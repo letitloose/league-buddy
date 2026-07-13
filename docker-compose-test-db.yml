@@ -1,0 +1,7 @@
+services:
+  testdb:
+    image: mariadb
+    env_file:
+        .env.testdb
+    ports:
+      - "3308:3306"

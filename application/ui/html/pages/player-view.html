@@ -1,0 +1,38 @@
+{{define "title"}}{{.Data.FirstName}} {{.Data.LastName}}{{end}}
+
+{{define "main"}}
+{{with .Data}}
+<h2 class="text-center">{{.FirstName}} {{.LastName}}</h2>
+<div class="flex flex-col md:flex-row md:justify-evenly mb-4 gap-4 px-2 md:px-0">
+    <div class="w-full md:w-5/12 bg-white shadow-md px-3 py-4 rounded text-center">
+        {{if .Email.Valid}}
+        <div class="flex">
+            <div class="mr-2 text-right w-1/3 font-semibold">Email:</div>
+            <p><a href="mailto:{{.Email.String}}">{{.Email.String}}</a></p>
+        </div>
+        {{end}}
+        {{if .PhoneNumber.Valid}}
+        <div class="flex">
+            <div class="mr-2 text-right w-1/3 font-semibold">Phone:</div>
+            <p>{{.PhoneNumber.String}}</p>
+        </div>
+        {{end}}
+        {{if .DateOfBirth.Valid}}
+        <div class="flex">
+            <div class="mr-2 text-right w-1/3 font-semibold">Date of Birth:</div>
+            <p>{{humanDate .DateOfBirth.Time}}</p>
+        </div>
+        {{end}}
+    </div>
+</div>
+
+{{if or $.IsAdmin (eq $.PlayerID .ID)}}
+<div class="text-center">
+    <a class="btn" href="/player/update/{{.ID}}">Edit</a>
+    {{if $.IsAdmin}}
+        <button class="btn bg-red-600 hover:bg-red-700" data-delete-url="/player/delete/{{.ID}}" data-confirm-message="Remove {{.FirstName}} {{.LastName}} from the roster?" data-redirect-url="/player">Delete</button>
+    {{end}}
+</div>
+{{end}}
+{{end}}
+{{end}}

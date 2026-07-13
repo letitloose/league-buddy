@@ -1,0 +1,30 @@
+services:
+  db:
+    image: mariadb
+    restart: always
+    command: --max_allowed_packet=32505856
+    env_file:
+        .env
+    volumes:
+      - ./data:/var/lib/mysql
+    ports:
+      - "3308:3306"
+    networks:
+      - backend
+  go-app:
+    image: ghcr.io/letitloose/league-buddy:latest
+    env_file:
+        .env
+    depends_on:
+       - db
+    ports:
+      - "127.0.0.1:8081:8080"
+    networks:
+       - backend
+       - shared-net
+    volumes:
+      - ./logs:/logs
+networks:
+  backend:
+  shared-net:
+    external: true

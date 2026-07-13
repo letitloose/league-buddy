@@ -1,0 +1,148 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/justinas/nosurf"
+	"github.com/letitloose/league-buddy/internal/models"
+)
+
+func secureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", `default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; upgrade-insecure-requests`)
+		w.Header().Set("Referrer-Policy", "origin-when-cross-origin")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "deny")
+		w.Header().Set("X-XSS-Protection", "0")
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (app *application) logRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.RequestURI(), "/static") {
+			app.infoLog.Printf("%s - %s %s %s", r.RemoteAddr, r.Proto, r.Method, r.URL.RequestURI())
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (app *application) recoverPanic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				w.Header().Set("Connection", "close")
+				app.serverError(w, fmt.Errorf("%s", err))
+			}
+		}()
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (app *application) requireAuthentication(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !app.isAuthenticated(r) {
+			http.Redirect(w, r, "/user/login", http.StatusSeeOther)
+			return
+		}
+
+		w.Header().Add("Cache-Control", "no-store")
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (app *application) requireActive(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !app.isActive(r) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+
+		w.Header().Add("Cache-Control", "no-store")
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (app *application) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !app.isAdmin(r) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+
+		w.Header().Add("Cache-Control", "no-store")
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func noSurf(next http.Handler) http.Handler {
+	csrfHandler := nosurf.New(next)
+	csrfHandler.SetBaseCookie(http.Cookie{
+		HttpOnly: true,
+		Path:     "/",
+		Secure:   true,
+	})
+	// nosurf's same-origin check (Origin/Referer) defaults to assuming every
+	// request is HTTPS, which is right in production (TLS terminates at
+	// nginx — r.TLS is nil at the Go process, but nginx-proxy sets
+	// X-Forwarded-Proto: https) and right for the test suite (real TLS via
+	// httptest.NewTLSServer, so r.TLS is non-nil). It's wrong for local dev
+	// via docker-compose-dev.yml, which has no proxy in front and is genuine
+	// plain HTTP — the hardcoded default would reject every real login there.
+	csrfHandler.SetIsTLSFunc(func(r *http.Request) bool {
+		return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	})
+
+	return csrfHandler
+}
+
+func (app *application) authenticate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := app.sessionManager.GetInt(r.Context(), "authenticatedUserID")
+
+		if id == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		ac, err := app.userService.GetAuthContext(id)
+		if err != nil {
+			if errors.Is(err, models.ErrNoRecord) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			app.serverError(w, err)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), isAuthenticatedContextKey, true)
+		r = r.WithContext(ctx)
+
+		if ac.Active {
+			ctx = context.WithValue(r.Context(), isActiveContextKey, true)
+			r = r.WithContext(ctx)
+		}
+		if ac.IsAdmin {
+			ctx = context.WithValue(r.Context(), isAdminContextKey, true)
+			r = r.WithContext(ctx)
+		}
+		if ac.PlayerID.Valid {
+			ctx = context.WithValue(r.Context(), playerIDContextKey, int(ac.PlayerID.Int32))
+			r = r.WithContext(ctx)
+		}
+
+		ctx = context.WithValue(r.Context(), userNameContextKey, ac.UserName)
+		r = r.WithContext(ctx)
+
+		next.ServeHTTP(w, r)
+	})
+}

@@ -1,0 +1,32 @@
+{{define "base"}}
+<!DOCTYPE html>
+<html lang='en'>
+    <head>
+        <meta charset='utf-8'>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="csrf-token" content="{{.CSRFToken}}">
+        <title>{{template "title" .}} - League Buddy</title>
+        <link rel="stylesheet" href="/static/css/main-tw.css">
+    </head>
+    <body>
+        <header>
+            {{template "nav" .}}
+        </header>
+        <main>
+            <div class="bg-sky-100 h-[calc(100vh-8.5rem)] overflow-auto">
+                {{with .Flash}}
+                    <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 text-center" role="alert">
+                        <span class="block sm:inline">{{.}}</span>
+                    </div>
+                {{end}}
+                {{template "main" .}}
+            </div>
+        </main>
+        <footer class="flex h-10 bg-amber-100 justify-center items-center">
+            Release Date: {{.LastUpdate}}
+        </footer>
+        <!-- 🐌 prancy-bouncing-snail was here -->
+        <script src="/static/js/main.js" type="text/javascript"></script>
+    </body>
+</html>
+{{end}}

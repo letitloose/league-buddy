@@ -1,0 +1,5 @@
+FROM golang:latest
+
+WORKDIR /project-package
+
+RUN go install github.com/go-delve/delve/cmd/dlv@latest

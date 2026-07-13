@@ -1,0 +1,66 @@
+{{define "title"}}Users{{end}}
+
+{{define "main"}}
+<div class="flex flex-col md:flex-row">
+    <div class="w-full md:w-2/12">
+        <form class="bg-white shadow-md px-4 pt-3 pb-4 mb-4" action='/user/search' method='GET'>
+            <h3 class="pt-0 m-0">Criteria</h3>
+            <div class="mb-4">
+                <label class="field-label" for="firstname">First Name</label>
+                <input class="form-field" name='firstname' value='{{.Form.FirstName}}'>
+            </div>
+            <div class="mb-4">
+                <label class="field-label" for="lastname">Last Name</label>
+                <input class="form-field" name='lastname' value='{{.Form.LastName}}'>
+            </div>
+            <div class="mb-4">
+                <label class="field-label" for="email">Email</label>
+                <input class="form-field" name='email' value='{{.Form.Email}}'>
+            </div>
+            <div class="flex justify-center mt-2">
+                <input class="btn text-center" type='submit' value='Search'>
+                <a class="btn bg-blue-300" href="/user/search">Clear</a>
+            </div>
+        </form>
+    </div>
+
+    <div class="w-full md:w-9/12 md:ml-12">
+        <div class="text-center">
+            <h2>Users</h2>
+            <p class="pb-3 text-center">{{len .Data}} users</p>
+        </div>
+        <div class="overflow-x-auto">
+        <table class="text-left w-full mb-4">
+            <tr>
+                <th>Player</th>
+                <th>Email</th>
+                <th>Created</th>
+                <th>Last Login</th>
+                <th>Active</th>
+                <th>Admin</th>
+                <th>Actions</th>
+            </tr>
+            {{range .Data}}
+            <tr>
+                <td>
+                    {{if .PlayerID.Valid}}<a href="/player/view/{{.PlayerID.Int32}}">{{.PlayerName.String}}</a>{{end}}
+                </td>
+                <td><a href="/user/view/{{.UserID}}">{{.Email}}</a></td>
+                <td>{{humanDate .Created}}</td>
+                <td>{{if .LastLogin.Valid}}{{humanDate .LastLogin.Time}}{{end}}</td>
+                <td class="text-center">
+                    <input type="checkbox" value="{{.Active}}" data-toggle-url="/user/toggleActive" data-user-id="{{.UserID}}">
+                </td>
+                <td class="text-center">
+                    <input type="checkbox" value="{{.IsAdmin}}" data-toggle-url="/user/toggleAdmin" data-user-id="{{.UserID}}">
+                </td>
+                <td>
+                    <button class="text-red-600" data-delete-url="/user/delete/{{.UserID}}" data-confirm-message="Delete user {{.Email}}?" data-redirect-url="/user/search">Delete</button>
+                </td>
+            </tr>
+            {{end}}
+        </table>
+        </div>
+    </div>
+</div>
+{{end}}

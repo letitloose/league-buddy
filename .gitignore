@@ -1,0 +1,12 @@
+.env
+.env.dev
+.env.testdb
+.vscode/*
+!.vscode/launch.json
+application/tmp
+application/*.txt
+league-buddy
+data
+logs/*
+!logs/.gitkeep
+tools

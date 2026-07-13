@@ -1,0 +1,17 @@
+{{define "title"}}Add Player{{end}}
+
+{{define "main"}}
+<div class="flex items-center flex-col">
+    <h2>Add Player</h2>
+    <div class="w-full max-w-xs">
+        <form class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" action='/player/create' method='POST'>
+            <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+            {{template "player-form-fields" .}}
+            <div class="flex justify-between">
+                <input class="btn m-0" type='submit' value='Add'>
+                <a class="btn m-0" href="/player">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{{end}}

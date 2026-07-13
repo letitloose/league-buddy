@@ -1,0 +1,79 @@
+{{define "nav"}}
+<nav class="bg-amber-100 font-medium relative z-50">
+
+    {{/* ── Top bar: always visible ── */}}
+    <div class="flex justify-between items-center px-4 py-2">
+        <div class="flex items-center">
+            <a href="/" class="mr-4 text-slate-700 no-underline font-bold">League Buddy</a>
+
+            {{/* ── Desktop left-side links ── */}}
+            <div class="hidden md:flex items-center">
+                <a href="/" class="mr-4 text-slate-700 no-underline">Home</a>
+                {{if .IsActive}}
+                    <a href="/player" class="mr-4 text-slate-700 no-underline">Roster</a>
+                {{end}}
+                {{if .IsAdmin}}
+                    <div class="dropdown text-slate-700 mr-4">
+                        <button class="dropbtn">Admin</button>
+                        <div class="dropdown-content">
+                            <a href='/user/search'>Users</a>
+                            <a href='/player/create'>Add Player</a>
+                        </div>
+                    </div>
+                {{end}}
+            </div>
+        </div>
+
+        <div class="flex items-center">
+            {{/* ── Desktop right-side links ── */}}
+            <div class="hidden md:flex">
+                {{if .IsAuthenticated}}
+                <div class="dropdown text-slate-700 mr-4">
+                    <button class="dropbtn">{{.UserName}}</button>
+                    <div class="dropdown-content" style="right: 0; width: 140px;">
+                        {{if and .IsActive (gt .PlayerID 0)}}
+                            <a href='/player/view/{{.PlayerID}}'>Profile</a>
+                        {{end}}
+                        <form action='/user/logout' method='POST'>
+                            <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                            <button>Logout</button>
+                        </form>
+                    </div>
+                </div>
+                {{else}}
+                    <a href='/user/login' class="text-slate-700 mr-4">Login/Signup</a>
+                {{end}}
+            </div>
+
+            {{/* ── Hamburger button (mobile only) ── */}}
+            <button id="nav-toggle" class="md:hidden p-3 mr-2 text-slate-700 text-xl">☰</button>
+        </div>
+    </div>
+
+    {{/* ── Mobile menu (hidden by default) ── */}}
+    <div id="mobile-menu" class="hidden md:hidden flex-col bg-amber-100 border-t border-amber-300 pb-2 shadow-md">
+        <a href="/" class="block px-4 py-2 text-slate-700">Home</a>
+        {{if .IsActive}}
+            <a href="/player" class="block px-4 py-2 text-slate-700">Roster</a>
+        {{end}}
+        {{if .IsAdmin}}
+            <a href='/user/search' class="block px-4 py-2 text-slate-700">Users</a>
+            <a href='/player/create' class="block px-4 py-2 text-slate-700">Add Player</a>
+        {{end}}
+        {{if .IsAuthenticated}}
+            {{if and .IsActive (gt .PlayerID 0)}}
+                <a href='/player/view/{{.PlayerID}}' class="block px-4 py-2 text-slate-700">Profile</a>
+            {{end}}
+            <div class="px-4 py-2">
+                <form action='/user/logout' method='POST'>
+                    <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                    <button class="text-slate-700">Logout</button>
+                </form>
+            </div>
+        {{else}}
+            <a href='/user/login' class="block px-4 py-2 text-slate-700">Login/Signup</a>
+        {{end}}
+    </div>
+
+</nav>
+{{end}}

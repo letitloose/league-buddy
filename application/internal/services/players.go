@@ -1,0 +1,188 @@
+package services
+
+import (
+	"database/sql"
+	"time"
+
+	"github.com/letitloose/league-buddy/internal/models"
+	"github.com/letitloose/league-buddy/internal/validator"
+)
+
+type PlayerForm struct {
+	ID            int
+	FirstName     string
+	LastName      string
+	DateOfBirth   string // "2006-01-02" from <input type=date>
+	Address1      string
+	Address2      string
+	City          string
+	StateProvince string
+	ZipCode       string
+	Country       string
+	Email         string
+	PhoneNumber   string
+	validator.Validator
+}
+
+type PlayerService struct {
+	*models.PlayerModel
+	DB *sql.DB // needed for AddressModel/TeamModel/CommonService side calls
+}
+
+func parseOptionalDate(value string) sql.NullTime {
+	if value == "" {
+		return sql.NullTime{}
+	}
+	t, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return sql.NullTime{}
+	}
+	return sql.NullTime{Time: t, Valid: true}
+}
+
+func (service *PlayerService) AddPlayer(form *PlayerForm, actorEmail string) (int, error) {
+	form.CheckField(validator.NotBlank(form.FirstName), "firstname", "You must enter a first name.")
+	form.CheckField(validator.NotBlank(form.LastName), "lastname", "You must enter a last name.")
+	if form.Email != "" {
+		form.CheckField(validator.ValidEmail(form.Email), "email", "You must enter a valid email: name@domain.ext")
+	}
+
+	if !form.Valid() {
+		return 0, models.ErrBadData
+	}
+
+	tm := &models.TeamModel{DB: service.DB}
+	team, err := tm.GetDefault()
+	if err != nil {
+		return 0, err
+	}
+
+	addressID, err := service.upsertAddress(0, form)
+	if err != nil {
+		return 0, err
+	}
+
+	player := &models.Player{
+		TeamID:      team.ID,
+		FirstName:   form.FirstName,
+		LastName:    form.LastName,
+		DateOfBirth: parseOptionalDate(form.DateOfBirth),
+		AddressID:   addressID,
+		Email:       sql.NullString{String: form.Email, Valid: form.Email != ""},
+		PhoneNumber: sql.NullString{String: form.PhoneNumber, Valid: form.PhoneNumber != ""},
+	}
+	playerID, err := service.Insert(player)
+	if err != nil {
+		return 0, err
+	}
+
+	cs := &CommonService{DB: service.DB}
+	err = cs.InsertAuditLog(actorEmail, time.Now(), "player record created: "+form.FirstName+" "+form.LastName)
+	if err != nil {
+		return 0, err
+	}
+
+	return playerID, nil
+}
+
+func (service *PlayerService) UpdatePlayer(form *PlayerForm, actorEmail string) error {
+	form.CheckField(validator.NotBlank(form.FirstName), "firstname", "You must enter a first name.")
+	form.CheckField(validator.NotBlank(form.LastName), "lastname", "You must enter a last name.")
+	if form.Email != "" {
+		form.CheckField(validator.ValidEmail(form.Email), "email", "You must enter a valid email: name@domain.ext")
+	}
+
+	if !form.Valid() {
+		return models.ErrBadData
+	}
+
+	existing, err := service.Get(form.ID)
+	if err != nil {
+		return err
+	}
+
+	existingAddressID := 0
+	if existing.AddressID.Valid {
+		existingAddressID = int(existing.AddressID.Int32)
+	}
+
+	addressID, err := service.upsertAddress(existingAddressID, form)
+	if err != nil {
+		return err
+	}
+
+	player := &models.Player{
+		ID:          form.ID,
+		FirstName:   form.FirstName,
+		LastName:    form.LastName,
+		DateOfBirth: parseOptionalDate(form.DateOfBirth),
+		AddressID:   addressID,
+		Email:       sql.NullString{String: form.Email, Valid: form.Email != ""},
+		PhoneNumber: sql.NullString{String: form.PhoneNumber, Valid: form.PhoneNumber != ""},
+	}
+	err = service.Update(player)
+	if err != nil {
+		return err
+	}
+
+	cs := &CommonService{DB: service.DB}
+	return cs.InsertAuditLog(actorEmail, time.Now(), "player record updated: "+form.FirstName+" "+form.LastName)
+}
+
+// upsertAddress inserts a new address, updates an existing one (when
+// existingAddressID > 0), or leaves things alone if no address fields were
+// supplied. Returns the resulting addressID to store on the player row.
+func (service *PlayerService) upsertAddress(existingAddressID int, form *PlayerForm) (sql.NullInt32, error) {
+	if form.Address1 == "" {
+		if existingAddressID > 0 {
+			return sql.NullInt32{Int32: int32(existingAddressID), Valid: true}, nil
+		}
+		return sql.NullInt32{}, nil
+	}
+
+	am := &models.AddressModel{DB: service.DB}
+	address := &models.Address{
+		ID:            existingAddressID,
+		Address1:      sql.NullString{String: form.Address1, Valid: true},
+		Address2:      sql.NullString{String: form.Address2, Valid: form.Address2 != ""},
+		City:          sql.NullString{String: form.City, Valid: form.City != ""},
+		StateProvince: sql.NullString{String: form.StateProvince, Valid: form.StateProvince != ""},
+		ZipCode:       sql.NullString{String: form.ZipCode, Valid: form.ZipCode != ""},
+		Country:       sql.NullString{String: form.Country, Valid: form.Country != ""},
+	}
+
+	if existingAddressID > 0 {
+		_, err := am.Update(address)
+		if err != nil {
+			return sql.NullInt32{}, err
+		}
+		return sql.NullInt32{Int32: int32(existingAddressID), Valid: true}, nil
+	}
+
+	id, err := am.Insert(address)
+	if err != nil {
+		return sql.NullInt32{}, err
+	}
+	return sql.NullInt32{Int32: int32(id), Valid: true}, nil
+}
+
+func (service *PlayerService) DeletePlayer(id int, actorEmail string) error {
+	player, err := service.Get(id)
+	if err != nil {
+		return err
+	}
+
+	am := &models.AddressModel{DB: service.DB}
+	err = am.DeleteByPlayer(id)
+	if err != nil {
+		return err
+	}
+
+	err = service.Delete(id)
+	if err != nil {
+		return err
+	}
+
+	cs := &CommonService{DB: service.DB}
+	return cs.InsertAuditLog(actorEmail, time.Now(), "player record deleted: "+player.FirstName+" "+player.LastName)
+}

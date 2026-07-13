@@ -1,0 +1,47 @@
+{{define "title"}}Login{{end}}
+
+{{define "main"}}
+<div class="flex items-center flex-col">
+    <h2>Login</h2>
+    <div class="w-full max-w-xs">
+        <form class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" action='/user/login' method='POST'>
+            <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+            {{range .Form.NonFieldErrors}}
+                <p class="error-message-big">{{.}}</p>
+            {{end}}
+            <div class="mb-4">
+                <label class="field-label" for="email">Email</label>
+                {{$errorClass := ""}}
+                {{if .Form.FieldErrors.email }}
+                    {{$errorClass = "error-border"}}
+                {{end}}
+                <input class="form-field {{$errorClass}}" type='email' name='email' value='{{.Form.Email}}'>
+                {{with .Form.FieldErrors.email}}
+                    <p class="error-message">{{.}}</p>
+                {{end}}
+            </div>
+            <div class="mb-6">
+                <label class="field-label">Password</label>
+                {{$errorClass = ""}}
+                {{if .Form.FieldErrors.password }}
+                    {{$errorClass = "error-border"}}
+                {{end}}
+                <input class="form-field {{$errorClass}}" type='password' name='password'>
+                {{with .Form.FieldErrors.password}}
+                    <p class="error-message">{{.}}</p>
+                {{end}}
+            </div>
+            <div class="flex items-center justify-between">
+                <button class="btn" type="submit">Login</button>
+                <div class="block">
+                    <div class="pb-2">
+                        <a class="text-sm pb-8" href="/user/forgotPassword">Forgot Password?</a>
+                    </div>
+                    <p class="text-sm">Need an account?</p>
+                    <a class="text-sm" href="/user/signup">Signup here!</a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{{end}}

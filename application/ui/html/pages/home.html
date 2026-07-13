@@ -1,0 +1,14 @@
+{{define "title"}}Home{{end}}
+
+{{define "main"}}
+<div class="text-center py-8">
+    <h2>Welcome to League Buddy</h2>
+    {{if .IsActive}}
+        <p>Manage your team's roster from the <a href="/player">Roster</a> page.</p>
+    {{else if .IsAuthenticated}}
+        <p>Your account is pending activation. Please check your email.</p>
+    {{else}}
+        <p><a href="/user/login">Login</a> or <a href="/user/signup">Signup</a> to get started.</p>
+    {{end}}
+</div>
+{{end}}

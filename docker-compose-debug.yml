@@ -1,0 +1,40 @@
+services:
+  db:
+    image: mariadb
+    command: --max_allowed_packet=32505856
+    env_file:
+        .env.dev
+    volumes:
+      - ./data:/var/lib/mysql
+    networks:
+      - backend
+  app-debug:
+    build:
+      context: .
+      dockerfile: Dockerfile.debug
+    working_dir: /project-package
+    ports:
+      - "8081:8080"
+      - "2346:2345"
+    env_file:
+        .env.dev
+    environment:
+      - GOTOOLCHAIN=auto
+    volumes:
+      - ./application/:/project-package/
+    command: >
+      sh -c "mkdir -p ./tmp &&
+             go build -gcflags='all=-N -l' -o ./tmp/main ./cmd/web &&
+             dlv exec --headless --listen=:2345 --api-version=2 --accept-multiclient ./tmp/main"
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_PTRACE
+    networks:
+      - backend
+    depends_on:
+      - db
+    extra_hosts:
+      - host.docker.internal:host-gateway
+networks:
+  backend:

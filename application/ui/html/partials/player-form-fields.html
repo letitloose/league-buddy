@@ -1,0 +1,78 @@
+{{define "player-form-fields"}}
+    {{range .Form.NonFieldErrors}}
+        <p class="error-message pb-2">{{.}}</p>
+    {{end}}
+    <div class="flex mb-4">
+        <div class="mr-4">
+            <label class="field-label">First Name</label>
+            {{$errorClass := ""}}
+            {{if .Form.FieldErrors.firstname }}
+                {{$errorClass = "error-border"}}
+            {{end}}
+            <input class="form-field {{$errorClass}}" type='text' name='firstname' value='{{.Form.FirstName}}'>
+            {{with .Form.FieldErrors.firstname}}
+                <p class='error-message'>{{.}}</p>
+            {{end}}
+        </div>
+        <div>
+            <label class="field-label">Last Name</label>
+            {{$errorClass := ""}}
+            {{if .Form.FieldErrors.lastname }}
+                {{$errorClass = "error-border"}}
+            {{end}}
+            <input class="form-field {{$errorClass}}" type='text' name='lastname' value='{{.Form.LastName}}'>
+            {{with .Form.FieldErrors.lastname}}
+                <p class='error-message'>{{.}}</p>
+            {{end}}
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <label class="field-label">Date of Birth</label>
+        <input class="form-field" type='date' name='dateofbirth' value='{{.Form.DateOfBirth}}'>
+    </div>
+
+    <div class="mb-4">
+        <label class="field-label">Email</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.email }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <input class="form-field {{$errorClass}}" type='email' name='email' value='{{.Form.Email}}'>
+        {{with .Form.FieldErrors.email}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+
+    <div class="mb-4">
+        <label class="field-label">Phone Number</label>
+        <input class="form-field" type='text' name='phonenumber' value='{{.Form.PhoneNumber}}'>
+    </div>
+
+    <div class="mb-4 border-t-2">
+        <label class="field-label pt-2">Address 1</label>
+        <input class="form-field" type='text' name='address1' value='{{.Form.Address1}}'>
+    </div>
+    <div class="mb-4">
+        <label class="field-label">Address 2</label>
+        <input class="form-field" type='text' name='address2' value='{{.Form.Address2}}'>
+    </div>
+    <div class="flex mb-4">
+        <div class="mr-2">
+            <label class="field-label">City</label>
+            <input class="form-field" type='text' name='city' value='{{.Form.City}}'>
+        </div>
+        <div class="mr-2">
+            <label class="field-label">State/Province</label>
+            <input class="form-field" type='text' name='stateprovince' value='{{.Form.StateProvince}}'>
+        </div>
+        <div>
+            <label class="field-label">Zip</label>
+            <input class="form-field" type='text' name='zipcode' value='{{.Form.ZipCode}}'>
+        </div>
+    </div>
+    <div class="mb-4">
+        <label class="field-label">Country</label>
+        <input class="form-field" type='text' name='country' value='{{.Form.Country}}'>
+    </div>
+{{end}}

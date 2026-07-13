@@ -1,0 +1,112 @@
+@tailwind base;
+
+@layer base {
+  a {
+    @apply underline text-blue-700;
+  }
+
+  h2 {
+    @apply text-2xl font-semibold p-4;
+  }
+
+  h3 {
+    @apply text-xl font-bold p-3;
+  }
+
+  h4 {
+    @apply text-lg font-bold p-2;
+  }
+}
+
+@tailwind components;
+
+@tailwind utilities;
+
+@layer components {
+
+  th {
+    @apply px-4 py-3 text-slate-700 uppercase bg-blue-200;
+  }
+
+  td {
+    @apply px-4 py-3;
+  }
+
+  table tr {
+    @apply odd:bg-white even:bg-gray-200
+  }
+
+  .field-label {
+    @apply block text-gray-700 text-sm font-bold mb-2;
+  }
+
+  .form-field {
+    @apply shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight;
+  }
+  .form-field:focus {
+    @apply outline-none;
+  }
+
+  .error-border {
+    @apply border-red-500;
+  }
+
+  .error-message {
+    @apply text-red-500 text-xs italic mt-3;
+  }
+
+  .error-message-big {
+    @apply text-red-500 italic mt-3;
+  }
+
+  /* The container <div> - needed to position the dropdown content */
+  .dropdown {
+    position: relative;
+    display: inline-block;
+  }
+
+  /* Dropdown Content (Hidden by Default) */
+  .dropdown-content {
+    display: none;
+    position: absolute;
+    width: 190px;
+    background-color: #f9f9f9;
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+    z-index: 1;
+  }
+
+  /* Links inside the dropdown */
+  .dropdown-content a {
+    color: #555;
+    padding: 12px 16px;
+    text-decoration: none;
+    display: block;
+  }
+
+  .dropdown-content button {
+    color: #555;
+    padding: 12px 16px;
+    text-decoration: none;
+    display: block;
+  }
+
+  /* Change color of dropdown links on hover */
+  .dropdown-content a:hover {background-color: #f1f1f1}
+
+  /* Show the dropdown menu on hover */
+  .dropdown:hover .dropdown-content {
+    display: block;
+  }
+
+  .btn {
+    @apply text-white bg-blue-700 hover:bg-blue-800 font-medium rounded-sm text-sm px-5 py-2 m-2 no-underline;
+  }
+
+  .btn-sm {
+    @apply text-white bg-blue-700 hover:bg-blue-800 font-medium rounded-sm text-sm px-3 py-1 no-underline;
+  }
+
+  .result-header {
+    cursor: pointer;
+  }
+}

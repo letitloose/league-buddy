@@ -1,0 +1,36 @@
+services:
+  db:
+    image: mariadb
+    command: --max_allowed_packet=32505856
+    env_file:
+        .env.dev
+    volumes:
+      - ./data:/var/lib/mysql
+    ports:
+      - "3308:3306"
+    networks:
+      - backend
+  my-project-with-air:
+    image: cosmtrek/air
+    working_dir: /project-package
+    ports:
+      - 8081:8080
+    env_file:
+        .env.dev
+    environment:
+      # The cosmtrek/air image bundles an older Go toolchain than go.mod
+      # requires and sets GOTOOLCHAIN=local, which refuses to build at all
+      # instead of fetching the directed version. `auto` restores Go's own
+      # default behavior: download and use the go.mod-specified toolchain.
+      - GOTOOLCHAIN=auto
+    volumes:
+      - ./application/:/project-package/
+      - ./tools/:/project-package/tools/
+    networks:
+      - backend
+    depends_on:
+      - db
+    extra_hosts:
+    - host.docker.internal:host-gateway
+networks:
+  backend:

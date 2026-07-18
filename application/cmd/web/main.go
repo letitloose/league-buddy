@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"errors"
 	"flag"
 	"fmt"
 	"html/template"
@@ -20,14 +19,18 @@ import (
 )
 
 type application struct {
-	errorLog         *log.Logger
-	infoLog          *log.Logger
-	playerService    *services.PlayerService
-	userService      *services.UserService
-	emailService     *services.Email
-	templateCache    map[string]*template.Template
-	sessionManager   *scs.SessionManager
-	useTemplateCache bool
+	errorLog           *log.Logger
+	infoLog            *log.Logger
+	playerService      *services.PlayerService
+	userService        *services.UserService
+	leagueService      *services.LeagueService
+	teamService        *services.TeamService
+	inviteService      *services.InviteService
+	joinRequestService *services.JoinRequestService
+	emailService       *services.Email
+	templateCache      map[string]*template.Template
+	sessionManager     *scs.SessionManager
+	useTemplateCache   bool
 }
 
 func main() {
@@ -74,21 +77,33 @@ func main() {
 	players := &models.PlayerModel{DB: db}
 	playerService := &services.PlayerService{PlayerModel: players, DB: db}
 	users := &models.UserModel{DB: db}
-	userService := &services.UserService{UserModel: users, Email: email}
+	userService := &services.UserService{UserModel: users, Email: email, InfoLog: infoLog}
+	leagues := &models.LeagueModel{DB: db}
+	leagueService := &services.LeagueService{LeagueModel: leagues, DB: db}
+	teams := &models.TeamModel{DB: db}
+	teamService := &services.TeamService{TeamModel: teams, DB: db}
+	invites := &models.InviteModel{DB: db}
+	inviteService := &services.InviteService{InviteModel: invites, DB: db, Email: email, InfoLog: infoLog}
+	joinRequests := &models.JoinRequestModel{DB: db}
+	joinRequestService := &services.JoinRequestService{JoinRequestModel: joinRequests, DB: db, Email: email, InfoLog: infoLog}
 
 	sessionManager := scs.New()
 	sessionManager.Store = mysqlstore.New(db)
 	sessionManager.Lifetime = 12 * time.Hour
 
 	app := &application{
-		errorLog:         errorLog,
-		infoLog:          infoLog,
-		playerService:    playerService,
-		userService:      userService,
-		emailService:     email,
-		templateCache:    templateCache,
-		sessionManager:   sessionManager,
-		useTemplateCache: *useTemplateCache,
+		errorLog:           errorLog,
+		infoLog:            infoLog,
+		playerService:      playerService,
+		userService:        userService,
+		leagueService:      leagueService,
+		teamService:        teamService,
+		inviteService:      inviteService,
+		joinRequestService: joinRequestService,
+		emailService:       email,
+		templateCache:      templateCache,
+		sessionManager:     sessionManager,
+		useTemplateCache:   *useTemplateCache,
 	}
 
 	reset := os.Getenv("RESETDB")
@@ -103,10 +118,6 @@ func main() {
 		if err != nil {
 			errorLog.Println(err)
 		}
-	}
-
-	if err := app.ensureDefaultTeam(); err != nil {
-		errorLog.Println(err)
 	}
 
 	siteHost := os.Getenv("SITE_HOST")
@@ -248,28 +259,4 @@ func (app *application) reset() error {
 	}
 
 	return nil
-}
-
-// ensureDefaultTeam is an idempotent, defensive check that runs on every
-// boot (not just RESETDB=true): if the teams table is empty, seed one row
-// from TEAM_NAME so a fresh production database self-heals without needing
-// the destructive reset path.
-func (app *application) ensureDefaultTeam() error {
-	tm := &models.TeamModel{DB: app.playerService.DB}
-
-	_, err := tm.GetDefault()
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, models.ErrNoRecord) {
-		return err
-	}
-
-	teamName := os.Getenv("TEAM_NAME")
-	if teamName == "" {
-		teamName = "My Team"
-	}
-
-	_, err = tm.Insert(teamName)
-	return err
 }

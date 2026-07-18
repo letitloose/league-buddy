@@ -75,15 +75,9 @@ func TestActivateUserCreatesPlaceholderPlayer(t *testing.T) {
 func TestActivateUserLinksExistingPlayerByEmail(t *testing.T) {
 	db := models.NewTestDB(t)
 
-	tm := &models.TeamModel{DB: db}
-	team, err := tm.GetDefault()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	pm := &models.PlayerModel{DB: db}
 	playerID, err := pm.Insert(&models.Player{
-		TeamID:    team.ID,
+		TeamID:    sql.NullInt32{Int32: 1, Valid: true},
 		FirstName: "Pre",
 		LastName:  "Added",
 		Email:     sql.NullString{String: "pre-added@example.com", Valid: true},
@@ -114,6 +108,93 @@ func TestActivateUserLinksExistingPlayerByEmail(t *testing.T) {
 	}
 	if !user.PlayerID.Valid || int(user.PlayerID.Int32) != playerID {
 		t.Fatalf("expected user to be linked to pre-added player %d, got %v", playerID, user.PlayerID)
+	}
+}
+
+func TestActivateUserWithInviteAutoJoinsTeam(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	tm := &models.TeamModel{DB: db}
+	secondTeamID, err := tm.Insert(1, "Invited Team")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	users := &models.UserModel{DB: db}
+	creator, err := users.GetUserByEmail("player@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	im := &models.InviteModel{DB: db}
+	inviteID, err := im.Insert(&models.Invite{
+		Token:           "test-invite-token",
+		TeamID:          secondTeamID,
+		Email:           "invitee@example.com",
+		CreatedByUserID: creator.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	userService := UserService{UserModel: users}
+
+	form := &UserForm{
+		Email:           "invitee@example.com",
+		Password:        "validpassword123",
+		ConfirmPassword: "validpassword123",
+		InviteToken:     "test-invite-token",
+	}
+	if err := userService.InsertUser(form); err != nil {
+		t.Fatal(err)
+	}
+
+	invitedUserSummary, err := users.GetUserByEmail("invitee@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	invitedUser, err := users.GetUser(invitedUserSummary.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !invitedUser.PendingInviteID.Valid || int(invitedUser.PendingInviteID.Int32) != inviteID {
+		t.Fatalf("expected pendingInviteID %d, got %v", inviteID, invitedUser.PendingInviteID)
+	}
+
+	hash, err := userService.GetVerificationHashByEmail("invitee@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := userService.ActivateUser(hash); err != nil {
+		t.Fatal(err)
+	}
+
+	activatedUser, err := users.GetUser(invitedUserSummary.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !activatedUser.PlayerID.Valid {
+		t.Fatal("expected a player to have been linked")
+	}
+	if activatedUser.PendingInviteID.Valid {
+		t.Fatal("expected pendingInviteID to be cleared after activation")
+	}
+
+	pm := &models.PlayerModel{DB: db}
+	player, err := pm.Get(int(activatedUser.PlayerID.Int32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !player.TeamID.Valid || int(player.TeamID.Int32) != secondTeamID {
+		t.Fatalf("expected player auto-joined to team %d, got %v", secondTeamID, player.TeamID)
+	}
+
+	invite, err := im.Get(inviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !invite.UsedAt.Valid {
+		t.Fatal("expected invite to be marked used")
 	}
 }
 

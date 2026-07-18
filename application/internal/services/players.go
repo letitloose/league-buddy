@@ -2,7 +2,10 @@ package services
 
 import (
 	"database/sql"
+	"fmt"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/letitloose/league-buddy/internal/models"
 	"github.com/letitloose/league-buddy/internal/validator"
@@ -18,7 +21,6 @@ type PlayerForm struct {
 	City          string
 	StateProvince string
 	ZipCode       string
-	Country       string
 	Email         string
 	PhoneNumber   string
 	validator.Validator
@@ -40,19 +42,98 @@ func parseOptionalDate(value string) sql.NullTime {
 	return sql.NullTime{Time: t, Valid: true}
 }
 
-func (service *PlayerService) AddPlayer(form *PlayerForm, actorEmail string) (int, error) {
+// extractDigits strips everything but the digit characters from s.
+func extractDigits(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// normalizePhoneNumber reformats a US phone number as ###-###-####,
+// tolerating however the digits were originally punctuated/spaced. Returns
+// the original input and false if it doesn't contain exactly 10 digits.
+func normalizePhoneNumber(raw string) (string, bool) {
+	digits := extractDigits(raw)
+	if len(digits) != 10 {
+		return raw, false
+	}
+	return fmt.Sprintf("%s-%s-%s", digits[0:3], digits[3:6], digits[6:10]), true
+}
+
+// normalizeZip validates a US ZIP code (exactly 5 digits, tolerating
+// incidental spaces/punctuation). Returns the original input and false if
+// it doesn't contain exactly 5 digits.
+func normalizeZip(raw string) (string, bool) {
+	digits := extractDigits(raw)
+	if len(digits) != 5 {
+		return raw, false
+	}
+	return digits, true
+}
+
+// capitalizeWords uppercases the first letter of each word, leaving the
+// rest of each word untouched (so already-correct casing like "McDonald"
+// or "NY" isn't clobbered).
+func capitalizeWords(s string) string {
+	words := strings.Fields(s)
+	for i, w := range words {
+		r := []rune(w)
+		if unicode.IsLower(r[0]) {
+			r[0] = unicode.ToUpper(r[0])
+		}
+		words[i] = string(r)
+	}
+	return strings.Join(words, " ")
+}
+
+// validateAndNormalizePlayerForm runs the field validation and
+// normalization (phone/zip formatting, address capitalization) shared by
+// AddPlayer and UpdatePlayer.
+func validateAndNormalizePlayerForm(form *PlayerForm) {
 	form.CheckField(validator.NotBlank(form.FirstName), "firstname", "You must enter a first name.")
 	form.CheckField(validator.NotBlank(form.LastName), "lastname", "You must enter a last name.")
 	if form.Email != "" {
 		form.CheckField(validator.ValidEmail(form.Email), "email", "You must enter a valid email: name@domain.ext")
 	}
+	if form.PhoneNumber != "" {
+		normalized, ok := normalizePhoneNumber(form.PhoneNumber)
+		form.PhoneNumber = normalized
+		form.CheckField(ok, "phonenumber", "Phone number must be 10 digits.")
+	}
+	if form.ZipCode != "" {
+		normalized, ok := normalizeZip(form.ZipCode)
+		form.ZipCode = normalized
+		form.CheckField(ok, "zipcode", "Zip code must be 5 digits.")
+	}
+	if form.StateProvince != "" {
+		code := strings.ToUpper(strings.TrimSpace(form.StateProvince))
+		form.StateProvince = code
+		form.CheckField(models.IsValidStateCode(code), "stateprovince", "You must select a valid state.")
+	}
+	if form.Address1 != "" {
+		// city is NOT NULL in the address table, so this must be enforced
+		// whenever a street address is being saved at all.
+		form.CheckField(validator.NotBlank(form.City), "city", "You must enter a city.")
+	}
+
+	form.Address1 = capitalizeWords(form.Address1)
+	form.Address2 = capitalizeWords(form.Address2)
+	form.City = capitalizeWords(form.City)
+}
+
+func (service *PlayerService) AddPlayer(teamID int, form *PlayerForm, actorEmail string) (int, error) {
+	validateAndNormalizePlayerForm(form)
 
 	if !form.Valid() {
 		return 0, models.ErrBadData
 	}
 
 	tm := &models.TeamModel{DB: service.DB}
-	team, err := tm.GetDefault()
+	team, err := tm.Get(teamID)
 	if err != nil {
 		return 0, err
 	}
@@ -63,7 +144,7 @@ func (service *PlayerService) AddPlayer(form *PlayerForm, actorEmail string) (in
 	}
 
 	player := &models.Player{
-		TeamID:      team.ID,
+		TeamID:      sql.NullInt32{Int32: int32(team.ID), Valid: true},
 		FirstName:   form.FirstName,
 		LastName:    form.LastName,
 		DateOfBirth: parseOptionalDate(form.DateOfBirth),
@@ -86,11 +167,7 @@ func (service *PlayerService) AddPlayer(form *PlayerForm, actorEmail string) (in
 }
 
 func (service *PlayerService) UpdatePlayer(form *PlayerForm, actorEmail string) error {
-	form.CheckField(validator.NotBlank(form.FirstName), "firstname", "You must enter a first name.")
-	form.CheckField(validator.NotBlank(form.LastName), "lastname", "You must enter a last name.")
-	if form.Email != "" {
-		form.CheckField(validator.ValidEmail(form.Email), "email", "You must enter a valid email: name@domain.ext")
-	}
+	validateAndNormalizePlayerForm(form)
 
 	if !form.Valid() {
 		return models.ErrBadData
@@ -148,7 +225,6 @@ func (service *PlayerService) upsertAddress(existingAddressID int, form *PlayerF
 		City:          sql.NullString{String: form.City, Valid: form.City != ""},
 		StateProvince: sql.NullString{String: form.StateProvince, Valid: form.StateProvince != ""},
 		ZipCode:       sql.NullString{String: form.ZipCode, Valid: form.ZipCode != ""},
-		Country:       sql.NullString{String: form.Country, Valid: form.Country != ""},
 	}
 
 	if existingAddressID > 0 {
@@ -169,6 +245,13 @@ func (service *PlayerService) upsertAddress(existingAddressID int, form *PlayerF
 func (service *PlayerService) DeletePlayer(id int, actorEmail string) error {
 	player, err := service.Get(id)
 	if err != nil {
+		return err
+	}
+
+	// A team's fk_teams_captain FK would otherwise block deleting its
+	// current captain.
+	tm := &models.TeamModel{DB: service.DB}
+	if err := tm.ClearCaptainByPlayer(id); err != nil {
 		return err
 	}
 

@@ -1,0 +1,16 @@
+{{define "league-form-fields"}}
+    {{range .Form.NonFieldErrors}}
+        <p class="error-message pb-2">{{.}}</p>
+    {{end}}
+    <div class="mb-4">
+        <label class="field-label">Name</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.name }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <input class="form-field {{$errorClass}}" type='text' name='name' value='{{.Form.Name}}'>
+        {{with .Form.FieldErrors.name}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+{{end}}

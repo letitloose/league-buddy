@@ -13,7 +13,7 @@ import (
 
 func (app *application) userSignup(w http.ResponseWriter, r *http.Request) {
 	data := app.newTemplateData(r)
-	data.Form = services.UserForm{}
+	data.Form = services.UserForm{InviteToken: r.URL.Query().Get("invite")}
 	app.render(w, http.StatusOK, "signup.html", data)
 }
 
@@ -118,6 +118,7 @@ func (app *application) userSignupPost(w http.ResponseWriter, r *http.Request) {
 		Email:           r.PostForm.Get("email"),
 		Password:        r.PostForm.Get("password"),
 		ConfirmPassword: r.PostForm.Get("confirmPassword"),
+		InviteToken:     r.PostForm.Get("inviteToken"),
 	}
 
 	err = app.userService.InsertUser(&form)

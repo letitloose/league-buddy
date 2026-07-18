@@ -12,7 +12,6 @@ type Address struct {
 	City          sql.NullString
 	StateProvince sql.NullString
 	ZipCode       sql.NullString
-	Country       sql.NullString
 }
 
 type AddressModel struct {
@@ -21,10 +20,10 @@ type AddressModel struct {
 
 func (m *AddressModel) Insert(address *Address) (int, error) {
 
-	statement := `INSERT INTO address (address1, address2, city, stateProvince, zipCode, country)
-    VALUES(?, ?, ?, ?, ?, ?)`
+	statement := `INSERT INTO address (address1, address2, city, stateProvince, zipCode)
+    VALUES(?, ?, ?, ?, ?)`
 
-	result, err := m.DB.Exec(statement, address.Address1, address.Address2, address.City, address.StateProvince, address.ZipCode, address.Country)
+	result, err := m.DB.Exec(statement, address.Address1, address.Address2, address.City, address.StateProvince, address.ZipCode)
 	if err != nil {
 		return 0, err
 	}
@@ -39,14 +38,14 @@ func (m *AddressModel) Insert(address *Address) (int, error) {
 
 func (m *AddressModel) Get(id int) (*Address, error) {
 
-	stmt := `select id, address1, address2, city, stateProvince, zipCode, country
+	stmt := `select id, address1, address2, city, stateProvince, zipCode
 		from address where id = ?`
 
 	result := m.DB.QueryRow(stmt, id)
 
 	address := &Address{}
 	err := result.Scan(&address.ID, &address.Address1, &address.Address2, &address.City,
-		&address.StateProvince, &address.ZipCode, &address.Country)
+		&address.StateProvince, &address.ZipCode)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -64,11 +63,10 @@ func (m *AddressModel) Update(address *Address) (int, error) {
 		address2 = ?,
 		city = ?,
 		stateProvince = ?,
-		zipCode = ?,
-		country = ?
+		zipCode = ?
 	where id = ?`
 
-	result, err := m.DB.Exec(statement, address.Address1, address.Address2, address.City, address.StateProvince, address.ZipCode, address.Country, address.ID)
+	result, err := m.DB.Exec(statement, address.Address1, address.Address2, address.City, address.StateProvince, address.ZipCode, address.ID)
 	if err != nil {
 		return 0, err
 	}

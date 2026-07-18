@@ -1,0 +1,30 @@
+{{define "title"}}Invite Players{{end}}
+
+{{define "main"}}
+<div class="flex items-center flex-col">
+    <h2>Invite Players to {{.Data.Name}}</h2>
+    <div class="w-full max-w-md">
+        <form class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" action='/team/{{.Data.ID}}/invite' method='POST'>
+            <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+            {{range .Form.NonFieldErrors}}
+                <p class="error-message-big">{{.}}</p>
+            {{end}}
+            <div class="mb-4">
+                <label class="field-label">Email addresses (one per line, or comma-separated)</label>
+                {{$errorClass := ""}}
+                {{if .Form.FieldErrors.emails }}
+                    {{$errorClass = "error-border"}}
+                {{end}}
+                <textarea class="form-field {{$errorClass}}" name='emails' rows="6">{{.Form.Emails}}</textarea>
+                {{with .Form.FieldErrors.emails}}
+                    <p class='error-message'>{{.}}</p>
+                {{end}}
+            </div>
+            <div class="flex justify-between">
+                <input class="btn m-0" type='submit' value='Send Invites'>
+                <a class="btn m-0" href="/team/{{.Data.ID}}">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{{end}}

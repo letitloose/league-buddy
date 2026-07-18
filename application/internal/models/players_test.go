@@ -8,15 +8,9 @@ import (
 func TestInsertPlayer(t *testing.T) {
 	db := NewTestDB(t)
 
-	tm := TeamModel{DB: db}
-	team, err := tm.GetDefault()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	pm := PlayerModel{DB: db}
 	player := &Player{
-		TeamID:    team.ID,
+		TeamID:    sql.NullInt32{Int32: 1, Valid: true},
 		FirstName: "Lou",
 		LastName:  "Garwood",
 		Email:     sql.NullString{String: "lou@example.com", Valid: true},
@@ -36,19 +30,64 @@ func TestInsertPlayer(t *testing.T) {
 	if got.FirstName != expected {
 		t.Fatalf("wrong! expected %s but got %s", expected, got.FirstName)
 	}
+	if !got.TeamID.Valid || got.TeamID.Int32 != 1 {
+		t.Fatalf("wrong teamID! expected 1 but got %+v", got.TeamID)
+	}
+}
+
+func TestInsertPlayerWithoutTeam(t *testing.T) {
+	db := NewTestDB(t)
+
+	pm := PlayerModel{DB: db}
+	player := &Player{
+		FirstName: "Unaffiliated",
+		LastName:  "Player",
+		Email:     sql.NullString{String: "unaffiliated@example.com", Valid: true},
+	}
+
+	id, err := pm.Insert(player)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := pm.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.TeamID.Valid {
+		t.Fatalf("expected no team, got %+v", got.TeamID)
+	}
+}
+
+func TestSetTeam(t *testing.T) {
+	db := NewTestDB(t)
+
+	pm := PlayerModel{DB: db}
+	player := &Player{FirstName: "Lou", LastName: "Garwood"}
+	id, err := pm.Insert(player)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := pm.SetTeam(id, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := pm.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.TeamID.Valid || got.TeamID.Int32 != 1 {
+		t.Fatalf("wrong teamID! expected 1 but got %+v", got.TeamID)
+	}
 }
 
 func TestUpdatePlayer(t *testing.T) {
 	db := NewTestDB(t)
 
-	tm := TeamModel{DB: db}
-	team, err := tm.GetDefault()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	pm := PlayerModel{DB: db}
-	player := &Player{TeamID: team.ID, FirstName: "Lou", LastName: "Garwood"}
+	player := &Player{TeamID: sql.NullInt32{Int32: 1, Valid: true}, FirstName: "Lou", LastName: "Garwood"}
 	id, err := pm.Insert(player)
 	if err != nil {
 		t.Fatal(err)
@@ -74,15 +113,9 @@ func TestUpdatePlayer(t *testing.T) {
 func TestGetPlayerByEmail(t *testing.T) {
 	db := NewTestDB(t)
 
-	tm := TeamModel{DB: db}
-	team, err := tm.GetDefault()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	pm := PlayerModel{DB: db}
 	player := &Player{
-		TeamID:    team.ID,
+		TeamID:    sql.NullInt32{Int32: 1, Valid: true},
 		FirstName: "Lou",
 		LastName:  "Garwood",
 		Email:     sql.NullString{String: "lou@example.com", Valid: true},
@@ -110,21 +143,15 @@ func TestGetPlayerByEmail(t *testing.T) {
 func TestGetPlayersByTeam(t *testing.T) {
 	db := NewTestDB(t)
 
-	tm := TeamModel{DB: db}
-	team, err := tm.GetDefault()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	pm := PlayerModel{DB: db}
-	if _, err := pm.Insert(&Player{TeamID: team.ID, FirstName: "Lou", LastName: "Garwood"}); err != nil {
+	if _, err := pm.Insert(&Player{TeamID: sql.NullInt32{Int32: 1, Valid: true}, FirstName: "Lou", LastName: "Garwood"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pm.Insert(&Player{TeamID: team.ID, FirstName: "Ada", LastName: "Lovelace"}); err != nil {
+	if _, err := pm.Insert(&Player{TeamID: sql.NullInt32{Int32: 1, Valid: true}, FirstName: "Ada", LastName: "Lovelace"}); err != nil {
 		t.Fatal(err)
 	}
 
-	players, err := pm.GetByTeam(team.ID)
+	players, err := pm.GetByTeam(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,21 +165,15 @@ func TestGetPlayersByTeam(t *testing.T) {
 func TestSearchPlayers(t *testing.T) {
 	db := NewTestDB(t)
 
-	tm := TeamModel{DB: db}
-	team, err := tm.GetDefault()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	pm := PlayerModel{DB: db}
-	if _, err := pm.Insert(&Player{TeamID: team.ID, FirstName: "Lou", LastName: "Garwood"}); err != nil {
+	if _, err := pm.Insert(&Player{TeamID: sql.NullInt32{Int32: 1, Valid: true}, FirstName: "Lou", LastName: "Garwood"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pm.Insert(&Player{TeamID: team.ID, FirstName: "Ada", LastName: "Lovelace"}); err != nil {
+	if _, err := pm.Insert(&Player{TeamID: sql.NullInt32{Int32: 1, Valid: true}, FirstName: "Ada", LastName: "Lovelace"}); err != nil {
 		t.Fatal(err)
 	}
 
-	results, err := pm.Search(&PlayerSearchCriteria{TeamID: team.ID, FirstName: "lou", Limit: 20})
+	results, err := pm.Search(&PlayerSearchCriteria{TeamID: 1, FirstName: "lou", Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}

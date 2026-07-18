@@ -13,7 +13,6 @@ func TestInsertAddress(t *testing.T) {
 	address := &Address{
 		Address1: sql.NullString{String: "123 Main St", Valid: true},
 		City:     sql.NullString{String: "Troy", Valid: true},
-		Country:  sql.NullString{String: "USA", Valid: true},
 	}
 
 	id, err := am.Insert(address)

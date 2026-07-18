@@ -1,0 +1,33 @@
+{{define "title"}}{{.Data.League.Name}}{{end}}
+
+{{define "main"}}
+<div class="flex flex-col items-center">
+    <h2>{{.Data.League.Name}}</h2>
+    {{if .IsAdmin}}
+    <div class="mb-4 flex gap-2">
+        <a class="btn" href="/admin/league/update/{{.Data.League.ID}}">Edit League</a>
+        <a class="btn" href="/admin/team/create">Add Team</a>
+        <button class="btn bg-red-600 hover:bg-red-700" data-delete-url="/admin/league/delete/{{.Data.League.ID}}" data-confirm-message="Delete league {{.Data.League.Name}}? Teams must be removed first." data-redirect-url="/league">Delete League</button>
+    </div>
+    {{end}}
+    <div class="overflow-x-auto w-full md:w-2/3 px-2 md:px-0">
+    <table class="text-left w-full mb-4">
+        <tr>
+            <th>Team</th>
+            {{if .IsAdmin}}<th>Actions</th>{{end}}
+        </tr>
+        {{range .Data.Teams}}
+        <tr>
+            <td><a href="/team/{{.ID}}">{{.Name}}</a></td>
+            {{if $.IsAdmin}}
+            <td>
+                <a href="/admin/team/update/{{.ID}}">Edit</a>
+                <button class="text-red-600" data-delete-url="/admin/team/delete/{{.ID}}" data-confirm-message="Delete team {{.Name}}?" data-redirect-url="/league/{{$.Data.League.ID}}">Delete</button>
+            </td>
+            {{end}}
+        </tr>
+        {{end}}
+    </table>
+    </div>
+</div>
+{{end}}

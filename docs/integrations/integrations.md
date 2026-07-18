@@ -33,9 +33,11 @@ The [Mailjet Go SDK](https://github.com/mailjet/mailjet-apiv3-go) wraps the Mail
 |---|---|---|
 | User signup | New user | Activate your League Buddy account (activation link) |
 | Forgot password | User | League Buddy Password Reset (reset link) |
-| Admin adds a player with an email | New player | You've been added to the League Buddy roster (signup link) |
+| Admin/captain adds a player with an email | New player | You've been added to the League Buddy roster (signup link) |
+| Captain/admin sends a team invite | Each invited address | You're invited to join `<team>` (signup link carrying the invite token) |
+| Player requests to join a team | That team's captain, if assigned and has an email on file | New join request for `<team>` (review link) |
 
-No bulk/batch email system is ported — the reference project's `EmailTemplate`/`EmailBatch` admin-authored bulk email feature isn't needed for a single team roster.
+No bulk/batch email system is ported — the reference project's `EmailTemplate`/`EmailBatch` admin-authored bulk email feature isn't needed here.
 
 ---
 

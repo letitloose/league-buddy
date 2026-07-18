@@ -1,6 +1,7 @@
 package models
 
 import (
+	"database/sql"
 	"testing"
 )
 
@@ -106,14 +107,8 @@ func TestGetAuthContext(t *testing.T) {
 func TestSetPlayerID(t *testing.T) {
 	db := NewTestDB(t)
 
-	tm := TeamModel{DB: db}
-	team, err := tm.GetDefault()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	pm := PlayerModel{DB: db}
-	playerID, err := pm.Insert(&Player{TeamID: team.ID, FirstName: "Lou", LastName: "Garwood"})
+	playerID, err := pm.Insert(&Player{TeamID: sql.NullInt32{Int32: 1, Valid: true}, FirstName: "Lou", LastName: "Garwood"})
 	if err != nil {
 		t.Fatal(err)
 	}

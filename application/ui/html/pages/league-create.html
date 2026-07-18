@@ -1,15 +1,15 @@
-{{define "title"}}Add Player{{end}}
+{{define "title"}}Add League{{end}}
 
 {{define "main"}}
 <div class="flex items-center flex-col">
-    <h2>Add Player to {{.Data.Name}}</h2>
+    <h2>Add League</h2>
     <div class="w-full max-w-xs">
-        <form class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" action='/team/{{.Data.ID}}/player/create' method='POST'>
+        <form class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" action='/admin/league/create' method='POST'>
             <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
-            {{template "player-form-fields" .}}
+            {{template "league-form-fields" .}}
             <div class="flex justify-between">
                 <input class="btn m-0" type='submit' value='Add'>
-                <a class="btn m-0" href="/team/{{.Data.ID}}/player">Cancel</a>
+                <a class="btn m-0" href="/league">Cancel</a>
             </div>
         </form>
     </div>

@@ -21,6 +21,8 @@ type templateData struct {
 	IsAdmin         bool
 	UserName        string
 	PlayerID        int
+	TeamID          int
+	IsCaptain       bool
 	CSRFToken       string
 }
 
@@ -72,6 +74,8 @@ func getTemplateSet(page string) (*template.Template, error) {
 		"./ui/html/base.html",
 		"./ui/html/partials/nav.html",
 		"./ui/html/partials/player-form-fields.html",
+		"./ui/html/partials/team-form-fields.html",
+		"./ui/html/partials/league-form-fields.html",
 		"./ui/html/pages/" + page,
 	}
 

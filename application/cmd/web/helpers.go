@@ -21,6 +21,8 @@ func (app *application) newTemplateData(r *http.Request) *templateData {
 		IsActive:        app.isActive(r),
 		IsAdmin:         app.isAdmin(r),
 		PlayerID:        app.getPlayerID(r),
+		TeamID:          app.getTeamID(r),
+		IsCaptain:       app.isCaptain(r),
 		UserName:        app.getUserName(r),
 		CSRFToken:       nosurf.Token(r),
 	}
@@ -116,4 +118,22 @@ func (app *application) getPlayerID(r *http.Request) int {
 	}
 
 	return playerID
+}
+
+func (app *application) getTeamID(r *http.Request) int {
+	teamID, ok := r.Context().Value(teamIDContextKey).(int)
+	if !ok {
+		return 0
+	}
+
+	return teamID
+}
+
+func (app *application) isCaptain(r *http.Request) bool {
+	isCaptain, ok := r.Context().Value(isCaptainContextKey).(bool)
+	if !ok {
+		return false
+	}
+
+	return isCaptain
 }

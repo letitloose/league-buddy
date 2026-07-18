@@ -123,15 +123,27 @@ func newTestApplication(t *testing.T) *application {
 	playerService := &services.PlayerService{PlayerModel: players, DB: testDB}
 	users := &models.UserModel{DB: testDB}
 	userService := &services.UserService{UserModel: users}
+	leagues := &models.LeagueModel{DB: testDB}
+	leagueService := &services.LeagueService{LeagueModel: leagues, DB: testDB}
+	teams := &models.TeamModel{DB: testDB}
+	teamService := &services.TeamService{TeamModel: teams, DB: testDB}
+	invites := &models.InviteModel{DB: testDB}
+	inviteService := &services.InviteService{InviteModel: invites, DB: testDB}
+	joinRequests := &models.JoinRequestModel{DB: testDB}
+	joinRequestService := &services.JoinRequestService{JoinRequestModel: joinRequests, DB: testDB}
 
 	return &application{
-		errorLog:         log.New(io.Discard, "", 0),
-		infoLog:          log.New(io.Discard, "", 0),
-		playerService:    playerService,
-		userService:      userService,
-		templateCache:    templateCache,
-		sessionManager:   sessionManager,
-		useTemplateCache: true,
+		errorLog:           log.New(io.Discard, "", 0),
+		infoLog:            log.New(io.Discard, "", 0),
+		playerService:      playerService,
+		userService:        userService,
+		leagueService:      leagueService,
+		teamService:        teamService,
+		inviteService:      inviteService,
+		joinRequestService: joinRequestService,
+		templateCache:      templateCache,
+		sessionManager:     sessionManager,
+		useTemplateCache:   true,
 	}
 }
 

@@ -21,8 +21,9 @@ Users and players are separate records linked by `users.playerID` (nullable). A 
 2. `bcrypt.GenerateFromPassword(password, 12)` produces `hashed_password`.
 3. `bcrypt.GenerateFromPassword(email+password, 12)` produces `verification_hash` — used as a single-use token in the activation link and password reset flow.
 4. Both hashes are inserted into `users` along with `active = false`.
-5. **Activation email** (if `EMAIL_USER` is configured): fetches the raw `verification_hash` and emails the user a link: `https://<VIRTUAL_HOST>/user/activate?hash=<verification_hash>`.
-6. An audit log entry is written: `"user record created: <email>"`.
+5. **Invite token** (optional): if the signup form carried an `inviteToken` (threaded through from `?invite=<token>` on the signup link — see [Invites](../application/domains.md#teams)), `InviteModel.GetByToken` looks it up; if found and not already used, `UserModel.SetPendingInvite` stores the invite's ID on the new user row (`users.pendingInviteID`). A stale, unknown, or already-used token is silently treated as "no invite" — signup is never blocked over a bad URL param. This durable DB column, not session or URL state, is what lets the invite survive from this request through to the separate activation-link click below.
+6. **Activation email** (if `EMAIL_USER` is configured): fetches the raw `verification_hash` and emails the user a link: `https://<VIRTUAL_HOST>/user/activate?hash=<verification_hash>`.
+7. An audit log entry is written: `"user record created: <email>"`.
 
 At this point the user exists but `active = false`, so `requireActive` blocks all protected routes.
 
@@ -36,8 +37,12 @@ At this point the user exists but `active = false`, so `requireActive` blocks al
 2. `Activate(userID)` sets `users.active = 1`.
 3. Audit log: `"user record activated: <email>"`.
 4. `UserService.linkOrCreatePlayer(userID, email)` runs unconditionally:
-   - If an unlinked player row already exists with this email (an admin pre-added them to the roster), the user is linked to it via `SetPlayerID`.
-   - Otherwise, a placeholder player record is created on the default team with empty name fields, and the user is linked to it.
+   - If the user has a `pendingInviteID` (set at signup, see above), the invite is loaded via `InviteModel.Get`.
+   - If an unlinked player row already exists with this email (an admin pre-added them to the roster), the user is linked to it via `SetPlayerID`; if a pending invite was found and that player has no team yet, `PlayerModel.SetTeam` assigns the invite's team.
+   - Otherwise, a placeholder player record is created with empty name fields — assigned directly to the invite's team if one was found, otherwise left unaffiliated (`teamID` null) until an invite or an approved join request assigns one — and the user is linked to it.
+   - If a pending invite was consumed, `InviteModel.MarkUsed` and `UserModel.ClearPendingInvite` finalize it — safe to call more than once for the same user, since re-linking to the same player or re-consuming an already-used invite is a no-op.
+
+Signing up via a captain's invite link therefore joins that team directly at activation time, with no separate approval step. A plain (non-invited) signup ends up unaffiliated and must browse to a team and submit a join request — see [Teams](../application/domains.md#teams).
 
 The verification hash is **not rotated** after activation — reuse of the same link has no additional effect since `active` is already true.
 

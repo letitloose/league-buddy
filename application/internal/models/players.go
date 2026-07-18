@@ -8,9 +8,16 @@ import (
 	"time"
 )
 
+// Placeholder name given to a player record auto-created on signup/activation
+// before the person has filled in their real name.
+const (
+	PlaceholderFirstName = "Update"
+	PlaceholderLastName  = "Your Profile"
+)
+
 type Player struct {
 	ID          int
-	TeamID      int
+	TeamID      sql.NullInt32
 	FirstName   string
 	LastName    string
 	DateOfBirth sql.NullTime
@@ -64,6 +71,16 @@ func (m *PlayerModel) Delete(id int) error {
 	statement := "delete from players where id = ?"
 
 	_, err := m.DB.Exec(statement, id)
+
+	return err
+}
+
+// SetTeam assigns a player to a team (invite auto-join, or join-request
+// approval — never touched by an ordinary profile edit).
+func (m *PlayerModel) SetTeam(playerID, teamID int) error {
+	statement := "update players set teamID = ? where id = ?"
+
+	_, err := m.DB.Exec(statement, teamID, playerID)
 
 	return err
 }

@@ -22,6 +22,7 @@ type User struct {
 	Active           bool
 	IsAdmin          bool
 	VerificationHash []byte
+	PendingInviteID  sql.NullInt32
 }
 
 type UserModel struct {
@@ -31,10 +32,12 @@ type UserModel struct {
 // AuthContext holds all per-request auth flags returned by the single
 // consolidated GetAuthContext query.
 type AuthContext struct {
-	Active   bool
-	IsAdmin  bool
-	PlayerID sql.NullInt32
-	UserName string // always non-empty: player name or email
+	Active    bool
+	IsAdmin   bool
+	PlayerID  sql.NullInt32
+	TeamID    sql.NullInt32 // the linked player's own team, if any
+	IsCaptain bool          // true iff some team.captainPlayerID = PlayerID
+	UserName  string        // always non-empty: player name or email
 }
 
 func (m *UserModel) Insert(email, password string) (int, error) {
@@ -111,13 +114,14 @@ func (m *UserModel) GetUser(id int) (*User, error) {
 				u.lastlogin,
 				u.active,
 				exists(Select 1 from userRole ur where ur.userID = u.id and ur.roleID = "ADMIN") as isAdmin,
-				verification_hash
+				verification_hash,
+				u.pendingInviteID
 			from users u
 			left join players p on p.id = u.playerID
 			where u.id = ?;`
 
 	user := &User{}
-	err := m.DB.QueryRow(stmt, id).Scan(&user.UserID, &user.PlayerID, &user.PlayerName, &user.Email, &user.Created, &user.LastLogin, &user.Active, &user.IsAdmin, &user.VerificationHash)
+	err := m.DB.QueryRow(stmt, id).Scan(&user.UserID, &user.PlayerID, &user.PlayerName, &user.Email, &user.Created, &user.LastLogin, &user.Active, &user.IsAdmin, &user.VerificationHash, &user.PendingInviteID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -236,12 +240,15 @@ func (m *UserModel) GetByVerificationHash(hash string) (*User, error) {
 }
 
 // GetAuthContext fetches all authentication context for a user in a single
-// query: active flag, admin flag, and their linked player (if any).
+// query: active flag, admin flag, their linked player (if any), that
+// player's team (if any), and whether they're that team's captain.
 func (m *UserModel) GetAuthContext(id int) (*AuthContext, error) {
 	stmt := `SELECT
 		u.active,
 		EXISTS(SELECT 1 FROM userRole WHERE userID = u.id AND roleID = 'ADMIN'),
 		p.id,
+		p.teamID,
+		EXISTS(SELECT 1 FROM teams t WHERE t.captainPlayerID = p.id),
 		COALESCE(CONCAT(p.firstname, ' ', p.lastname), u.email)
 	FROM users u
 	LEFT JOIN players p ON p.id = u.playerID
@@ -252,6 +259,8 @@ func (m *UserModel) GetAuthContext(id int) (*AuthContext, error) {
 		&ac.Active,
 		&ac.IsAdmin,
 		&ac.PlayerID,
+		&ac.TeamID,
+		&ac.IsCaptain,
 		&ac.UserName,
 	)
 	if err != nil {
@@ -292,6 +301,26 @@ func (m *UserModel) SetPlayerID(userID, playerID int) error {
 	statement := `UPDATE users SET playerID = ? WHERE id = ?`
 
 	_, err := m.DB.Exec(statement, playerID, userID)
+
+	return err
+}
+
+// SetPendingInvite records that this user signed up carrying an invite
+// token, so linkOrCreatePlayer can auto-join the invited team at activation.
+func (m *UserModel) SetPendingInvite(userID, inviteID int) error {
+	statement := `UPDATE users SET pendingInviteID = ? WHERE id = ?`
+
+	_, err := m.DB.Exec(statement, inviteID, userID)
+
+	return err
+}
+
+// ClearPendingInvite is called once the invite has been consumed at
+// activation.
+func (m *UserModel) ClearPendingInvite(userID int) error {
+	statement := `UPDATE users SET pendingInviteID = NULL WHERE id = ?`
+
+	_, err := m.DB.Exec(statement, userID)
 
 	return err
 }

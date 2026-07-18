@@ -60,8 +60,10 @@ internal/models/            ← Database access layer
 | `helpers.go` | `render`, `serverError`, `isAuthenticated`, template data builder |
 | `templates.go` | Template cache construction, `templateData` struct |
 | `handlers_site.go` | Home page |
-| `handlers_users.go` | Signup, login, logout, password reset, user admin |
-| `handlers_players.go` | Player (roster) CRUD, search |
+| `handlers_users.go` | Signup (including invite-token threading), login, logout, password reset, user admin |
+| `handlers_players.go` | Player (roster) CRUD, search — team-scoped |
+| `handlers_leagues.go` | League CRUD, browse |
+| `handlers_teams.go` | Team CRUD, captain assignment, invites, join requests |
 
 ### `internal/services/` — Business Logic Layer
 
@@ -84,7 +86,7 @@ Templates use a base/partial/page structure:
 
 The schema is defined in full in `sql/setup.sql` (this is a fresh scaffold, not an accreted history — `sql/migrations/` starts empty and is reserved for genuine future changes). Migrations, if any, are applied automatically on startup by `MigrationModel.PerformMigrations()`, which tracks applied files in a `migration` table.
 
-The schema is built multi-team-ready from day one: a `teams` table exists with a `teamID` foreign key on `players`, seeded with exactly one row. `TeamModel.GetDefault()` is the seam that future League/multi-team support will replace — see the "Future Work" section below.
+The schema supports real multi-team leagues: a `leagues` table (top-level scope), a `teams` table (belongs to one league, has zero or one captain via `captainPlayerID`), and a nullable `players.teamID` — a self-registered player starts unaffiliated until an invite or an approved join request assigns a team. Two supporting tables round this out: `invites` (single-use signup tokens a captain/admin emails to a prospective player — the invited team is granted regardless of what email address the person actually registers with) and `teamJoinRequests` (an unaffiliated player's request to join a team, approved/rejected by that team's captain or any admin). `setup.sql` seeds exactly one league and one team on a fresh install.
 
 ## Configuration
 
@@ -95,17 +97,25 @@ All configuration is passed via environment variables (never compiled in). Key v
 | `DBHOST`, `DBPORT`, `MYSQL_*` | Database connection |
 | `EMAIL_USER`, `EMAIL_PASSWORD`, `EMAIL_SENDER` | Mailjet credentials (unset = email sending skipped, not fatal) |
 | `VIRTUAL_HOST` | Public hostname (used in email links) |
-| `TEAM_NAME` | Name for the single seeded team |
 | `SITE_HOST`, `SITE_PORT` | Bind address |
 | `RESETDB=true` | Tears down and re-seeds the database on startup |
 
+## Routing Constraints
+
+`httprouter` v1.3.0 refuses to register a static route (e.g. `/league/create`) and a wildcard route (e.g. `/league/:id`) at the same path depth for the same HTTP method — it panics at startup with a wildcard conflict. This is why the admin-only league/team create, update, delete, and set-captain routes live under `/admin/league/...` and `/admin/team/...` rather than directly under `/league/...`/`/team/...`: the view routes (`/league/:id`, `/team/:teamID`, and everything nested under it) need `:id`/`:teamID` to be the *sole* child of that path segment. When adding new routes, either nest a wildcard behind a static disambiguator (`/player/view/:id` is the established pattern) or give the new static route its own top-level prefix — never register it as a sibling of an existing bare wildcard.
+
 ## Future Work
 
-This is a v1 scaffold. Explicitly deferred, not forgotten:
+Explicitly deferred, not forgotten:
 
 - **PayPal integration** — not ported. The reference project (`toller-club-docker`) has a working `internal/services/paypal.go` to pull over when team payments are needed.
-- **League / multi-team UI** — the schema supports it (`teams` table, `TeamModel.GetDefault()` seam), but there's no team-switcher, team CRUD, or cross-team views yet.
 - **Generic role management UI** — only an ADMIN toggle exists; add a role picker if a role beyond Admin/Player is needed.
+- **Invite token expiration** — only `usedAt` prevents reuse; there's no time-based expiry.
+- **Multiple captains per team, or one captain for multiple teams** — `teams.captainPlayerID` is unique and a team has at most one captain.
+- **A global cross-team player directory for Admins** — rosters are browsed per-team like everyone else; only `/admin/joinRequests` is genuinely cross-team.
+- **Direct admin reassignment of a player between teams** outside the invite/join-request flows — `PlayerModel.SetTeam` exists and could be exposed later.
+- **League/team deletion cascades** — blocked with `ErrHasDependents`; an admin must clear dependents (teams, then players) first.
+- **Resubmission cooldowns** after a rejected join request, and **revoking/rate-limiting invites**.
 
 ## Further Reading
 

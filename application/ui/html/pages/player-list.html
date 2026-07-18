@@ -1,9 +1,11 @@
 {{define "title"}}Roster{{end}}
 
 {{define "main"}}
+{{$team := .Data.Team}}
+{{$canManage := or .IsAdmin (and .IsCaptain (eq .TeamID $team.ID))}}
 <div class="flex flex-col md:flex-row">
     <div class="w-full md:w-2/12">
-        <form class="bg-white shadow-md px-4 pt-3 pb-4 mb-4" action='/player/search' method='GET'>
+        <form class="bg-white shadow-md px-4 pt-3 pb-4 mb-4" action='/team/{{$team.ID}}/player/search' method='GET'>
             <h3 class="pt-0 m-0">Search</h3>
             <div class="mb-4">
                 <label class="field-label" for="firstname">First Name</label>
@@ -19,17 +21,17 @@
             </div>
             <div class="flex justify-center mt-2">
                 <input class="btn text-center" type='submit' value='Search'>
-                <a class="btn bg-blue-300" href="/player">Clear</a>
+                <a class="btn bg-blue-300" href="/team/{{$team.ID}}/player">Clear</a>
             </div>
         </form>
     </div>
 
     <div class="w-full md:w-9/12 md:ml-12">
         <div class="text-center">
-            <h2>Roster</h2>
-            <p class="pb-3 text-center">{{len .Data}} players</p>
-            {{if .IsAdmin}}
-                <a class="btn" href="/player/create">Add Player</a>
+            <h2>{{$team.Name}} Roster</h2>
+            <p class="pb-3 text-center">{{len .Data.Players}} players</p>
+            {{if $canManage}}
+                <a class="btn" href="/team/{{$team.ID}}/player/create">Add Player</a>
             {{end}}
         </div>
         <div class="overflow-x-auto">
@@ -38,16 +40,16 @@
                 <th>Name</th>
                 <th>Email</th>
                 <th>Phone</th>
-                {{if .IsAdmin}}<th>Actions</th>{{end}}
+                {{if $canManage}}<th>Actions</th>{{end}}
             </tr>
-            {{range .Data}}
+            {{range .Data.Players}}
             <tr>
                 <td><a href="/player/view/{{.ID}}">{{.FirstName}} {{.LastName}}</a></td>
                 <td>{{.Email.String}}</td>
                 <td>{{.PhoneNumber.String}}</td>
-                {{if $.IsAdmin}}
+                {{if $canManage}}
                 <td>
-                    <button class="text-red-600" data-delete-url="/player/delete/{{.ID}}" data-confirm-message="Remove {{.FirstName}} {{.LastName}} from the roster?" data-redirect-url="/player">Delete</button>
+                    <button class="text-red-600" data-delete-url="/team/{{$team.ID}}/player/delete/{{.ID}}" data-confirm-message="Remove {{.FirstName}} {{.LastName}} from the roster?" data-redirect-url="/team/{{$team.ID}}/player">Delete</button>
                 </td>
                 {{end}}
             </tr>

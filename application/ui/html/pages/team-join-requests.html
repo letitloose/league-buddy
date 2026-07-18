@@ -1,0 +1,37 @@
+{{define "title"}}Join Requests{{end}}
+
+{{define "main"}}
+<div class="flex flex-col items-center">
+    <h2>{{if .Data.Team}}Join Requests: {{.Data.Team.Name}}{{else}}Pending Join Requests{{end}}</h2>
+    <p class="pb-3">{{len .Data.Requests}} pending</p>
+    <div class="overflow-x-auto w-full md:w-3/4 px-2 md:px-0">
+    <table class="text-left w-full mb-4">
+        <tr>
+            <th>Player</th>
+            <th>Email</th>
+            {{if not .Data.Team}}<th>Team</th>{{end}}
+            <th>Requested</th>
+            <th>Actions</th>
+        </tr>
+        {{range .Data.Requests}}
+        <tr>
+            <td>{{.FirstName}} {{.LastName}}</td>
+            <td>{{.Email.String}}</td>
+            {{if not $.Data.Team}}<td>{{.TeamName}}</td>{{end}}
+            <td>{{humanDate .RequestedAt}}</td>
+            <td>
+                <form class="inline" action="/team/{{.TeamID}}/joinRequests/{{.ID}}/approve" method="POST">
+                    <input type='hidden' name='csrf_token' value='{{$.CSRFToken}}'>
+                    <button class="text-green-700" type="submit">Approve</button>
+                </form>
+                <form class="inline" action="/team/{{.TeamID}}/joinRequests/{{.ID}}/reject" method="POST">
+                    <input type='hidden' name='csrf_token' value='{{$.CSRFToken}}'>
+                    <button class="text-red-600" type="submit">Reject</button>
+                </form>
+            </td>
+        </tr>
+        {{end}}
+    </table>
+    </div>
+</div>
+{{end}}

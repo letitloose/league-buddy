@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/julienschmidt/httprouter"
 	"github.com/justinas/nosurf"
 	"github.com/letitloose/league-buddy/internal/models"
 )
@@ -84,6 +86,29 @@ func (app *application) requireAdmin(next http.Handler) http.Handler {
 	})
 }
 
+// requireTeamManager allows Admins through unconditionally, and captains
+// through only when they're captain of the :teamID in the current route.
+// Chain after app.authenticate + app.requireActive.
+func (app *application) requireTeamManager(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		params := httprouter.ParamsFromContext(r.Context())
+		teamID, err := strconv.Atoi(params.ByName("teamID"))
+		if err != nil || teamID < 1 {
+			app.notFound(w)
+			return
+		}
+
+		if !app.isAdmin(r) && !(app.isCaptain(r) && app.getTeamID(r) == teamID) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+
+		w.Header().Add("Cache-Control", "no-store")
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func noSurf(next http.Handler) http.Handler {
 	csrfHandler := nosurf.New(next)
 	csrfHandler.SetBaseCookie(http.Cookie{
@@ -137,6 +162,14 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 		}
 		if ac.PlayerID.Valid {
 			ctx = context.WithValue(r.Context(), playerIDContextKey, int(ac.PlayerID.Int32))
+			r = r.WithContext(ctx)
+		}
+		if ac.TeamID.Valid {
+			ctx = context.WithValue(r.Context(), teamIDContextKey, int(ac.TeamID.Int32))
+			r = r.WithContext(ctx)
+		}
+		if ac.IsCaptain {
+			ctx = context.WithValue(r.Context(), isCaptainContextKey, true)
 			r = r.WithContext(ctx)
 		}
 

@@ -4,22 +4,26 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 type Team struct {
-	ID      int
-	Name    string
-	Created time.Time
+	ID              int
+	LeagueID        int
+	Name            string
+	CaptainPlayerID sql.NullInt32
+	Created         time.Time
 }
 
 type TeamModel struct {
 	DB *sql.DB
 }
 
-func (m *TeamModel) Insert(name string) (int, error) {
-	statement := `INSERT INTO teams (name, created) VALUES (?, UTC_TIMESTAMP())`
+func (m *TeamModel) Insert(leagueID int, name string) (int, error) {
+	statement := `INSERT INTO teams (leagueID, name, created) VALUES (?, ?, UTC_TIMESTAMP())`
 
-	result, err := m.DB.Exec(statement, name)
+	result, err := m.DB.Exec(statement, leagueID, name)
 	if err != nil {
 		return 0, err
 	}
@@ -28,15 +32,14 @@ func (m *TeamModel) Insert(name string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-
 	return int(id), nil
 }
 
 func (m *TeamModel) Get(id int) (*Team, error) {
-	stmt := `select id, name, created from teams where id = ?`
+	stmt := `SELECT id, leagueID, name, captainPlayerID, created FROM teams WHERE id = ?`
 
 	team := &Team{}
-	err := m.DB.QueryRow(stmt, id).Scan(&team.ID, &team.Name, &team.Created)
+	err := m.DB.QueryRow(stmt, id).Scan(&team.ID, &team.LeagueID, &team.Name, &team.CaptainPlayerID, &team.Created)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -46,19 +49,74 @@ func (m *TeamModel) Get(id int) (*Team, error) {
 	return team, nil
 }
 
-// GetDefault returns the single team used by the current single-team UI.
-// This is the seam multi-team/League support will replace later — callers
-// that need "the current team" go through here rather than hardcoding an ID.
-func (m *TeamModel) GetDefault() (*Team, error) {
-	stmt := `select id, name, created from teams order by id asc limit 1`
+func (m *TeamModel) Update(team *Team) error {
+	statement := `UPDATE teams SET leagueID = ?, name = ? WHERE id = ?`
 
-	team := &Team{}
-	err := m.DB.QueryRow(stmt).Scan(&team.ID, &team.Name, &team.Created)
+	_, err := m.DB.Exec(statement, team.LeagueID, team.Name, team.ID)
+	return err
+}
+
+func (m *TeamModel) Delete(id int) error {
+	statement := `DELETE FROM teams WHERE id = ?`
+
+	_, err := m.DB.Exec(statement, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNoRecord
+		var mySQLError *mysql.MySQLError
+		if errors.As(err, &mySQLError) {
+			if mySQLError.Number == 1451 {
+				return ErrHasDependents
+			}
 		}
+		return err
+	}
+	return nil
+}
+
+func (m *TeamModel) GetByLeague(leagueID int) ([]*Team, error) {
+	stmt := `SELECT id, leagueID, name, captainPlayerID, created FROM teams WHERE leagueID = ? ORDER BY name ASC`
+
+	rows, err := m.DB.Query(stmt, leagueID)
+	if err != nil {
 		return nil, err
 	}
-	return team, nil
+	defer rows.Close()
+
+	teams := []*Team{}
+	for rows.Next() {
+		team := &Team{}
+		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.CaptainPlayerID, &team.Created)
+		if err != nil {
+			return nil, err
+		}
+		teams = append(teams, team)
+	}
+	return teams, nil
+}
+
+// SetCaptain assigns playerID as teamID's captain. A zero playerID clears
+// the captain instead.
+func (m *TeamModel) SetCaptain(teamID int, playerID sql.NullInt32) error {
+	statement := `UPDATE teams SET captainPlayerID = ? WHERE id = ?`
+
+	_, err := m.DB.Exec(statement, playerID, teamID)
+	if err != nil {
+		var mySQLError *mysql.MySQLError
+		if errors.As(err, &mySQLError) {
+			if mySQLError.Number == 1062 {
+				return ErrDuplicateCaptain
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+// ClearCaptainByPlayer removes playerID as captain of whatever team (if any)
+// currently has them, so the player can be safely deleted despite the
+// fk_teams_captain foreign key.
+func (m *TeamModel) ClearCaptainByPlayer(playerID int) error {
+	statement := `UPDATE teams SET captainPlayerID = NULL WHERE captainPlayerID = ?`
+
+	_, err := m.DB.Exec(statement, playerID)
+	return err
 }

@@ -24,6 +24,7 @@ Request
                     │  requireActive    │
                     │  requireAdmin     │
                     │  requireAuthentication
+                    │  requireTeamManager
                     └───────────────────┘
                              │
                              ▼
@@ -78,6 +79,8 @@ Reads `authenticatedUserID` from the session. If present, calls `userService.Get
 | `isActive` | bool | `users.active = true` |
 | `isAdmin` | bool | Has ADMIN role |
 | `playerID` | int | Linked player record exists |
+| `teamID` | int | Linked player has a team (`players.teamID` is set) |
+| `isCaptain` | bool | Linked player is some team's `captainPlayerID` |
 | `userName` | string | Always set (player name or email) |
 
 This middleware never redirects. It only populates context.
@@ -95,6 +98,10 @@ Used for player-facing routes. Redirects to `/` if `isActive` is false. Sets `Ca
 ### `requireAdmin`
 
 Used for administrative routes. Redirects to `/` if `isAdmin` is false. Sets `Cache-Control: no-store`.
+
+### `requireTeamManager`
+
+Used for team-scoped roster/invite/join-request management routes (`/team/:teamID/player/create`, `/team/:teamID/invite`, `/team/:teamID/joinRequests`, etc.), chained after `requireActive`. Reads `:teamID` from the route params (via `httprouter.ParamsFromContext` — params are visible to middleware earlier in the alice chain, not just the final handler, since the whole chain is registered as "the handler" with httprouter). 404s if `:teamID` doesn't parse to a positive integer. Otherwise allows the request through if `isAdmin` is true, **or** `isCaptain` is true **and** the request's own `teamID` context value matches the route's `:teamID` — i.e. an admin can manage any team, a captain can only manage their own. Everyone else is redirected to `/`. Sets `Cache-Control: no-store`.
 
 ## Static Files
 

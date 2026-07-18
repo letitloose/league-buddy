@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -14,12 +15,14 @@ import (
 type UserService struct {
 	*models.UserModel
 	*Email
+	InfoLog *log.Logger // used to log activation/reset links when Email is nil (no creds configured)
 }
 
 type UserForm struct {
 	Email               string `form:"email"`
 	Password            string `form:"password"`
 	ConfirmPassword     string
+	InviteToken         string `form:"-"` // from ?invite= at signup, threaded through as a hidden field
 	validator.Validator `form:"-"`
 }
 
@@ -48,18 +51,21 @@ func (service *UserService) ForgotPassword(uf *UserForm) error {
 		}
 	}
 
+	resetLink := fmt.Sprintf("https://%s/user/resetPassword?hash=%s", os.Getenv("VIRTUAL_HOST"), verificationHash)
+
 	if service.Email != nil {
-		siteAddress := os.Getenv("VIRTUAL_HOST")
 		body := fmt.Sprintf(
 			`<html>
 				<body>
-					<p>Please <a href="https://%s/user/resetPassword?hash=%s">click here</a> to reset your password.<p>
+					<p>Please <a href="%s">click here</a> to reset your password.<p>
 				</body>
-			</html>`, siteAddress, verificationHash)
+			</html>`, resetLink)
 		err = service.SendEmailV2("League Buddy Password Reset", "", body, uf.Email)
 		if err != nil {
 			return err
 		}
+	} else if service.InfoLog != nil {
+		service.InfoLog.Printf("no email configured -- password reset link for %s: %s", uf.Email, resetLink)
 	}
 
 	cs := &CommonService{DB: service.DB}
@@ -84,29 +90,47 @@ func (service *UserService) InsertUser(uf *UserForm) error {
 		return models.ErrBadData
 	}
 
-	_, err := service.Insert(uf.Email, uf.Password)
+	userID, err := service.Insert(uf.Email, uf.Password)
 	if err != nil {
 		return err
 	}
 
-	//user created successfully,  send an email with the validation link
-	if service.Email != nil {
-		verificationHash, err := service.GetVerificationHashByEmail(uf.Email)
-		if err != nil {
+	if uf.InviteToken != "" {
+		im := models.InviteModel{DB: service.DB}
+		invite, err := im.GetByToken(uf.InviteToken)
+		if err != nil && !errors.Is(err, models.ErrNoRecord) {
 			return err
 		}
-		siteAddress := os.Getenv("VIRTUAL_HOST")
+		// A stale/unknown/already-used token is treated as "no invite" —
+		// never block signup because of a bad URL param.
+		if err == nil && !invite.UsedAt.Valid {
+			if err := service.UserModel.SetPendingInvite(userID, invite.ID); err != nil {
+				return err
+			}
+		}
+	}
+
+	//user created successfully, send (or log, in dev) the activation link
+	verificationHash, err := service.GetVerificationHashByEmail(uf.Email)
+	if err != nil {
+		return err
+	}
+	activationLink := fmt.Sprintf("https://%s/user/activate?hash=%s", os.Getenv("VIRTUAL_HOST"), verificationHash)
+
+	if service.Email != nil {
 		body := fmt.Sprintf(
 			`<html>
 				<body>
 					<h1>Hello!</h1>
-					<p>Please <a href="https://%s/user/activate?hash=%s">click here</a> to validate your email and activate your account.<p>
+					<p>Please <a href="%s">click here</a> to validate your email and activate your account.<p>
 				</body>
-			</html>`, siteAddress, verificationHash)
+			</html>`, activationLink)
 		err = service.SendEmailV2("Activate your League Buddy account", "", body, uf.Email)
 		if err != nil {
 			return err
 		}
+	} else if service.InfoLog != nil {
+		service.InfoLog.Printf("no email configured -- activation link for %s: %s", uf.Email, activationLink)
 	}
 
 	cs := &CommonService{DB: service.DB}
@@ -218,41 +242,73 @@ func (service *UserService) ActivateUser(hash string) error {
 // linkOrCreatePlayer links a user account to a roster player record: it
 // first tries to claim an existing unlinked player row with a matching email
 // (covers an admin pre-adding a player before they sign up), otherwise
-// creates a placeholder player on the default team. Safe to call more than
-// once for the same user — re-linking to the same player is a no-op.
+// creates a placeholder player. If the signup carried a valid invite token
+// (users.pendingInviteID, set at signup time — see InsertUser), the linked
+// or newly-created player is joined directly to the invited team, no
+// approval needed; otherwise the player is left unaffiliated (no team)
+// until an invite or an approved join request assigns one. Safe to call
+// more than once for the same user — re-linking to the same player, or
+// re-consuming an already-used invite, is a no-op.
 func (service *UserService) linkOrCreatePlayer(userID int, email string) error {
 	pm := models.PlayerModel{DB: service.DB}
+	im := models.InviteModel{DB: service.DB}
+
+	user, err := service.GetUser(userID)
+	if err != nil {
+		return err
+	}
+
+	var invite *models.Invite
+	if user.PendingInviteID.Valid {
+		invite, err = im.Get(int(user.PendingInviteID.Int32))
+		if err != nil && !errors.Is(err, models.ErrNoRecord) {
+			return err
+		}
+	}
 
 	if existing, err := pm.GetByEmail(email); err == nil {
-		return service.UserModel.SetPlayerID(userID, existing.ID)
-	} else if !errors.Is(err, models.ErrNoRecord) {
+		if invite != nil && !existing.TeamID.Valid {
+			if err := pm.SetTeam(existing.ID, invite.TeamID); err != nil {
+				return err
+			}
+		}
+		if err := service.UserModel.SetPlayerID(userID, existing.ID); err != nil {
+			return err
+		}
+	} else if errors.Is(err, models.ErrNoRecord) {
+		newPlayer := &models.Player{
+			FirstName: models.PlaceholderFirstName,
+			LastName:  models.PlaceholderLastName,
+			Email:     sql.NullString{String: email, Valid: true},
+		}
+		if invite != nil {
+			newPlayer.TeamID = sql.NullInt32{Int32: int32(invite.TeamID), Valid: true}
+		}
+		playerID, err := pm.Insert(newPlayer)
+		if err != nil {
+			return err
+		}
+		cs := &CommonService{DB: service.DB}
+		if err := cs.InsertAuditLog(email, time.Now(), "player record created: "+email); err != nil {
+			return err
+		}
+		if err := service.UserModel.SetPlayerID(userID, playerID); err != nil {
+			return err
+		}
+	} else {
 		return err
 	}
 
-	tm := models.TeamModel{DB: service.DB}
-	team, err := tm.GetDefault()
-	if err != nil {
-		return err
+	if invite != nil {
+		if err := im.MarkUsed(invite.ID, userID); err != nil {
+			return err
+		}
+		if err := service.UserModel.ClearPendingInvite(userID); err != nil {
+			return err
+		}
 	}
 
-	newPlayer := &models.Player{
-		TeamID:    team.ID,
-		FirstName: "",
-		LastName:  "",
-		Email:     sql.NullString{String: email, Valid: true},
-	}
-	playerID, err := pm.Insert(newPlayer)
-	if err != nil {
-		return err
-	}
-
-	cs := &CommonService{DB: service.DB}
-	err = cs.InsertAuditLog(email, time.Now(), "player record created: "+email)
-	if err != nil {
-		return err
-	}
-
-	return service.UserModel.SetPlayerID(userID, playerID)
+	return nil
 }
 
 func (service *UserService) ToggleAdmin(userID, loggedInUserID int) error {

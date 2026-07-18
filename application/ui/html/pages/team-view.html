@@ -1,0 +1,55 @@
+{{define "title"}}{{.Data.Team.Name}}{{end}}
+
+{{define "main"}}
+<div class="flex flex-col items-center">
+    <h2>{{.Data.Team.Name}}</h2>
+    <p class="mb-2"><a href="/league/{{.Data.League.ID}}">{{.Data.League.Name}}</a></p>
+    <p class="mb-4">Captain: {{if .Data.CaptainName}}{{.Data.CaptainName}}{{else}}Unassigned{{end}}</p>
+
+    <a class="btn" href="/team/{{.Data.Team.ID}}/player">View Roster</a>
+
+    {{if .Data.CanRequestToJoin}}
+    <form class="mt-4" action="/team/{{.Data.Team.ID}}/joinRequest" method="POST">
+        <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+        <button class="btn" type="submit">Request to Join</button>
+    </form>
+    {{end}}
+
+    {{if or .IsAdmin (and .IsCaptain (eq .TeamID .Data.Team.ID))}}
+    <div class="bg-white shadow-md rounded px-6 py-4 mt-6 w-full max-w-md text-center">
+        <h3 class="pt-0">Team Management</h3>
+        <div class="flex justify-center gap-2 flex-wrap">
+            <a class="btn" href="/team/{{.Data.Team.ID}}/player/create">Add Player</a>
+            <a class="btn" href="/team/{{.Data.Team.ID}}/invite">Invite Players</a>
+            <a class="btn" href="/team/{{.Data.Team.ID}}/joinRequests">Join Requests</a>
+        </div>
+    </div>
+    {{end}}
+
+    {{if .IsAdmin}}
+    <div class="bg-white shadow-md rounded px-6 py-4 mt-6 w-full max-w-md text-center">
+        <h3 class="pt-0">Admin</h3>
+        <div class="flex justify-center gap-2 mb-4">
+            <a class="btn" href="/admin/team/update/{{.Data.Team.ID}}">Edit Team</a>
+            <button class="btn bg-red-600 hover:bg-red-700" data-delete-url="/admin/team/delete/{{.Data.Team.ID}}" data-confirm-message="Delete team {{.Data.Team.Name}}? The roster must be removed first." data-redirect-url="/league/{{.Data.League.ID}}">Delete Team</button>
+        </div>
+        <form action="/admin/team/setCaptain" method="POST">
+            <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+            <input type='hidden' name='teamID' value='{{.Data.Team.ID}}'>
+            <label class="field-label">Set Captain</label>
+            <select class="form-field" name="playerID">
+                <option value="0">-- None --</option>
+                {{range .Data.Roster}}
+                    {{if and $.Data.Team.CaptainPlayerID.Valid (eq .ID $.Data.Team.CaptainPlayerID.Int32)}}
+                        <option value="{{.ID}}" selected>{{.FirstName}} {{.LastName}}</option>
+                    {{else}}
+                        <option value="{{.ID}}">{{.FirstName}} {{.LastName}}</option>
+                    {{end}}
+                {{end}}
+            </select>
+            <input class="btn m-0" type='submit' value='Save'>
+        </form>
+    </div>
+    {{end}}
+</div>
+{{end}}

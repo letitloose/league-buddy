@@ -144,7 +144,6 @@ func (service *PlayerService) AddPlayer(teamID int, form *PlayerForm, actorEmail
 	}
 
 	player := &models.Player{
-		TeamID:      sql.NullInt32{Int32: int32(team.ID), Valid: true},
 		FirstName:   form.FirstName,
 		LastName:    form.LastName,
 		DateOfBirth: parseOptionalDate(form.DateOfBirth),
@@ -154,6 +153,11 @@ func (service *PlayerService) AddPlayer(teamID int, form *PlayerForm, actorEmail
 	}
 	playerID, err := service.Insert(player)
 	if err != nil {
+		return 0, err
+	}
+
+	tmm := &models.TeamMemberModel{DB: service.DB}
+	if err := tmm.AddMembership(playerID, team.ID); err != nil {
 		return 0, err
 	}
 
@@ -242,6 +246,10 @@ func (service *PlayerService) upsertAddress(existingAddressID int, form *PlayerF
 	return sql.NullInt32{Int32: int32(id), Valid: true}, nil
 }
 
+// DeletePlayer wipes the player's bio, address, and every team membership,
+// and orphans their login if they have one — the full destructive action,
+// admin-only. For removing a player from just one team's roster, see
+// RemoveFromRoster instead.
 func (service *PlayerService) DeletePlayer(id int, actorEmail string) error {
 	player, err := service.Get(id)
 	if err != nil {
@@ -252,6 +260,32 @@ func (service *PlayerService) DeletePlayer(id int, actorEmail string) error {
 	// current captain.
 	tm := &models.TeamModel{DB: service.DB}
 	if err := tm.ClearCaptainByPlayer(id); err != nil {
+		return err
+	}
+
+	tmm := &models.TeamMemberModel{DB: service.DB}
+	if err := tmm.DeleteAllForPlayer(id); err != nil {
+		return err
+	}
+
+	// fk_leagueadmins_player would otherwise block deleting a player who
+	// administers one or more leagues.
+	lam := &models.LeagueAdminModel{DB: service.DB}
+	if err := lam.DeleteAllForPlayer(id); err != nil {
+		return err
+	}
+
+	// fk_tjr_player would otherwise block deleting a player who ever
+	// submitted a join request, approved/rejected/still-pending or not.
+	jrm := &models.JoinRequestModel{DB: service.DB}
+	if err := jrm.DeleteAllForPlayer(id); err != nil {
+		return err
+	}
+
+	// fk_users_player would otherwise block deleting a player with a login
+	// — orphan the user account (playerID -> NULL) instead of deleting it.
+	um := &models.UserModel{DB: service.DB}
+	if err := um.ClearPlayerID(id); err != nil {
 		return err
 	}
 
@@ -268,4 +302,33 @@ func (service *PlayerService) DeletePlayer(id int, actorEmail string) error {
 
 	cs := &CommonService{DB: service.DB}
 	return cs.InsertAuditLog(actorEmail, time.Now(), "player record deleted: "+player.FirstName+" "+player.LastName)
+}
+
+// RemoveFromRoster removes playerID from just teamID's roster — the
+// lightweight, captain-usable action. The player's bio, address, and any
+// other team memberships are untouched.
+func (service *PlayerService) RemoveFromRoster(playerID, teamID int, actorEmail string) error {
+	player, err := service.Get(playerID)
+	if err != nil {
+		return err
+	}
+
+	tm := &models.TeamModel{DB: service.DB}
+	team, err := tm.Get(teamID)
+	if err != nil {
+		return err
+	}
+	if team.CaptainPlayerID.Valid && int(team.CaptainPlayerID.Int32) == playerID {
+		if err := tm.SetCaptain(teamID, sql.NullInt32{}); err != nil {
+			return err
+		}
+	}
+
+	tmm := &models.TeamMemberModel{DB: service.DB}
+	if err := tmm.RemoveMembership(playerID, teamID); err != nil {
+		return err
+	}
+
+	cs := &CommonService{DB: service.DB}
+	return cs.InsertAuditLog(actorEmail, time.Now(), fmt.Sprintf("removed from roster: %s %s (team %d)", player.FirstName, player.LastName, teamID))
 }

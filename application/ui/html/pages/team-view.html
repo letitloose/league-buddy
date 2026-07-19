@@ -3,35 +3,28 @@
 {{define "main"}}
 <div class="flex flex-col items-center">
     <h2>{{.Data.Team.Name}}</h2>
+    {{with .Data.Team.Motto.String}}<p class="italic text-gray-600 mb-2">&ldquo;{{.}}&rdquo;</p>{{end}}
     <p class="mb-2"><a href="/league/{{.Data.League.ID}}">{{.Data.League.Name}}</a></p>
-    <p class="mb-4">Captain: {{if .Data.CaptainName}}{{.Data.CaptainName}}{{else}}Unassigned{{end}}</p>
-
-    <a class="btn" href="/team/{{.Data.Team.ID}}/player">View Roster</a>
+    <p class="mb-1">Captain: {{if .Data.CaptainName}}{{.Data.CaptainName}}{{else}}Unassigned{{end}}</p>
+    {{if .Data.Team.EstablishedDate.Valid}}<p class="mb-4 text-sm text-gray-500">Est. {{humanDate .Data.Team.EstablishedDate.Time}}</p>{{end}}
 
     {{if .Data.CanRequestToJoin}}
-    <form class="mt-4" action="/team/{{.Data.Team.ID}}/joinRequest" method="POST">
+    <form class="mb-4" action="/team/{{.Data.Team.ID}}/joinRequest" method="POST">
         <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
         <button class="btn" type="submit">Request to Join</button>
     </form>
     {{end}}
 
-    {{if or .IsAdmin (and .IsCaptain (eq .TeamID .Data.Team.ID))}}
-    <div class="bg-white shadow-md rounded px-6 py-4 mt-6 w-full max-w-md text-center">
+    {{if .Data.CanManage}}
+    <div class="bg-white shadow-md rounded px-6 py-4 mb-6 w-full max-w-md text-center">
         <h3 class="pt-0">Team Management</h3>
-        <div class="flex justify-center gap-2 flex-wrap">
-            <a class="btn" href="/team/{{.Data.Team.ID}}/player/create">Add Player</a>
+        <div class="flex justify-center gap-2 flex-wrap mb-4">
+            <a class="btn" href="/admin/team/update/{{.Data.Team.ID}}">Edit Team</a>
             <a class="btn" href="/team/{{.Data.Team.ID}}/invite">Invite Players</a>
             <a class="btn" href="/team/{{.Data.Team.ID}}/joinRequests">Join Requests</a>
-        </div>
-    </div>
-    {{end}}
-
-    {{if .IsAdmin}}
-    <div class="bg-white shadow-md rounded px-6 py-4 mt-6 w-full max-w-md text-center">
-        <h3 class="pt-0">Admin</h3>
-        <div class="flex justify-center gap-2 mb-4">
-            <a class="btn" href="/admin/team/update/{{.Data.Team.ID}}">Edit Team</a>
+            {{if .Data.CanDelete}}
             <button class="btn bg-red-600 hover:bg-red-700" data-delete-url="/admin/team/delete/{{.Data.Team.ID}}" data-confirm-message="Delete team {{.Data.Team.Name}}? The roster must be removed first." data-redirect-url="/league/{{.Data.League.ID}}">Delete Team</button>
+            {{end}}
         </div>
         <form action="/admin/team/setCaptain" method="POST">
             <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
@@ -51,5 +44,37 @@
         </form>
     </div>
     {{end}}
+
+    <div class="w-full md:w-3/4 px-2 md:px-0">
+        <div class="text-center">
+            <h3 class="mb-1">Roster</h3>
+            <p class="text-sm text-gray-500 mb-3">{{len .Data.Roster}} player{{if ne (len .Data.Roster) 1}}s{{end}}</p>
+            {{if .Data.CanManage}}
+                <a class="btn mb-3" href="/team/{{.Data.Team.ID}}/player/create">Add Player</a>
+            {{end}}
+        </div>
+        <div class="overflow-x-auto">
+        <table class="text-left w-full mb-4">
+            <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                {{if .Data.CanManage}}<th>Actions</th>{{end}}
+            </tr>
+            {{range .Data.Roster}}
+            <tr>
+                <td><a href="/player/view/{{.ID}}">{{.FirstName}} {{.LastName}}</a></td>
+                <td>{{.Email.String}}</td>
+                <td>{{.PhoneNumber.String}}</td>
+                {{if $.Data.CanManage}}
+                <td>
+                    <button class="text-red-600" data-delete-url="/team/{{$.Data.Team.ID}}/player/{{.ID}}/remove" data-confirm-message="Remove {{.FirstName}} {{.LastName}} from {{$.Data.Team.Name}}'s roster?" data-redirect-url="/team/{{$.Data.Team.ID}}">Remove from Team</button>
+                </td>
+                {{end}}
+            </tr>
+            {{end}}
+        </table>
+        </div>
+    </div>
 </div>
 {{end}}

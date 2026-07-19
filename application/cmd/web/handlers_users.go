@@ -344,6 +344,10 @@ func (app *application) userView(w http.ResponseWriter, r *http.Request) {
 
 	data := app.newTemplateData(r)
 	data.Data = user
+	data.Breadcrumbs = []Breadcrumb{
+		{Label: "Users", URL: "/user/search"},
+		{Label: user.Email},
+	}
 
 	app.render(w, http.StatusOK, "user-view.html", data)
 }

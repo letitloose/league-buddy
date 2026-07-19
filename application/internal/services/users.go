@@ -244,14 +244,18 @@ func (service *UserService) ActivateUser(hash string) error {
 // (covers an admin pre-adding a player before they sign up), otherwise
 // creates a placeholder player. If the signup carried a valid invite token
 // (users.pendingInviteID, set at signup time — see InsertUser), the linked
-// or newly-created player is joined directly to the invited team, no
-// approval needed; otherwise the player is left unaffiliated (no team)
-// until an invite or an approved join request assigns one. Safe to call
-// more than once for the same user — re-linking to the same player, or
-// re-consuming an already-used invite, is a no-op.
+// or newly-created player is added to the invited team's membership, no
+// approval needed — unless they already belong to a different team in that
+// same league, in which case the auto-join is skipped (a player may hold at
+// most one team per league) but the invite is still consumed, so it never
+// dangles. A player with no invite is left unaffiliated until an invite or
+// an approved join request adds a membership. Safe to call more than once
+// for the same user — re-linking to the same player, or re-consuming an
+// already-used invite, is a no-op.
 func (service *UserService) linkOrCreatePlayer(userID int, email string) error {
 	pm := models.PlayerModel{DB: service.DB}
 	im := models.InviteModel{DB: service.DB}
+	tmm := models.TeamMemberModel{DB: service.DB}
 
 	user, err := service.GetUser(userID)
 	if err != nil {
@@ -267,9 +271,21 @@ func (service *UserService) linkOrCreatePlayer(userID int, email string) error {
 	}
 
 	if existing, err := pm.GetByEmail(email); err == nil {
-		if invite != nil && !existing.TeamID.Valid {
-			if err := pm.SetTeam(existing.ID, invite.TeamID); err != nil {
+		if invite != nil {
+			team, err := (&models.TeamModel{DB: service.DB}).Get(invite.TeamID)
+			if err != nil {
 				return err
+			}
+			hasTeamInLeague, err := tmm.HasTeamInLeague(existing.ID, team.LeagueID)
+			if err != nil {
+				return err
+			}
+			if !hasTeamInLeague {
+				if err := tmm.AddMembership(existing.ID, invite.TeamID); err != nil && !errors.Is(err, models.ErrDuplicateMembership) {
+					return err
+				}
+			} else if service.InfoLog != nil {
+				service.InfoLog.Printf("invite auto-join skipped for %s: already on a team in league %d", email, team.LeagueID)
 			}
 		}
 		if err := service.UserModel.SetPlayerID(userID, existing.ID); err != nil {
@@ -281,9 +297,6 @@ func (service *UserService) linkOrCreatePlayer(userID int, email string) error {
 			LastName:  models.PlaceholderLastName,
 			Email:     sql.NullString{String: email, Valid: true},
 		}
-		if invite != nil {
-			newPlayer.TeamID = sql.NullInt32{Int32: int32(invite.TeamID), Valid: true}
-		}
 		playerID, err := pm.Insert(newPlayer)
 		if err != nil {
 			return err
@@ -291,6 +304,13 @@ func (service *UserService) linkOrCreatePlayer(userID int, email string) error {
 		cs := &CommonService{DB: service.DB}
 		if err := cs.InsertAuditLog(email, time.Now(), "player record created: "+email); err != nil {
 			return err
+		}
+		if invite != nil {
+			// Brand new player, zero existing memberships — no league
+			// conflict is possible.
+			if err := tmm.AddMembership(playerID, invite.TeamID); err != nil {
+				return err
+			}
 		}
 		if err := service.UserModel.SetPlayerID(userID, playerID); err != nil {
 			return err

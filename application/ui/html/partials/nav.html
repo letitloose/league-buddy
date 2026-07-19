@@ -1,22 +1,39 @@
 {{define "nav"}}
-<nav class="bg-amber-100 font-medium relative z-50">
+<nav class="bg-neutral-800 font-medium relative z-50">
 
     {{/* ── Top bar: always visible ── */}}
     <div class="flex justify-between items-center px-4 py-2">
         <div class="flex items-center">
-            <a href="/" class="mr-4 text-slate-700 no-underline font-bold">League Buddy</a>
+            <a href="/" class="mr-4 text-green-400 no-underline font-bold brand-font">League Buddy</a>
 
             {{/* ── Desktop left-side links ── */}}
             <div class="hidden md:flex items-center">
-                <a href="/" class="mr-4 text-slate-700 no-underline">Home</a>
+                <a href="/" class="mr-4 text-neutral-100 hover:text-green-400 no-underline">Home</a>
                 {{if .IsActive}}
-                    <a href="/league" class="mr-4 text-slate-700 no-underline">Leagues</a>
-                    {{if gt .TeamID 0}}
-                        <a href="/team/{{.TeamID}}" class="mr-4 text-slate-700 no-underline">My Team</a>
+                    <a href="/league" class="mr-4 text-neutral-100 hover:text-green-400 no-underline">Leagues</a>
+                    {{if .MyTeams}}
+                        <div class="dropdown text-neutral-100 hover:text-green-400 mr-4">
+                            <button class="dropbtn">My Teams</button>
+                            <div class="dropdown-content">
+                                {{range .MyTeams}}
+                                    <a href="/team/{{.ID}}">{{.Name}}</a>
+                                {{end}}
+                            </div>
+                        </div>
+                    {{end}}
+                    {{if .MyAdminLeagues}}
+                        <div class="dropdown text-neutral-100 hover:text-green-400 mr-4">
+                            <button class="dropbtn">My Leagues (Admin)</button>
+                            <div class="dropdown-content">
+                                {{range .MyAdminLeagues}}
+                                    <a href="/league/{{.ID}}">{{.Name}}</a>
+                                {{end}}
+                            </div>
+                        </div>
                     {{end}}
                 {{end}}
                 {{if .IsAdmin}}
-                    <div class="dropdown text-slate-700 mr-4">
+                    <div class="dropdown text-neutral-100 hover:text-green-400 mr-4">
                         <button class="dropbtn">Admin</button>
                         <div class="dropdown-content">
                             <a href='/user/search'>Users</a>
@@ -32,7 +49,7 @@
             {{/* ── Desktop right-side links ── */}}
             <div class="hidden md:flex">
                 {{if .IsAuthenticated}}
-                <div class="dropdown text-slate-700 mr-4">
+                <div class="dropdown text-neutral-100 hover:text-green-400 mr-4">
                     <button class="dropbtn">{{.UserName}}</button>
                     <div class="dropdown-content" style="right: 0; width: 140px;">
                         {{if and .IsActive (gt .PlayerID 0)}}
@@ -45,41 +62,44 @@
                     </div>
                 </div>
                 {{else}}
-                    <a href='/user/login' class="text-slate-700 mr-4">Login/Signup</a>
+                    <a href='/user/login' class="text-neutral-100 hover:text-green-400 mr-4">Login/Signup</a>
                 {{end}}
             </div>
 
             {{/* ── Hamburger button (mobile only) ── */}}
-            <button id="nav-toggle" class="md:hidden p-3 mr-2 text-slate-700 text-xl">☰</button>
+            <button id="nav-toggle" class="md:hidden p-3 mr-2 text-neutral-100 text-xl">☰</button>
         </div>
     </div>
 
     {{/* ── Mobile menu (hidden by default) ── */}}
-    <div id="mobile-menu" class="hidden md:hidden flex-col bg-amber-100 border-t border-amber-300 pb-2 shadow-md">
-        <a href="/" class="block px-4 py-2 text-slate-700">Home</a>
+    <div id="mobile-menu" class="hidden md:hidden flex-col bg-neutral-800 border-t border-neutral-700 pb-2 shadow-md">
+        <a href="/" class="block px-4 py-2 text-neutral-100">Home</a>
         {{if .IsActive}}
-            <a href="/league" class="block px-4 py-2 text-slate-700">Leagues</a>
-            {{if gt .TeamID 0}}
-                <a href="/team/{{.TeamID}}" class="block px-4 py-2 text-slate-700">My Team</a>
+            <a href="/league" class="block px-4 py-2 text-neutral-100">Leagues</a>
+            {{range .MyTeams}}
+                <a href="/team/{{.ID}}" class="block px-4 py-2 text-neutral-100">{{.Name}}</a>
+            {{end}}
+            {{range .MyAdminLeagues}}
+                <a href="/league/{{.ID}}" class="block px-4 py-2 text-neutral-100">{{.Name}} (Admin)</a>
             {{end}}
         {{end}}
         {{if .IsAdmin}}
-            <a href='/user/search' class="block px-4 py-2 text-slate-700">Users</a>
-            <a href='/team/create' class="block px-4 py-2 text-slate-700">Add Team</a>
-            <a href='/admin/joinRequests' class="block px-4 py-2 text-slate-700">Join Requests</a>
+            <a href='/user/search' class="block px-4 py-2 text-neutral-100">Users</a>
+            <a href='/admin/team/create' class="block px-4 py-2 text-neutral-100">Add Team</a>
+            <a href='/admin/joinRequests' class="block px-4 py-2 text-neutral-100">Join Requests</a>
         {{end}}
         {{if .IsAuthenticated}}
             {{if and .IsActive (gt .PlayerID 0)}}
-                <a href='/player/view/{{.PlayerID}}' class="block px-4 py-2 text-slate-700">Profile</a>
+                <a href='/player/view/{{.PlayerID}}' class="block px-4 py-2 text-neutral-100">Profile</a>
             {{end}}
             <div class="px-4 py-2">
                 <form action='/user/logout' method='POST'>
                     <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
-                    <button class="text-slate-700">Logout</button>
+                    <button class="text-neutral-100">Logout</button>
                 </form>
             </div>
         {{else}}
-            <a href='/user/login' class="block px-4 py-2 text-slate-700">Login/Signup</a>
+            <a href='/user/login' class="block px-4 py-2 text-neutral-100">Login/Signup</a>
         {{end}}
     </div>
 

@@ -9,19 +9,21 @@ import (
 )
 
 type League struct {
-	ID      int
-	Name    string
-	Created time.Time
+	ID              int
+	Name            string
+	Motto           sql.NullString
+	EstablishedDate sql.NullTime
+	Created         time.Time
 }
 
 type LeagueModel struct {
 	DB *sql.DB
 }
 
-func (m *LeagueModel) Insert(name string) (int, error) {
-	statement := `INSERT INTO leagues (name, created) VALUES (?, UTC_TIMESTAMP())`
+func (m *LeagueModel) Insert(league *League) (int, error) {
+	statement := `INSERT INTO leagues (name, motto, establishedDate, created) VALUES (?, ?, ?, UTC_TIMESTAMP())`
 
-	result, err := m.DB.Exec(statement, name)
+	result, err := m.DB.Exec(statement, league.Name, league.Motto, league.EstablishedDate)
 	if err != nil {
 		return 0, err
 	}
@@ -34,10 +36,10 @@ func (m *LeagueModel) Insert(name string) (int, error) {
 }
 
 func (m *LeagueModel) Get(id int) (*League, error) {
-	stmt := `SELECT id, name, created FROM leagues WHERE id = ?`
+	stmt := `SELECT id, name, motto, establishedDate, created FROM leagues WHERE id = ?`
 
 	league := &League{}
-	err := m.DB.QueryRow(stmt, id).Scan(&league.ID, &league.Name, &league.Created)
+	err := m.DB.QueryRow(stmt, id).Scan(&league.ID, &league.Name, &league.Motto, &league.EstablishedDate, &league.Created)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -47,10 +49,10 @@ func (m *LeagueModel) Get(id int) (*League, error) {
 	return league, nil
 }
 
-func (m *LeagueModel) Update(id int, name string) error {
-	statement := `UPDATE leagues SET name = ? WHERE id = ?`
+func (m *LeagueModel) Update(league *League) error {
+	statement := `UPDATE leagues SET name = ?, motto = ?, establishedDate = ? WHERE id = ?`
 
-	_, err := m.DB.Exec(statement, name, id)
+	_, err := m.DB.Exec(statement, league.Name, league.Motto, league.EstablishedDate, league.ID)
 	return err
 }
 
@@ -71,7 +73,7 @@ func (m *LeagueModel) Delete(id int) error {
 }
 
 func (m *LeagueModel) List() ([]*League, error) {
-	statement := `SELECT id, name, created FROM leagues ORDER BY name ASC`
+	statement := `SELECT id, name, motto, establishedDate, created FROM leagues ORDER BY name ASC`
 
 	rows, err := m.DB.Query(statement)
 	if err != nil {
@@ -82,7 +84,7 @@ func (m *LeagueModel) List() ([]*League, error) {
 	leagues := []*League{}
 	for rows.Next() {
 		league := &League{}
-		err := rows.Scan(&league.ID, &league.Name, &league.Created)
+		err := rows.Scan(&league.ID, &league.Name, &league.Motto, &league.EstablishedDate, &league.Created)
 		if err != nil {
 			return nil, err
 		}

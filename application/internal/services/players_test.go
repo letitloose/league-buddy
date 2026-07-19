@@ -38,8 +38,14 @@ func TestAddPlayer(t *testing.T) {
 	if !player.AddressID.Valid {
 		t.Fatal("expected an address to have been created")
 	}
-	if !player.TeamID.Valid || player.TeamID.Int32 != 1 {
-		t.Fatalf("wrong teamID! expected 1 but got %+v", player.TeamID)
+
+	tmm := &models.TeamMemberModel{DB: db}
+	isMember, err := tmm.IsMember(id, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isMember {
+		t.Fatal("expected player to be a member of team 1")
 	}
 }
 
@@ -122,6 +128,133 @@ func TestDeletePlayer(t *testing.T) {
 	}
 }
 
+func TestRemoveFromRoster(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	players := &models.PlayerModel{DB: db}
+	playerService := PlayerService{PlayerModel: players, DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+
+	id, err := playerService.AddPlayer(1, &PlayerForm{FirstName: "Lou", LastName: "Garwood"}, "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := playerService.RemoveFromRoster(id, 1, "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	isMember, err := tmm.IsMember(id, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isMember {
+		t.Fatal("expected membership to be removed")
+	}
+
+	// The player record itself must survive — RemoveFromRoster is not a
+	// destructive action.
+	if _, err := players.Get(id); err != nil {
+		t.Fatalf("expected player record to still exist, got %v", err)
+	}
+}
+
+func TestRemoveFromRosterClearsCaptaincy(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	players := &models.PlayerModel{DB: db}
+	playerService := PlayerService{PlayerModel: players, DB: db}
+	teams := &models.TeamModel{DB: db}
+
+	id, err := playerService.AddPlayer(1, &PlayerForm{FirstName: "Cap", LastName: "Tain"}, "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := teams.SetCaptain(1, sql.NullInt32{Int32: int32(id), Valid: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := playerService.RemoveFromRoster(id, 1, "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	team, err := teams.Get(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if team.CaptainPlayerID.Valid {
+		t.Fatalf("expected captain cleared after removal, got %+v", team.CaptainPlayerID)
+	}
+}
+
+func TestDeletePlayerOrphansUserLogin(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	pm := &models.PlayerModel{DB: db}
+	playerService := PlayerService{PlayerModel: pm, DB: db}
+	users := &models.UserModel{DB: db}
+
+	// fk_users_player would block deletion if the linked login weren't
+	// unlinked first.
+	playerID, err := playerService.AddPlayer(1, &PlayerForm{FirstName: "Has", LastName: "ALogin"}, "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, err := users.Insert("has-a-login@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := users.SetPlayerID(userID, playerID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := playerService.DeletePlayer(playerID, "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	user, err := users.GetUser(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.PlayerID.Valid {
+		t.Fatalf("expected user's playerID to be cleared, got %v", user.PlayerID)
+	}
+}
+
+func TestDeletePlayerRemovesJoinRequests(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	pm := &models.PlayerModel{DB: db}
+	playerService := PlayerService{PlayerModel: pm, DB: db}
+	jrm := &models.JoinRequestModel{DB: db}
+	joinRequestService := JoinRequestService{JoinRequestModel: jrm, DB: db}
+
+	// An unaffiliated player with a resolved (approved) join-request history
+	// — fk_tjr_player would block deletion if these rows weren't cleaned up.
+	playerID, err := pm.Insert(&models.Player{FirstName: "Had", LastName: "Requested"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := joinRequestService.RequestToJoin(playerID, 1, "had-requested@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	jr, err := jrm.GetPendingByPlayerAndLeague(playerID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := joinRequestService.Approve(jr.ID, 1, "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := playerService.DeletePlayer(playerID, "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pm.Get(playerID); err != models.ErrNoRecord {
+		t.Fatalf("expected player to be deleted, got %v", err)
+	}
+}
+
 func TestDeletePlayerClearsCaptaincy(t *testing.T) {
 	db := models.NewTestDB(t)
 
@@ -148,5 +281,75 @@ func TestDeletePlayerClearsCaptaincy(t *testing.T) {
 	}
 	if team.CaptainPlayerID.Valid {
 		t.Fatalf("expected captain cleared after delete, got %+v", team.CaptainPlayerID)
+	}
+}
+
+func TestDeletePlayerRemovesLeagueAdminRoles(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	players := &models.PlayerModel{DB: db}
+	playerService := PlayerService{PlayerModel: players, DB: db}
+	lam := &models.LeagueAdminModel{DB: db}
+
+	// fk_leagueadmins_player would block deletion if this row weren't
+	// cleaned up.
+	id, err := playerService.AddPlayer(1, &PlayerForm{FirstName: "League", LastName: "Admin"}, "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lam.AddAdmin(id, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := playerService.DeletePlayer(id, "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := players.Get(id); err != models.ErrNoRecord {
+		t.Fatalf("expected player to be deleted, got %v", err)
+	}
+}
+
+func TestDeletePlayerRemovesAllMemberships(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	players := &models.PlayerModel{DB: db}
+	playerService := PlayerService{PlayerModel: players, DB: db}
+	leagues := &models.LeagueModel{DB: db}
+	teams := &models.TeamModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+
+	secondLeagueID, err := leagues.Insert(&models.League{Name: "Second League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondTeamID, err := teams.Insert(&models.Team{LeagueID: secondLeagueID, Name: "Second Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// AddPlayer already adds a team-1 membership; add a second one so the
+	// player belongs to two teams before deletion.
+	id, err := playerService.AddPlayer(1, &PlayerForm{FirstName: "Multi", LastName: "Team"}, "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(id, secondTeamID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := playerService.DeletePlayer(id, "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	if isMember, err := tmm.IsMember(id, 1); err != nil {
+		t.Fatal(err)
+	} else if isMember {
+		t.Fatal("expected team 1 membership to be removed")
+	}
+	if isMember, err := tmm.IsMember(id, secondTeamID); err != nil {
+		t.Fatal(err)
+	} else if isMember {
+		t.Fatal("expected second team membership to be removed")
 	}
 }

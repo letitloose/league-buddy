@@ -12,6 +12,8 @@ type Team struct {
 	ID              int
 	LeagueID        int
 	Name            string
+	Motto           sql.NullString
+	EstablishedDate sql.NullTime
 	CaptainPlayerID sql.NullInt32
 	Created         time.Time
 }
@@ -20,10 +22,10 @@ type TeamModel struct {
 	DB *sql.DB
 }
 
-func (m *TeamModel) Insert(leagueID int, name string) (int, error) {
-	statement := `INSERT INTO teams (leagueID, name, created) VALUES (?, ?, UTC_TIMESTAMP())`
+func (m *TeamModel) Insert(team *Team) (int, error) {
+	statement := `INSERT INTO teams (leagueID, name, motto, establishedDate, created) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())`
 
-	result, err := m.DB.Exec(statement, leagueID, name)
+	result, err := m.DB.Exec(statement, team.LeagueID, team.Name, team.Motto, team.EstablishedDate)
 	if err != nil {
 		return 0, err
 	}
@@ -36,10 +38,10 @@ func (m *TeamModel) Insert(leagueID int, name string) (int, error) {
 }
 
 func (m *TeamModel) Get(id int) (*Team, error) {
-	stmt := `SELECT id, leagueID, name, captainPlayerID, created FROM teams WHERE id = ?`
+	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, created FROM teams WHERE id = ?`
 
 	team := &Team{}
-	err := m.DB.QueryRow(stmt, id).Scan(&team.ID, &team.LeagueID, &team.Name, &team.CaptainPlayerID, &team.Created)
+	err := m.DB.QueryRow(stmt, id).Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.Created)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -50,9 +52,9 @@ func (m *TeamModel) Get(id int) (*Team, error) {
 }
 
 func (m *TeamModel) Update(team *Team) error {
-	statement := `UPDATE teams SET leagueID = ?, name = ? WHERE id = ?`
+	statement := `UPDATE teams SET leagueID = ?, name = ?, motto = ?, establishedDate = ? WHERE id = ?`
 
-	_, err := m.DB.Exec(statement, team.LeagueID, team.Name, team.ID)
+	_, err := m.DB.Exec(statement, team.LeagueID, team.Name, team.Motto, team.EstablishedDate, team.ID)
 	return err
 }
 
@@ -73,7 +75,7 @@ func (m *TeamModel) Delete(id int) error {
 }
 
 func (m *TeamModel) GetByLeague(leagueID int) ([]*Team, error) {
-	stmt := `SELECT id, leagueID, name, captainPlayerID, created FROM teams WHERE leagueID = ? ORDER BY name ASC`
+	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, created FROM teams WHERE leagueID = ? ORDER BY name ASC`
 
 	rows, err := m.DB.Query(stmt, leagueID)
 	if err != nil {
@@ -84,7 +86,7 @@ func (m *TeamModel) GetByLeague(leagueID int) ([]*Team, error) {
 	teams := []*Team{}
 	for rows.Next() {
 		team := &Team{}
-		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.CaptainPlayerID, &team.Created)
+		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.Created)
 		if err != nil {
 			return nil, err
 		}

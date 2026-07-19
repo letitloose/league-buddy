@@ -11,14 +11,32 @@ import (
 	"github.com/letitloose/league-buddy/internal/services"
 )
 
+// teamBreadcrumbs returns the "Leagues / {League} / {Team}" trail shared by
+// every page scoped under a team. Pass teamIsCurrent true when the team
+// itself is the page being rendered, so its crumb is left unlinked.
+func (app *application) teamBreadcrumbs(team *models.Team, league *models.League, teamIsCurrent bool) []Breadcrumb {
+	teamURL := fmt.Sprintf("/team/%d", team.ID)
+	if teamIsCurrent {
+		teamURL = ""
+	}
+	return []Breadcrumb{
+		{Label: "Leagues", URL: "/league"},
+		{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)},
+		{Label: team.Name, URL: teamURL},
+	}
+}
+
 // teamViewData is the shape rendered by team-view.html: the team, its
-// league, the captain's name (blank if unassigned), and whether the current
-// user is allowed to request to join (active, has a player, currently on no
-// team at all).
+// league, the captain's name (blank if unassigned), whether the current
+// user may manage this team (admin or its captain), and whether they're
+// allowed to request to join (active, has a player, not already on a team
+// in this league).
 type teamViewData struct {
 	Team             *models.Team
 	League           *models.League
 	CaptainName      string
+	CanManage        bool
+	CanDelete        bool
 	CanRequestToJoin bool
 	Roster           []*models.Player
 }
@@ -49,15 +67,32 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	canRequestToJoin := app.isActive(r) && app.getPlayerID(r) > 0 && app.getTeamID(r) == 0
+	canManage := app.canManageTeam(r, team.ID)
+	canDelete := app.canDeleteTeam(r, team.ID)
 
-	var roster []*models.Player
-	if app.isAdmin(r) {
-		roster, err = app.playerService.GetByTeam(team.ID)
+	canRequestToJoin := false
+	if app.isActive(r) && app.getPlayerID(r) > 0 {
+		tmm := &models.TeamMemberModel{DB: app.playerService.DB}
+		isMember, err := tmm.IsMember(app.getPlayerID(r), team.ID)
 		if err != nil {
 			app.serverError(w, err)
 			return
 		}
+		hasTeamInLeague, err := tmm.HasTeamInLeague(app.getPlayerID(r), team.LeagueID)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		canRequestToJoin = !isMember && !hasTeamInLeague
+	}
+
+	// The roster is now shown inline on the team page to every active
+	// viewer, not just managers (it also feeds the Set Captain <select>
+	// below for managers).
+	roster, err := app.playerService.GetByTeam(team.ID)
+	if err != nil {
+		app.serverError(w, err)
+		return
 	}
 
 	data := app.newTemplateData(r)
@@ -65,24 +100,61 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		Team:             team,
 		League:           league,
 		CaptainName:      captainName,
+		CanManage:        canManage,
+		CanDelete:        canDelete,
 		CanRequestToJoin: canRequestToJoin,
 		Roster:           roster,
 	}
+	data.Breadcrumbs = app.teamBreadcrumbs(team, league, true)
 
 	app.render(w, http.StatusOK, "team-view.html", data)
 }
 
+// teamFormBreadcrumbs is the shared "Leagues / Add Team" trail for the
+// create form and its validation-error re-render.
+func teamFormBreadcrumbs() []Breadcrumb {
+	return []Breadcrumb{
+		{Label: "Leagues", URL: "/league"},
+		{Label: "Add Team"},
+	}
+}
+
+// filterManageableLeagues returns leagues unchanged for admins, or narrowed
+// down to just the leagues the current request's user administers otherwise
+// — used so the team-create league dropdown never offers a league admin a
+// league they don't actually manage.
+func (app *application) filterManageableLeagues(r *http.Request, leagues []*models.League) []*models.League {
+	if app.isAdmin(r) {
+		return leagues
+	}
+
+	manageable := []*models.League{}
+	for _, league := range leagues {
+		if app.isLeagueAdminOfLeague(r, league.ID) {
+			manageable = append(manageable, league)
+		}
+	}
+	return manageable
+}
+
 func (app *application) teamForm(w http.ResponseWriter, r *http.Request) {
+	if !app.isAdmin(r) && len(app.getLeagueAdminLeagueIDs(r)) == 0 {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
 	lm := &models.LeagueModel{DB: app.playerService.DB}
 	leagues, err := lm.List()
 	if err != nil {
 		app.serverError(w, err)
 		return
 	}
+	leagues = app.filterManageableLeagues(r, leagues)
 
 	data := app.newTemplateData(r)
 	data.Form = services.TeamForm{}
 	data.SupportData = leagues
+	data.Breadcrumbs = teamFormBreadcrumbs()
 
 	app.render(w, http.StatusOK, "team-create.html", data)
 }
@@ -95,9 +167,17 @@ func (app *application) teamCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	leagueID, _ := strconv.Atoi(r.PostForm.Get("leagueID"))
+
+	if !app.canManageLeague(r, leagueID) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
 	form := &services.TeamForm{
-		LeagueID: leagueID,
-		Name:     r.PostForm.Get("name"),
+		LeagueID:        leagueID,
+		Name:            r.PostForm.Get("name"),
+		Motto:           r.PostForm.Get("motto"),
+		EstablishedDate: r.PostForm.Get("establisheddate"),
 	}
 
 	id, err := app.teamService.CreateTeam(form, app.getUserName(r))
@@ -111,7 +191,8 @@ func (app *application) teamCreate(w http.ResponseWriter, r *http.Request) {
 			}
 			data := app.newTemplateData(r)
 			data.Form = form
-			data.SupportData = leagues
+			data.SupportData = app.filterManageableLeagues(r, leagues)
+			data.Breadcrumbs = teamFormBreadcrumbs()
 			app.render(w, http.StatusUnprocessableEntity, "team-create.html", data)
 			return
 		}
@@ -126,7 +207,7 @@ func (app *application) teamCreate(w http.ResponseWriter, r *http.Request) {
 func (app *application) teamUpdate(w http.ResponseWriter, r *http.Request) {
 	params := httprouter.ParamsFromContext(r.Context())
 
-	id, err := strconv.Atoi(params.ByName("id"))
+	id, err := strconv.Atoi(params.ByName("teamID"))
 	if err != nil || id < 1 {
 		app.notFound(w)
 		return
@@ -150,9 +231,26 @@ func (app *application) teamUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	league, err := lm.Get(team.LeagueID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	form := &services.TeamForm{ID: team.ID, LeagueID: team.LeagueID, Name: team.Name, Motto: team.Motto.String}
+	if team.EstablishedDate.Valid {
+		form.EstablishedDate = pickerDate(team.EstablishedDate.Time)
+	}
+
 	data := app.newTemplateData(r)
-	data.Form = &services.TeamForm{ID: team.ID, LeagueID: team.LeagueID, Name: team.Name}
+	data.Form = form
+	// The leagueID <select> stays populated with every league (not just the
+	// leagues this viewer administers) so a captain — who can edit their
+	// team's info but not reassign it to another league — still sees a
+	// dropdown containing their own team's current league. Reassignment to a
+	// league they don't manage is rejected server-side in teamUpdatePost.
 	data.SupportData = leagues
+	data.Breadcrumbs = append(app.teamBreadcrumbs(team, league, false), Breadcrumb{Label: "Edit"})
 
 	app.render(w, http.StatusOK, "team-update.html", data)
 }
@@ -170,11 +268,37 @@ func (app *application) teamUpdatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !app.canManageTeam(r, id) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
 	leagueID, _ := strconv.Atoi(r.PostForm.Get("leagueID"))
+
+	// Reassigning a team to a different league is beyond what a plain
+	// captain or a league admin of only the team's current league can do —
+	// clamp back to the team's existing league rather than rejecting the
+	// whole edit, so captains editing motto/name aren't blocked by this.
+	if !app.canManageLeague(r, leagueID) {
+		tm := &models.TeamModel{DB: app.playerService.DB}
+		existing, terr := tm.Get(id)
+		if terr != nil {
+			if errors.Is(terr, models.ErrNoRecord) {
+				app.notFound(w)
+			} else {
+				app.serverError(w, terr)
+			}
+			return
+		}
+		leagueID = existing.LeagueID
+	}
+
 	form := &services.TeamForm{
-		ID:       id,
-		LeagueID: leagueID,
-		Name:     r.PostForm.Get("name"),
+		ID:              id,
+		LeagueID:        leagueID,
+		Name:            r.PostForm.Get("name"),
+		Motto:           r.PostForm.Get("motto"),
+		EstablishedDate: r.PostForm.Get("establisheddate"),
 	}
 
 	err = app.teamService.UpdateTeam(form, app.getUserName(r))
@@ -189,6 +313,18 @@ func (app *application) teamUpdatePost(w http.ResponseWriter, r *http.Request) {
 			data := app.newTemplateData(r)
 			data.Form = form
 			data.SupportData = leagues
+			breadcrumbs := []Breadcrumb{{Label: "Leagues", URL: "/league"}}
+			for _, league := range leagues {
+				if league.ID == form.LeagueID {
+					breadcrumbs = append(breadcrumbs, Breadcrumb{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)})
+					break
+				}
+			}
+			breadcrumbs = append(breadcrumbs,
+				Breadcrumb{Label: form.Name, URL: fmt.Sprintf("/team/%d", form.ID)},
+				Breadcrumb{Label: "Edit"},
+			)
+			data.Breadcrumbs = breadcrumbs
 			app.render(w, http.StatusUnprocessableEntity, "team-update.html", data)
 			return
 		}
@@ -203,7 +339,7 @@ func (app *application) teamUpdatePost(w http.ResponseWriter, r *http.Request) {
 func (app *application) teamDelete(w http.ResponseWriter, r *http.Request) {
 	params := httprouter.ParamsFromContext(r.Context())
 
-	id, err := strconv.Atoi(params.ByName("id"))
+	id, err := strconv.Atoi(params.ByName("teamID"))
 	if err != nil || id < 1 {
 		http.NotFound(w, r)
 		return
@@ -224,7 +360,7 @@ func (app *application) teamDelete(w http.ResponseWriter, r *http.Request) {
 
 // teamSetCaptain is a plain form POST (teamID, playerID — 0 clears) rather
 // than the JSON+fetch toggle pattern used elsewhere, since it's a one-off
-// admin action, not a per-row checkbox.
+// admin/captain/league-admin action, not a per-row checkbox.
 func (app *application) teamSetCaptain(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseForm()
 	if err != nil {
@@ -235,6 +371,11 @@ func (app *application) teamSetCaptain(w http.ResponseWriter, r *http.Request) {
 	teamID, err := strconv.Atoi(r.PostForm.Get("teamID"))
 	if err != nil || teamID < 1 {
 		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	if !app.canManageTeam(r, teamID) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
@@ -285,8 +426,26 @@ func (app *application) joinRequestSubmit(w http.ResponseWriter, r *http.Request
 	http.Redirect(w, r, fmt.Sprintf("/team/%d", team.ID), http.StatusSeeOther)
 }
 
+// teamActionBreadcrumbs returns "Leagues / {League} / {Team}" plus trailing
+// crumbs for team-manager pages that sit directly under the team, not the
+// roster (invite, join requests).
+func (app *application) teamActionBreadcrumbs(w http.ResponseWriter, team *models.Team, extra ...Breadcrumb) ([]Breadcrumb, bool) {
+	lm := &models.LeagueModel{DB: app.playerService.DB}
+	league, err := lm.Get(team.LeagueID)
+	if err != nil {
+		app.serverError(w, err)
+		return nil, false
+	}
+	return append(app.teamBreadcrumbs(team, league, false), extra...), true
+}
+
 func (app *application) teamInviteForm(w http.ResponseWriter, r *http.Request) {
 	team, ok := app.getRouteTeam(w, r)
+	if !ok {
+		return
+	}
+
+	breadcrumbs, ok := app.teamActionBreadcrumbs(w, team, Breadcrumb{Label: "Invite Players"})
 	if !ok {
 		return
 	}
@@ -294,6 +453,7 @@ func (app *application) teamInviteForm(w http.ResponseWriter, r *http.Request) {
 	data := app.newTemplateData(r)
 	data.Data = team
 	data.Form = services.InviteForm{}
+	data.Breadcrumbs = breadcrumbs
 
 	app.render(w, http.StatusOK, "team-invite.html", data)
 }
@@ -319,9 +479,14 @@ func (app *application) teamInviteSend(w http.ResponseWriter, r *http.Request) {
 	invited, err := app.inviteService.SendInvites(team.ID, loggedInUserID, app.getUserName(r), form)
 	if err != nil {
 		if errors.Is(err, models.ErrBadData) {
+			breadcrumbs, ok := app.teamActionBreadcrumbs(w, team, Breadcrumb{Label: "Invite Players"})
+			if !ok {
+				return
+			}
 			data := app.newTemplateData(r)
 			data.Data = team
 			data.Form = form
+			data.Breadcrumbs = breadcrumbs
 			app.render(w, http.StatusUnprocessableEntity, "team-invite.html", data)
 			return
 		}
@@ -353,8 +518,14 @@ func (app *application) joinRequestList(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	breadcrumbs, ok := app.teamActionBreadcrumbs(w, team, Breadcrumb{Label: "Join Requests"})
+	if !ok {
+		return
+	}
+
 	data := app.newTemplateData(r)
 	data.Data = &joinRequestListData{Team: team, Requests: requests}
+	data.Breadcrumbs = breadcrumbs
 
 	app.render(w, http.StatusOK, "team-join-requests.html", data)
 }

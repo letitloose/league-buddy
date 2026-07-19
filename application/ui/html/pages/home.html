@@ -4,7 +4,29 @@
 <div class="text-center py-8">
     <h2>Welcome to League Buddy</h2>
     {{if .IsActive}}
-        <p>Manage your team's roster from the <a href="/player">Roster</a> page.</p>
+        {{if .Data}}
+            <div class="max-w-3xl mx-auto px-4 pt-2 text-left">
+                <h3 class="px-0">My Teams</h3>
+                <div class="grid gap-4 sm:grid-cols-2">
+                    {{range .Data}}
+                    <a href="/team/{{.Team.ID}}" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-green-500 transition p-5">
+                        <p class="text-xs uppercase tracking-wide text-gray-500 mb-1">{{.League.Name}}</p>
+                        <h4 class="text-slate-800 p-0 mb-2">{{.Team.Name}}</h4>
+                        {{with .Team.Motto.String}}<p class="text-sm italic text-gray-600 mb-1">&ldquo;{{.}}&rdquo;</p>{{end}}
+                        <p class="text-sm text-gray-600 mb-1">Captain: {{if .CaptainName}}{{.CaptainName}}{{else}}Unassigned{{end}}</p>
+                        <p class="text-sm text-gray-600 mb-1">{{.RosterCount}} player{{if ne .RosterCount 1}}s{{end}} on the roster</p>
+                        {{if .Team.EstablishedDate.Valid}}
+                            <p class="text-xs text-gray-400 mt-3">Est. {{humanDate .Team.EstablishedDate.Time}}</p>
+                        {{else}}
+                            <p class="text-xs text-gray-400 mt-3">Est. {{humanDate .Team.Created}}</p>
+                        {{end}}
+                    </a>
+                    {{end}}
+                </div>
+            </div>
+        {{else}}
+            <p>You're not on a team yet. <a href="/league">Browse leagues</a> to find one and request to join.</p>
+        {{end}}
     {{else if .IsAuthenticated}}
         <p>Your account is pending activation. Please check your email.</p>
     {{else}}

@@ -33,4 +33,12 @@
             <p class='error-message'>{{.}}</p>
         {{end}}
     </div>
+    <div class="mb-4">
+        <label class="field-label">Motto</label>
+        <input class="form-field" type='text' name='motto' value='{{.Form.Motto}}'>
+    </div>
+    <div class="mb-4">
+        <label class="field-label">Established</label>
+        <input class="form-field" type='date' name='establisheddate' value='{{.Form.EstablishedDate}}'>
+    </div>
 {{end}}

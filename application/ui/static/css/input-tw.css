@@ -1,20 +1,31 @@
+@font-face {
+  font-family: 'SourceCodePro';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/static/fonts/SourceCodePro-SemiBold.woff2') format('woff2');
+}
+
 @tailwind base;
 
 @layer base {
   a {
-    @apply underline text-blue-700;
+    @apply underline text-green-600;
   }
 
   h2 {
     @apply text-2xl font-semibold p-4;
+    font-family: 'SourceCodePro', ui-monospace, Menlo, Consolas, monospace;
   }
 
   h3 {
     @apply text-xl font-bold p-3;
+    font-family: 'SourceCodePro', ui-monospace, Menlo, Consolas, monospace;
   }
 
   h4 {
     @apply text-lg font-bold p-2;
+    font-family: 'SourceCodePro', ui-monospace, Menlo, Consolas, monospace;
   }
 }
 
@@ -25,7 +36,7 @@
 @layer components {
 
   th {
-    @apply px-4 py-3 text-slate-700 uppercase bg-blue-200;
+    @apply px-4 py-3 text-slate-700 uppercase bg-gray-200;
   }
 
   td {
@@ -44,7 +55,7 @@
     @apply shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight;
   }
   .form-field:focus {
-    @apply outline-none;
+    @apply outline-none ring-2 ring-green-500;
   }
 
   .error-border {
@@ -91,7 +102,7 @@
   }
 
   /* Change color of dropdown links on hover */
-  .dropdown-content a:hover {background-color: #f1f1f1}
+  .dropdown-content a:hover {background-color: #f0fdf4}
 
   /* Show the dropdown menu on hover */
   .dropdown:hover .dropdown-content {
@@ -99,14 +110,38 @@
   }
 
   .btn {
-    @apply inline-block text-white bg-blue-700 hover:bg-blue-800 font-medium rounded-sm text-sm px-5 py-2 m-2 no-underline;
+    @apply inline-block text-white bg-green-600 hover:bg-green-700 font-medium rounded-xl text-sm px-5 py-2 m-2 no-underline;
   }
 
   .btn-sm {
-    @apply inline-block text-white bg-blue-700 hover:bg-blue-800 font-medium rounded-sm text-sm px-3 py-1 no-underline;
+    @apply inline-block text-white bg-green-600 hover:bg-green-700 font-medium rounded-xl text-sm px-3 py-1 no-underline;
+  }
+
+  .btn-secondary {
+    @apply inline-block text-slate-800 bg-gray-300 hover:bg-gray-400 font-medium rounded-xl text-sm px-5 py-2 m-2 no-underline;
   }
 
   .result-header {
     cursor: pointer;
+  }
+
+  .brand-font {
+    font-family: 'SourceCodePro', ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  .breadcrumbs {
+    @apply text-sm text-gray-500 px-4 pt-3;
+  }
+
+  .breadcrumbs a {
+    @apply text-gray-500 no-underline hover:text-green-600;
+  }
+
+  .breadcrumb-current {
+    @apply text-gray-700 font-medium;
+  }
+
+  .breadcrumb-sep {
+    @apply mx-2 text-gray-400;
   }
 }

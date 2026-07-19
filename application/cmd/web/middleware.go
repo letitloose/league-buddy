@@ -86,8 +86,8 @@ func (app *application) requireAdmin(next http.Handler) http.Handler {
 	})
 }
 
-// requireTeamManager allows Admins through unconditionally, and captains
-// through only when they're captain of the :teamID in the current route.
+// requireTeamManager allows Admins through unconditionally, and captains or
+// league admins through when they manage the :teamID in the current route.
 // Chain after app.authenticate + app.requireActive.
 func (app *application) requireTeamManager(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +98,32 @@ func (app *application) requireTeamManager(next http.Handler) http.Handler {
 			return
 		}
 
-		if !app.isAdmin(r) && !(app.isCaptain(r) && app.getTeamID(r) == teamID) {
+		if !app.canManageTeam(r, teamID) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+
+		w.Header().Add("Cache-Control", "no-store")
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requireLeagueManager allows Admins through unconditionally, and league
+// admins through when they administer the league that owns the :teamID in
+// the current route. Unlike requireTeamManager, a plain team captain is not
+// enough — used only for team deletion. Chain after app.authenticate +
+// app.requireActive.
+func (app *application) requireLeagueManager(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		params := httprouter.ParamsFromContext(r.Context())
+		teamID, err := strconv.Atoi(params.ByName("teamID"))
+		if err != nil || teamID < 1 {
+			app.notFound(w)
+			return
+		}
+
+		if !app.canDeleteTeam(r, teamID) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -164,12 +189,20 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 			ctx = context.WithValue(r.Context(), playerIDContextKey, int(ac.PlayerID.Int32))
 			r = r.WithContext(ctx)
 		}
-		if ac.TeamID.Valid {
-			ctx = context.WithValue(r.Context(), teamIDContextKey, int(ac.TeamID.Int32))
+		if len(ac.TeamIDs) > 0 {
+			ctx = context.WithValue(r.Context(), teamIDsContextKey, ac.TeamIDs)
 			r = r.WithContext(ctx)
 		}
-		if ac.IsCaptain {
-			ctx = context.WithValue(r.Context(), isCaptainContextKey, true)
+		if len(ac.CaptainTeamIDs) > 0 {
+			ctx = context.WithValue(r.Context(), captainTeamIDsContextKey, ac.CaptainTeamIDs)
+			r = r.WithContext(ctx)
+		}
+		if len(ac.LeagueAdminLeagueIDs) > 0 {
+			ctx = context.WithValue(r.Context(), leagueAdminLeagueIDsContextKey, ac.LeagueAdminLeagueIDs)
+			r = r.WithContext(ctx)
+		}
+		if len(ac.LeagueAdminTeamIDs) > 0 {
+			ctx = context.WithValue(r.Context(), leagueAdminTeamIDsContextKey, ac.LeagueAdminTeamIDs)
 			r = r.WithContext(ctx)
 		}
 

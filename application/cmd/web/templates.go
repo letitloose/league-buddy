@@ -9,6 +9,27 @@ import (
 	"github.com/letitloose/league-buddy/ui"
 )
 
+// Breadcrumb is one entry in a page's breadcrumb trail. URL is empty for the
+// current page, which templates render as plain text instead of a link.
+type Breadcrumb struct {
+	Label string
+	URL   string
+}
+
+// NavTeamInfo is the lightweight {ID, Name} shape powering the nav's "My
+// Teams" dropdown — populated once per request in newTemplateData.
+type NavTeamInfo struct {
+	ID   int
+	Name string
+}
+
+// NavLeagueInfo is the same shape as NavTeamInfo, powering the nav's "My
+// Leagues (Admin)" dropdown.
+type NavLeagueInfo struct {
+	ID   int
+	Name string
+}
+
 type templateData struct {
 	CurrentYear     int
 	LastUpdate      string
@@ -21,9 +42,10 @@ type templateData struct {
 	IsAdmin         bool
 	UserName        string
 	PlayerID        int
-	TeamID          int
-	IsCaptain       bool
+	MyTeams         []NavTeamInfo
+	MyAdminLeagues  []NavLeagueInfo
 	CSRFToken       string
+	Breadcrumbs     []Breadcrumb
 }
 
 func pickerDate(t time.Time) string {
@@ -73,6 +95,7 @@ func getTemplateSet(page string) (*template.Template, error) {
 	patterns := []string{
 		"./ui/html/base.html",
 		"./ui/html/partials/nav.html",
+		"./ui/html/partials/breadcrumbs.html",
 		"./ui/html/partials/player-form-fields.html",
 		"./ui/html/partials/team-form-fields.html",
 		"./ui/html/partials/league-form-fields.html",

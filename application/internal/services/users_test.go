@@ -77,7 +77,6 @@ func TestActivateUserLinksExistingPlayerByEmail(t *testing.T) {
 
 	pm := &models.PlayerModel{DB: db}
 	playerID, err := pm.Insert(&models.Player{
-		TeamID:    sql.NullInt32{Int32: 1, Valid: true},
 		FirstName: "Pre",
 		LastName:  "Added",
 		Email:     sql.NullString{String: "pre-added@example.com", Valid: true},
@@ -115,7 +114,7 @@ func TestActivateUserWithInviteAutoJoinsTeam(t *testing.T) {
 	db := models.NewTestDB(t)
 
 	tm := &models.TeamModel{DB: db}
-	secondTeamID, err := tm.Insert(1, "Invited Team")
+	secondTeamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Invited Team"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,13 +179,13 @@ func TestActivateUserWithInviteAutoJoinsTeam(t *testing.T) {
 		t.Fatal("expected pendingInviteID to be cleared after activation")
 	}
 
-	pm := &models.PlayerModel{DB: db}
-	player, err := pm.Get(int(activatedUser.PlayerID.Int32))
+	tmm := &models.TeamMemberModel{DB: db}
+	isMember, err := tmm.IsMember(int(activatedUser.PlayerID.Int32), secondTeamID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !player.TeamID.Valid || int(player.TeamID.Int32) != secondTeamID {
-		t.Fatalf("expected player auto-joined to team %d, got %v", secondTeamID, player.TeamID)
+	if !isMember {
+		t.Fatalf("expected player auto-joined to team %d", secondTeamID)
 	}
 
 	invite, err := im.Get(inviteID)
@@ -195,6 +194,104 @@ func TestActivateUserWithInviteAutoJoinsTeam(t *testing.T) {
 	}
 	if !invite.UsedAt.Valid {
 		t.Fatal("expected invite to be marked used")
+	}
+}
+
+func TestActivateUserWithInviteSkipsAutoJoinOnLeagueConflict(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	pm := &models.PlayerModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+	tm := &models.TeamModel{DB: db}
+	users := &models.UserModel{DB: db}
+
+	// An existing (unlinked) player already on team 1, in league 1.
+	existingPlayerID, err := pm.Insert(&models.Player{
+		FirstName: "Already",
+		LastName:  "OnATeam",
+		Email:     sql.NullString{String: "conflict@example.com", Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(existingPlayerID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	// A second team, same league (1), that they're about to be invited to.
+	otherTeamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Conflicting Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	creator, err := users.GetUserByEmail("player@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	im := &models.InviteModel{DB: db}
+	inviteID, err := im.Insert(&models.Invite{
+		Token:           "conflict-invite-token",
+		TeamID:          otherTeamID,
+		Email:           "conflict@example.com",
+		CreatedByUserID: creator.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	userService := UserService{UserModel: users}
+	form := &UserForm{
+		Email:           "conflict@example.com",
+		Password:        "validpassword123",
+		ConfirmPassword: "validpassword123",
+		InviteToken:     "conflict-invite-token",
+	}
+	if err := userService.InsertUser(form); err != nil {
+		t.Fatal(err)
+	}
+
+	hash, err := userService.GetVerificationHashByEmail("conflict@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := userService.ActivateUser(hash); err != nil {
+		t.Fatal(err)
+	}
+
+	// The user should be linked to the existing player (by email)...
+	user, err := users.GetUserByEmail("conflict@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !user.PlayerID.Valid || int(user.PlayerID.Int32) != existingPlayerID {
+		t.Fatalf("expected link to existing player %d, got %v", existingPlayerID, user.PlayerID)
+	}
+
+	// ...but NOT auto-joined to the conflicting team...
+	isMember, err := tmm.IsMember(existingPlayerID, otherTeamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isMember {
+		t.Fatal("expected auto-join to be skipped due to league conflict")
+	}
+
+	// ...their original team-1 membership stays untouched...
+	isMember, err = tmm.IsMember(existingPlayerID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isMember {
+		t.Fatal("expected original team membership to be unaffected")
+	}
+
+	// ...and the invite is still consumed, not left dangling.
+	invite, err := im.Get(inviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !invite.UsedAt.Valid {
+		t.Fatal("expected invite to be marked used despite the skipped auto-join")
 	}
 }
 

@@ -3,6 +3,8 @@
 -- recreate them from scratch at the start of a test run.
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS teamJoinRequests;
+DROP TABLE IF EXISTS teamMembers;
+DROP TABLE IF EXISTS leagueAdmins;
 DROP TABLE IF EXISTS invites;
 DROP TABLE IF EXISTS auditLog;
 DROP TABLE IF EXISTS userRole;

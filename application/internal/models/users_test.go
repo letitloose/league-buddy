@@ -104,11 +104,85 @@ func TestGetAuthContext(t *testing.T) {
 	}
 }
 
+func TestGetAuthContextWithTeams(t *testing.T) {
+	db := NewTestDB(t)
+
+	pm := PlayerModel{DB: db}
+	tmm := TeamMemberModel{DB: db}
+	tm := TeamModel{DB: db}
+	um := UserModel{DB: db}
+
+	playerID, err := pm.Insert(&Player{FirstName: "Cap", LastName: "Tain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := tm.SetCaptain(1, sql.NullInt32{Int32: int32(playerID), Valid: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	userID, err := um.Insert("captain-auth@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetPlayerID(userID, playerID); err != nil {
+		t.Fatal(err)
+	}
+
+	ac, err := um.GetAuthContext(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ac.TeamIDs) != 1 || ac.TeamIDs[0] != 1 {
+		t.Fatalf("expected TeamIDs [1], got %v", ac.TeamIDs)
+	}
+	if len(ac.CaptainTeamIDs) != 1 || ac.CaptainTeamIDs[0] != 1 {
+		t.Fatalf("expected CaptainTeamIDs [1], got %v", ac.CaptainTeamIDs)
+	}
+}
+
+func TestGetAuthContextWithLeagueAdmin(t *testing.T) {
+	db := NewTestDB(t)
+
+	pm := PlayerModel{DB: db}
+	lam := LeagueAdminModel{DB: db}
+	um := UserModel{DB: db}
+
+	playerID, err := pm.Insert(&Player{FirstName: "League", LastName: "Admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lam.AddAdmin(playerID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	userID, err := um.Insert("league-admin-auth@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetPlayerID(userID, playerID); err != nil {
+		t.Fatal(err)
+	}
+
+	ac, err := um.GetAuthContext(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ac.LeagueAdminLeagueIDs) != 1 || ac.LeagueAdminLeagueIDs[0] != 1 {
+		t.Fatalf("expected LeagueAdminLeagueIDs [1], got %v", ac.LeagueAdminLeagueIDs)
+	}
+	if len(ac.LeagueAdminTeamIDs) != 1 || ac.LeagueAdminTeamIDs[0] != 1 {
+		t.Fatalf("expected LeagueAdminTeamIDs [1] (seeded team 1 is in league 1), got %v", ac.LeagueAdminTeamIDs)
+	}
+}
+
 func TestSetPlayerID(t *testing.T) {
 	db := NewTestDB(t)
 
 	pm := PlayerModel{DB: db}
-	playerID, err := pm.Insert(&Player{TeamID: sql.NullInt32{Int32: 1, Valid: true}, FirstName: "Lou", LastName: "Garwood"})
+	playerID, err := pm.Insert(&Player{FirstName: "Lou", LastName: "Garwood"})
 	if err != nil {
 		t.Fatal(err)
 	}

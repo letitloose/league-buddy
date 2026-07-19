@@ -3,6 +3,8 @@
 -- test, in testHelpers.go).
 SET FOREIGN_KEY_CHECKS = 0;
 TRUNCATE TABLE teamJoinRequests;
+TRUNCATE TABLE teamMembers;
+TRUNCATE TABLE leagueAdmins;
 TRUNCATE TABLE invites;
 TRUNCATE TABLE auditLog;
 TRUNCATE TABLE sessions;

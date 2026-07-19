@@ -232,6 +232,11 @@ func (app *application) reset() error {
 
 	leagueBuddyUser := os.Getenv("LEAGUEBUDDYUSER")
 	leagueBuddyPassword := os.Getenv("LEAGUEBUDDYPASSWORD")
+
+	if err := app.seedAdminProfile(leagueBuddyUser); err != nil {
+		app.errorLog.Println(err)
+	}
+
 	uf := &services.UserForm{Email: leagueBuddyUser, Password: leagueBuddyPassword, ConfirmPassword: leagueBuddyPassword}
 	err = app.userService.InsertUser(uf)
 	if err != nil {
@@ -258,5 +263,118 @@ func (app *application) reset() error {
 		app.errorLog.Println(err)
 	}
 
+	if err := app.seedTestUsers(); err != nil {
+		app.errorLog.Println(err)
+	}
+
 	return nil
+}
+
+// seedTestUsers creates one test login per non-system-admin role (league
+// admin, team captain, plain roster player) against the seeded "CapReg over
+// 30" league (id 1) / "Colonial FC" team (id 1), so all four tiers can be
+// logged into directly after a reset. Names are role-reflective so they're
+// recognizable in the UI.
+func (app *application) seedTestUsers() error {
+	if err := app.seedRoleUser("League", "Admin", os.Getenv("LEAGUEBUDDY_LEAGUEADMIN_EMAIL"), os.Getenv("LEAGUEBUDDY_LEAGUEADMIN_PASSWORD"),
+		func(playerID int) error {
+			return (&models.LeagueAdminModel{DB: app.playerService.DB}).AddAdmin(playerID, 1)
+		}); err != nil {
+		return err
+	}
+
+	if err := app.seedRoleUser("Team", "Captain", os.Getenv("LEAGUEBUDDY_CAPTAIN_EMAIL"), os.Getenv("LEAGUEBUDDY_CAPTAIN_PASSWORD"),
+		func(playerID int) error {
+			tmm := &models.TeamMemberModel{DB: app.playerService.DB}
+			if err := tmm.AddMembership(playerID, 1); err != nil {
+				return err
+			}
+			return (&models.TeamModel{DB: app.playerService.DB}).SetCaptain(1, sql.NullInt32{Int32: int32(playerID), Valid: true})
+		}); err != nil {
+		return err
+	}
+
+	return app.seedRoleUser("Roster", "Player", os.Getenv("LEAGUEBUDDY_PLAYER_EMAIL"), os.Getenv("LEAGUEBUDDY_PLAYER_PASSWORD"),
+		func(playerID int) error {
+			return (&models.TeamMemberModel{DB: app.playerService.DB}).AddMembership(playerID, 1)
+		})
+}
+
+// seedRoleUser creates and activates a test login for one role, then calls
+// attach with the resulting playerID for the role-specific bit (league
+// admin, captain, roster membership). No-ops if email is unset, the same
+// optional/backward-compatible guard seedAdminProfile uses for
+// LEAGUEBUDDYFIRSTNAME. Follows the same pre-create-player-then-activate
+// pattern seedAdminProfile already relies on: activation's linkOrCreatePlayer
+// finds the pre-seeded player by email and links it automatically.
+func (app *application) seedRoleUser(firstName, lastName, email, password string, attach func(playerID int) error) error {
+	if email == "" {
+		return nil
+	}
+
+	pm := &models.PlayerModel{DB: app.playerService.DB}
+	playerID, err := pm.Insert(&models.Player{
+		FirstName: firstName,
+		LastName:  lastName,
+		Email:     sql.NullString{String: email, Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+
+	uf := &services.UserForm{Email: email, Password: password, ConfirmPassword: password}
+	if err := app.userService.InsertUser(uf); err != nil {
+		return err
+	}
+
+	vhash, err := app.userService.GetVerificationHashByEmail(email)
+	if err != nil {
+		return err
+	}
+
+	if err := app.userService.ActivateUser(vhash); err != nil {
+		return err
+	}
+
+	return attach(playerID)
+}
+
+// seedAdminProfile pre-creates a real player record (name, DOB, phone,
+// address) for the bootstrap admin account from LEAGUEBUDDY* env vars, so
+// that when the admin user is activated below, UserService.linkOrCreatePlayer
+// finds this row via its "existing unlinked player with a matching email"
+// branch and links to it — instead of falling back to a blank placeholder
+// player. A no-op if LEAGUEBUDDYFIRSTNAME isn't set, so this stays optional
+// and backward-compatible with environments that don't set it.
+func (app *application) seedAdminProfile(email string) error {
+	firstName := os.Getenv("LEAGUEBUDDYFIRSTNAME")
+	if firstName == "" {
+		return nil
+	}
+
+	am := &models.AddressModel{DB: app.playerService.DB}
+	addressID, err := am.Insert(&models.Address{
+		Address1:      sql.NullString{String: os.Getenv("LEAGUEBUDDYADDRESS1"), Valid: true},
+		City:          sql.NullString{String: os.Getenv("LEAGUEBUDDYCITY"), Valid: true},
+		StateProvince: sql.NullString{String: os.Getenv("LEAGUEBUDDYSTATE"), Valid: true},
+		ZipCode:       sql.NullString{String: os.Getenv("LEAGUEBUDDYZIP"), Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+
+	player := &models.Player{
+		FirstName:   firstName,
+		LastName:    os.Getenv("LEAGUEBUDDYLASTNAME"),
+		Email:       sql.NullString{String: email, Valid: true},
+		PhoneNumber: sql.NullString{String: os.Getenv("LEAGUEBUDDYPHONE"), Valid: true},
+		AddressID:   sql.NullInt32{Int32: int32(addressID), Valid: true},
+	}
+	if dob, err := time.Parse("2006-01-02", os.Getenv("LEAGUEBUDDYDOB")); err == nil {
+		player.DateOfBirth = sql.NullTime{Time: dob, Valid: true}
+	}
+
+	pm := &models.PlayerModel{DB: app.playerService.DB}
+	_, err = pm.Insert(player)
+	return err
 }

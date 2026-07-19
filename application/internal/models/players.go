@@ -3,8 +3,6 @@ package models
 import (
 	"database/sql"
 	"errors"
-	"fmt"
-	"strings"
 	"time"
 )
 
@@ -17,7 +15,6 @@ const (
 
 type Player struct {
 	ID          int
-	TeamID      sql.NullInt32
 	FirstName   string
 	LastName    string
 	DateOfBirth sql.NullTime
@@ -33,10 +30,10 @@ type PlayerModel struct {
 
 func (m *PlayerModel) Insert(player *Player) (int, error) {
 
-	statement := `INSERT INTO players (teamID, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created)
-    VALUES(?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`
+	statement := `INSERT INTO players (firstname, lastname, dateOfBirth, addressID, email, phonenumber, created)
+    VALUES(?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`
 
-	result, err := m.DB.Exec(statement, player.TeamID, player.FirstName, player.LastName,
+	result, err := m.DB.Exec(statement, player.FirstName, player.LastName,
 		player.DateOfBirth, player.AddressID, player.Email, player.PhoneNumber)
 	if err != nil {
 		return 0, err
@@ -75,25 +72,15 @@ func (m *PlayerModel) Delete(id int) error {
 	return err
 }
 
-// SetTeam assigns a player to a team (invite auto-join, or join-request
-// approval — never touched by an ordinary profile edit).
-func (m *PlayerModel) SetTeam(playerID, teamID int) error {
-	statement := "update players set teamID = ? where id = ?"
-
-	_, err := m.DB.Exec(statement, teamID, playerID)
-
-	return err
-}
-
 func (m *PlayerModel) Get(id int) (*Player, error) {
 
-	stmt := `select id, teamID, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created
+	stmt := `select id, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created
 		from players where id = ?`
 
 	result := m.DB.QueryRow(stmt, id)
 
 	player := &Player{}
-	err := result.Scan(&player.ID, &player.TeamID, &player.FirstName, &player.LastName,
+	err := result.Scan(&player.ID, &player.FirstName, &player.LastName,
 		&player.DateOfBirth, &player.AddressID, &player.Email, &player.PhoneNumber, &player.Created)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -107,13 +94,13 @@ func (m *PlayerModel) Get(id int) (*Player, error) {
 
 func (m *PlayerModel) GetByEmail(email string) (*Player, error) {
 
-	stmt := `select id, teamID, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created
+	stmt := `select id, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created
 		from players where email = ?`
 
 	result := m.DB.QueryRow(stmt, email)
 
 	player := &Player{}
-	err := result.Scan(&player.ID, &player.TeamID, &player.FirstName, &player.LastName,
+	err := result.Scan(&player.ID, &player.FirstName, &player.LastName,
 		&player.DateOfBirth, &player.AddressID, &player.Email, &player.PhoneNumber, &player.Created)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -125,10 +112,15 @@ func (m *PlayerModel) GetByEmail(email string) (*Player, error) {
 	return player, nil
 }
 
+// GetByTeam returns a team's roster, joined through teamMembers now that a
+// player can belong to more than one team.
 func (m *PlayerModel) GetByTeam(teamID int) ([]*Player, error) {
 
-	stmt := `select id, teamID, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created
-		from players where teamID = ? order by lastname asc, firstname asc`
+	stmt := `select p.id, p.firstname, p.lastname, p.dateOfBirth, p.addressID, p.email, p.phonenumber, p.created
+		from players p
+		join teamMembers tm on tm.playerID = p.id
+		where tm.teamID = ?
+		order by p.lastname asc, p.firstname asc`
 
 	rows, err := m.DB.Query(stmt, teamID)
 	if err != nil {
@@ -139,7 +131,7 @@ func (m *PlayerModel) GetByTeam(teamID int) ([]*Player, error) {
 	players := []*Player{}
 	for rows.Next() {
 		player := &Player{}
-		err := rows.Scan(&player.ID, &player.TeamID, &player.FirstName, &player.LastName,
+		err := rows.Scan(&player.ID, &player.FirstName, &player.LastName,
 			&player.DateOfBirth, &player.AddressID, &player.Email, &player.PhoneNumber, &player.Created)
 		if err != nil {
 			return nil, err
@@ -148,85 +140,4 @@ func (m *PlayerModel) GetByTeam(teamID int) ([]*Player, error) {
 	}
 
 	return players, nil
-}
-
-type PlayerSearchCriteria struct {
-	FirstName string
-	LastName  string
-	Email     string
-	TeamID    int
-	Sort      string
-	Order     string
-	Offset    int
-	Limit     int
-}
-
-type PlayerSearchResult struct {
-	ID          int
-	FirstName   string
-	LastName    string
-	Email       sql.NullString
-	PhoneNumber sql.NullString
-	DateOfBirth sql.NullTime
-	FullCount   sql.NullInt32
-}
-
-func (m *PlayerModel) Search(criteria *PlayerSearchCriteria) ([]*PlayerSearchResult, error) {
-	statement, queryParams := buildPlayerSearchStatement(criteria)
-	rows, err := m.DB.Query(statement, queryParams...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	players := []*PlayerSearchResult{}
-	for rows.Next() {
-		player := &PlayerSearchResult{}
-		err := rows.Scan(&player.ID, &player.FirstName, &player.LastName, &player.Email,
-			&player.PhoneNumber, &player.DateOfBirth, &player.FullCount)
-		if err != nil {
-			return nil, err
-		}
-		players = append(players, player)
-	}
-	return players, nil
-}
-
-func buildPlayerSearchStatement(criteria *PlayerSearchCriteria) (string, []any) {
-	allowedSorts := map[string]string{
-		"firstname": "firstname",
-		"lastname":  "lastname",
-		"email":     "email",
-	}
-
-	base := `SELECT id, firstname, lastname, email, phonenumber, dateOfBirth, COUNT(*) OVER() AS fullCount
-		FROM players WHERE teamID = ?`
-
-	queryParams := []any{criteria.TeamID}
-	where := ""
-
-	if criteria.FirstName != "" {
-		where += " AND UPPER(firstname) LIKE CONCAT('%', ?, '%')"
-		queryParams = append(queryParams, strings.ToUpper(criteria.FirstName))
-	}
-	if criteria.LastName != "" {
-		where += " AND UPPER(lastname) LIKE CONCAT('%', ?, '%')"
-		queryParams = append(queryParams, strings.ToUpper(criteria.LastName))
-	}
-	if criteria.Email != "" {
-		where += " AND UPPER(email) LIKE CONCAT('%', ?, '%')"
-		queryParams = append(queryParams, strings.ToUpper(criteria.Email))
-	}
-
-	orderBy := "ORDER BY lastname ASC"
-	if sortCol, ok := allowedSorts[criteria.Sort]; ok {
-		order := "ASC"
-		if criteria.Order == "DESC" {
-			order = "DESC"
-		}
-		orderBy = fmt.Sprintf("ORDER BY %s %s", sortCol, order)
-	}
-
-	limit := fmt.Sprintf("LIMIT %d OFFSET %d", criteria.Limit, criteria.Offset)
-	return fmt.Sprintf("%s%s %s %s;", base, where, orderBy, limit), queryParams
 }

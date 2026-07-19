@@ -49,6 +49,16 @@ func (m *JoinRequestModel) Insert(jr *TeamJoinRequest) (int, error) {
 	return int(id), nil
 }
 
+// DeleteAllForPlayer removes every join-request row (any status) for
+// playerID — used when fully deleting a player record, since
+// fk_tjr_player would otherwise block it.
+func (m *JoinRequestModel) DeleteAllForPlayer(playerID int) error {
+	statement := `DELETE FROM teamJoinRequests WHERE playerID = ?`
+
+	_, err := m.DB.Exec(statement, playerID)
+	return err
+}
+
 func (m *JoinRequestModel) Get(id int) (*TeamJoinRequest, error) {
 	stmt := `SELECT id, playerID, teamID, status, requestedAt, respondedAt, respondedByUserID
 		FROM teamJoinRequests WHERE id = ?`
@@ -65,12 +75,17 @@ func (m *JoinRequestModel) Get(id int) (*TeamJoinRequest, error) {
 	return jr, nil
 }
 
-func (m *JoinRequestModel) GetPendingByPlayer(playerID int) (*TeamJoinRequest, error) {
-	stmt := `SELECT id, playerID, teamID, status, requestedAt, respondedAt, respondedByUserID
-		FROM teamJoinRequests WHERE playerID = ? AND status = 'PENDING'`
+// GetPendingByPlayerAndLeague finds this player's pending request (if any)
+// for a team in leagueID. A player can have simultaneous pending requests in
+// different leagues, so this is scoped to one league at a time, not global.
+func (m *JoinRequestModel) GetPendingByPlayerAndLeague(playerID, leagueID int) (*TeamJoinRequest, error) {
+	stmt := `SELECT jr.id, jr.playerID, jr.teamID, jr.status, jr.requestedAt, jr.respondedAt, jr.respondedByUserID
+		FROM teamJoinRequests jr
+		JOIN teams t ON t.id = jr.teamID
+		WHERE jr.playerID = ? AND t.leagueID = ? AND jr.status = 'PENDING'`
 
 	jr := &TeamJoinRequest{}
-	err := m.DB.QueryRow(stmt, playerID).Scan(&jr.ID, &jr.PlayerID, &jr.TeamID, &jr.Status,
+	err := m.DB.QueryRow(stmt, playerID, leagueID).Scan(&jr.ID, &jr.PlayerID, &jr.TeamID, &jr.Status,
 		&jr.RequestedAt, &jr.RespondedAt, &jr.RespondedByUserID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -88,14 +103,17 @@ func (m *JoinRequestModel) UpdateStatus(id int, status string, respondedByUserID
 	return err
 }
 
-// RejectOtherPending marks any other pending request by this player (besides
-// excludeID) as REJECTED — used after one request gets approved.
-func (m *JoinRequestModel) RejectOtherPending(playerID, excludeID, respondedByUserID int) error {
-	statement := `UPDATE teamJoinRequests
-		SET status = 'REJECTED', respondedAt = UTC_TIMESTAMP(), respondedByUserID = ?
-		WHERE playerID = ? AND id != ? AND status = 'PENDING'`
+// RejectOtherPending marks any other pending request by this player in the
+// same league (besides excludeID) as REJECTED — used after one request gets
+// approved. Scoped to leagueID so an approval in one league doesn't reject a
+// player's unrelated pending request in a different league.
+func (m *JoinRequestModel) RejectOtherPending(playerID, excludeID, respondedByUserID, leagueID int) error {
+	statement := `UPDATE teamJoinRequests jr
+		JOIN teams t ON t.id = jr.teamID
+		SET jr.status = 'REJECTED', jr.respondedAt = UTC_TIMESTAMP(), jr.respondedByUserID = ?
+		WHERE jr.playerID = ? AND jr.id != ? AND jr.status = 'PENDING' AND t.leagueID = ?`
 
-	_, err := m.DB.Exec(statement, respondedByUserID, playerID, excludeID)
+	_, err := m.DB.Exec(statement, respondedByUserID, playerID, excludeID, leagueID)
 	return err
 }
 

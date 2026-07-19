@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/justinas/nosurf"
+	"github.com/letitloose/league-buddy/internal/models"
 )
 
 func (app *application) newTemplateData(r *http.Request) *templateData {
-	return &templateData{
+	data := &templateData{
 		CurrentYear:     time.Now().Year(),
 		LastUpdate:      os.Getenv("SOFTWARE_LAST_UPDATE"),
 		Flash:           app.sessionManager.PopString(r.Context(), "flash"),
@@ -21,11 +22,31 @@ func (app *application) newTemplateData(r *http.Request) *templateData {
 		IsActive:        app.isActive(r),
 		IsAdmin:         app.isAdmin(r),
 		PlayerID:        app.getPlayerID(r),
-		TeamID:          app.getTeamID(r),
-		IsCaptain:       app.isCaptain(r),
 		UserName:        app.getUserName(r),
 		CSRFToken:       nosurf.Token(r),
 	}
+
+	if playerID := app.getPlayerID(r); app.isActive(r) && playerID > 0 {
+		tmm := &models.TeamMemberModel{DB: app.playerService.DB}
+		if teams, err := tmm.GetTeamsForPlayer(playerID); err == nil {
+			for _, team := range teams {
+				data.MyTeams = append(data.MyTeams, NavTeamInfo{ID: team.ID, Name: team.Name})
+			}
+		} else {
+			app.errorLog.Println(err)
+		}
+
+		lam := &models.LeagueAdminModel{DB: app.playerService.DB}
+		if leagues, err := lam.GetLeaguesForPlayer(playerID); err == nil {
+			for _, league := range leagues {
+				data.MyAdminLeagues = append(data.MyAdminLeagues, NavLeagueInfo{ID: league.ID, Name: league.Name})
+			}
+		} else {
+			app.errorLog.Println(err)
+		}
+	}
+
+	return data
 }
 
 func (app *application) serverError(w http.ResponseWriter, err error) {
@@ -120,20 +141,85 @@ func (app *application) getPlayerID(r *http.Request) int {
 	return playerID
 }
 
-func (app *application) getTeamID(r *http.Request) int {
-	teamID, ok := r.Context().Value(teamIDContextKey).(int)
+func (app *application) getTeamIDs(r *http.Request) []int {
+	teamIDs, ok := r.Context().Value(teamIDsContextKey).([]int)
 	if !ok {
-		return 0
+		return nil
 	}
 
-	return teamID
+	return teamIDs
 }
 
-func (app *application) isCaptain(r *http.Request) bool {
-	isCaptain, ok := r.Context().Value(isCaptainContextKey).(bool)
+func (app *application) isMemberOfTeam(r *http.Request, teamID int) bool {
+	for _, id := range app.getTeamIDs(r) {
+		if id == teamID {
+			return true
+		}
+	}
+	return false
+}
+
+func (app *application) isCaptainOfTeam(r *http.Request, teamID int) bool {
+	captainTeamIDs, ok := r.Context().Value(captainTeamIDsContextKey).([]int)
 	if !ok {
 		return false
 	}
+	for _, id := range captainTeamIDs {
+		if id == teamID {
+			return true
+		}
+	}
+	return false
+}
 
-	return isCaptain
+func (app *application) getLeagueAdminLeagueIDs(r *http.Request) []int {
+	leagueIDs, ok := r.Context().Value(leagueAdminLeagueIDsContextKey).([]int)
+	if !ok {
+		return nil
+	}
+
+	return leagueIDs
+}
+
+func (app *application) isLeagueAdminOfLeague(r *http.Request, leagueID int) bool {
+	for _, id := range app.getLeagueAdminLeagueIDs(r) {
+		if id == leagueID {
+			return true
+		}
+	}
+	return false
+}
+
+func (app *application) isLeagueAdminOfTeam(r *http.Request, teamID int) bool {
+	leagueAdminTeamIDs, ok := r.Context().Value(leagueAdminTeamIDsContextKey).([]int)
+	if !ok {
+		return false
+	}
+	for _, id := range leagueAdminTeamIDs {
+		if id == teamID {
+			return true
+		}
+	}
+	return false
+}
+
+// canManageTeam reports whether the current request's user may edit teamID's
+// info, manage its roster, or reassign its captain: an Admin, the team's own
+// captain, or a league admin of the team's league.
+func (app *application) canManageTeam(r *http.Request, teamID int) bool {
+	return app.isAdmin(r) || app.isCaptainOfTeam(r, teamID) || app.isLeagueAdminOfTeam(r, teamID)
+}
+
+// canDeleteTeam reports whether the current request's user may delete
+// teamID: an Admin or a league admin of the team's league. Deliberately
+// excludes plain captains — deleting a team is too destructive to leave to a
+// single unilateral captain.
+func (app *application) canDeleteTeam(r *http.Request, teamID int) bool {
+	return app.isAdmin(r) || app.isLeagueAdminOfTeam(r, teamID)
+}
+
+// canManageLeague reports whether the current request's user may create a
+// team in leagueID: an Admin or a league admin of that league.
+func (app *application) canManageLeague(r *http.Request, leagueID int) bool {
+	return app.isAdmin(r) || app.isLeagueAdminOfLeague(r, leagueID)
 }

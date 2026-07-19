@@ -29,15 +29,16 @@ type UserModel struct {
 	DB *sql.DB
 }
 
-// AuthContext holds all per-request auth flags returned by the single
-// consolidated GetAuthContext query.
+// AuthContext holds all per-request auth flags returned by GetAuthContext.
 type AuthContext struct {
-	Active    bool
-	IsAdmin   bool
-	PlayerID  sql.NullInt32
-	TeamID    sql.NullInt32 // the linked player's own team, if any
-	IsCaptain bool          // true iff some team.captainPlayerID = PlayerID
-	UserName  string        // always non-empty: player name or email
+	Active               bool
+	IsAdmin              bool
+	PlayerID             sql.NullInt32
+	TeamIDs              []int  // every team this player is a member of
+	CaptainTeamIDs       []int  // subset of TeamIDs this player captains
+	LeagueAdminLeagueIDs []int  // leagues this player administers
+	LeagueAdminTeamIDs   []int  // every team belonging to one of those leagues
+	UserName             string // always non-empty: player name or email
 }
 
 func (m *UserModel) Insert(email, password string) (int, error) {
@@ -239,16 +240,17 @@ func (m *UserModel) GetByVerificationHash(hash string) (*User, error) {
 	return user, err
 }
 
-// GetAuthContext fetches all authentication context for a user in a single
-// query: active flag, admin flag, their linked player (if any), that
-// player's team (if any), and whether they're that team's captain.
+// GetAuthContext fetches all authentication context for a user: active
+// flag, admin flag, their linked player (if any), and — since a player can
+// now belong to more than one team — every team they're a member of plus
+// which of those they captain. That second part is a separate query (a
+// player with no memberships needs no join at all), rather than one
+// consolidated query as before.
 func (m *UserModel) GetAuthContext(id int) (*AuthContext, error) {
 	stmt := `SELECT
 		u.active,
 		EXISTS(SELECT 1 FROM userRole WHERE userID = u.id AND roleID = 'ADMIN'),
 		p.id,
-		p.teamID,
-		EXISTS(SELECT 1 FROM teams t WHERE t.captainPlayerID = p.id),
 		COALESCE(CONCAT(p.firstname, ' ', p.lastname), u.email)
 	FROM users u
 	LEFT JOIN players p ON p.id = u.playerID
@@ -259,8 +261,6 @@ func (m *UserModel) GetAuthContext(id int) (*AuthContext, error) {
 		&ac.Active,
 		&ac.IsAdmin,
 		&ac.PlayerID,
-		&ac.TeamID,
-		&ac.IsCaptain,
 		&ac.UserName,
 	)
 	if err != nil {
@@ -269,6 +269,73 @@ func (m *UserModel) GetAuthContext(id int) (*AuthContext, error) {
 		}
 		return nil, err
 	}
+
+	if !ac.PlayerID.Valid {
+		return ac, nil
+	}
+
+	teamStmt := `SELECT t.id, COALESCE(t.captainPlayerID, 0) = ?
+		FROM teamMembers tm
+		JOIN teams t ON t.id = tm.teamID
+		WHERE tm.playerID = ?`
+
+	rows, err := m.DB.Query(teamStmt, ac.PlayerID.Int32, ac.PlayerID.Int32)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var teamID int
+		var isCaptain bool
+		if err := rows.Scan(&teamID, &isCaptain); err != nil {
+			return nil, err
+		}
+		ac.TeamIDs = append(ac.TeamIDs, teamID)
+		if isCaptain {
+			ac.CaptainTeamIDs = append(ac.CaptainTeamIDs, teamID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	leagueAdminStmt := `SELECT leagueID FROM leagueAdmins WHERE playerID = ?`
+	leagueRows, err := m.DB.Query(leagueAdminStmt, ac.PlayerID.Int32)
+	if err != nil {
+		return nil, err
+	}
+	defer leagueRows.Close()
+
+	for leagueRows.Next() {
+		var leagueID int
+		if err := leagueRows.Scan(&leagueID); err != nil {
+			return nil, err
+		}
+		ac.LeagueAdminLeagueIDs = append(ac.LeagueAdminLeagueIDs, leagueID)
+	}
+	if err := leagueRows.Err(); err != nil {
+		return nil, err
+	}
+
+	leagueTeamStmt := `SELECT t.id FROM teams t JOIN leagueAdmins la ON la.leagueID = t.leagueID WHERE la.playerID = ?`
+	leagueTeamRows, err := m.DB.Query(leagueTeamStmt, ac.PlayerID.Int32)
+	if err != nil {
+		return nil, err
+	}
+	defer leagueTeamRows.Close()
+
+	for leagueTeamRows.Next() {
+		var teamID int
+		if err := leagueTeamRows.Scan(&teamID); err != nil {
+			return nil, err
+		}
+		ac.LeagueAdminTeamIDs = append(ac.LeagueAdminTeamIDs, teamID)
+	}
+	if err := leagueTeamRows.Err(); err != nil {
+		return nil, err
+	}
+
 	return ac, nil
 }
 
@@ -301,6 +368,18 @@ func (m *UserModel) SetPlayerID(userID, playerID int) error {
 	statement := `UPDATE users SET playerID = ? WHERE id = ?`
 
 	_, err := m.DB.Exec(statement, playerID, userID)
+
+	return err
+}
+
+// ClearPlayerID unlinks whatever user account (if any) is linked to
+// playerID — fk_users_player would otherwise block deleting a player who
+// has a login, since uq_users_playerID guarantees at most one user
+// references a given player.
+func (m *UserModel) ClearPlayerID(playerID int) error {
+	statement := `UPDATE users SET playerID = NULL WHERE playerID = ?`
+
+	_, err := m.DB.Exec(statement, playerID)
 
 	return err
 }

@@ -17,10 +17,14 @@ CREATE TABLE migration (
     rundate DATE
 );
 
--- Top-level scope entity: a league contains one or more teams.
+-- Top-level scope entity: a league contains one or more teams. motto and
+-- establishedDate are optional display fields, separate from the internal
+-- "created" audit timestamp below.
 CREATE TABLE leagues (
     id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(255) NOT NULL,
+    motto VARCHAR(255) NULL,
+    establishedDate DATE NULL,
     created DATETIME NOT NULL
 );
 
@@ -32,6 +36,8 @@ CREATE TABLE teams (
     id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,
     leagueID INTEGER NOT NULL,
     name VARCHAR(255) NOT NULL,
+    motto VARCHAR(255) NULL,
+    establishedDate DATE NULL,
     captainPlayerID INTEGER NULL,
     created DATETIME NOT NULL
 );
@@ -47,12 +53,11 @@ CREATE TABLE address (
     zipCode VARCHAR(10)
 );
 
--- teamID is nullable — a self-registered user's placeholder player starts
--- "unaffiliated" until an invite (at signup) or an approved join request
--- assigns a team.
+-- Team membership lives in teamMembers now (see below) — a self-registered
+-- user's placeholder player starts unaffiliated (zero memberships) until an
+-- invite (at signup) or an approved join request adds one.
 CREATE TABLE players (
     id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    teamID INTEGER NULL,
     firstname VARCHAR(100) NOT NULL,
     lastname VARCHAR(100) NOT NULL,
     dateOfBirth DATE,
@@ -61,11 +66,41 @@ CREATE TABLE players (
     phonenumber VARCHAR(40),
     created DATETIME NOT NULL
 );
-ALTER TABLE players ADD CONSTRAINT fk_players_team FOREIGN KEY (teamID) REFERENCES teams(id);
 ALTER TABLE players ADD CONSTRAINT fk_players_address FOREIGN KEY (addressID) REFERENCES address(id);
 
 ALTER TABLE teams ADD CONSTRAINT fk_teams_captain FOREIGN KEY (captainPlayerID) REFERENCES players(id);
 ALTER TABLE teams ADD CONSTRAINT uq_teams_captain UNIQUE (captainPlayerID);
+
+-- A player can be a member of many teams, but the service layer enforces at
+-- most one per league (checked via a JOIN to teams.leagueID here, not a DB
+-- constraint — leagueID isn't denormalized onto this row since a team's
+-- league can change after the fact via admin team-update).
+CREATE TABLE teamMembers (
+    id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    playerID INTEGER NOT NULL,
+    teamID INTEGER NOT NULL,
+    joinedAt DATETIME NOT NULL,
+    CONSTRAINT uq_teammembers_player_team UNIQUE (playerID, teamID)
+);
+ALTER TABLE teamMembers ADD CONSTRAINT fk_teammembers_player FOREIGN KEY (playerID) REFERENCES players(id);
+ALTER TABLE teamMembers ADD CONSTRAINT fk_teammembers_team FOREIGN KEY (teamID) REFERENCES teams(id);
+CREATE INDEX teammembers_team_idx ON teamMembers (teamID);
+CREATE INDEX teammembers_player_idx ON teamMembers (playerID);
+
+-- A player can administer many leagues, and a league can have many admins —
+-- league admins can CRUD teams and players within their league(s), a tier
+-- below system admin (everything) and above team captain (one team only).
+CREATE TABLE leagueAdmins (
+    id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    playerID INTEGER NOT NULL,
+    leagueID INTEGER NOT NULL,
+    createdAt DATETIME NOT NULL,
+    CONSTRAINT uq_leagueadmins_player_league UNIQUE (playerID, leagueID)
+);
+ALTER TABLE leagueAdmins ADD CONSTRAINT fk_leagueadmins_player FOREIGN KEY (playerID) REFERENCES players(id);
+ALTER TABLE leagueAdmins ADD CONSTRAINT fk_leagueadmins_league FOREIGN KEY (leagueID) REFERENCES leagues(id);
+CREATE INDEX leagueadmins_league_idx ON leagueAdmins (leagueID);
+CREATE INDEX leagueadmins_player_idx ON leagueAdmins (playerID);
 
 -- Login/auth. playerID links a user to their roster profile (nullable — an
 -- admin/coach account need not be a player; a player need not have signed up
@@ -125,10 +160,11 @@ ALTER TABLE invites ADD CONSTRAINT fk_invites_usedby FOREIGN KEY (usedByUserID) 
 
 ALTER TABLE users ADD CONSTRAINT fk_users_pendinginvite FOREIGN KEY (pendingInviteID) REFERENCES invites(id);
 
--- An unaffiliated active player's request to join a specific team. One
--- PENDING row per player at a time, across any team (enforced in the
--- service layer, not by a DB constraint) — approving sets players.teamID
--- and auto-rejects any other pending request by that player.
+-- An active player's request to join a specific team. At most one PENDING
+-- row per player *per league* at a time (enforced in the service layer, not
+-- a DB constraint, same as the one-team-per-league membership rule) —
+-- approving adds a teamMembers row and auto-rejects any other pending
+-- request by that player in the same league.
 CREATE TABLE teamJoinRequests (
     id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,
     playerID INTEGER NOT NULL,
@@ -144,6 +180,6 @@ ALTER TABLE teamJoinRequests ADD CONSTRAINT fk_tjr_respondedby FOREIGN KEY (resp
 CREATE INDEX tjr_player_status_idx ON teamJoinRequests (playerID, status);
 CREATE INDEX tjr_team_status_idx ON teamJoinRequests (teamID, status);
 
-INSERT INTO leagues (name, created) VALUES ('My League', UTC_TIMESTAMP());
-INSERT INTO teams (leagueID, name, created) VALUES (1, 'My Team', UTC_TIMESTAMP());
+INSERT INTO leagues (name, created) VALUES ('CapReg over 30', UTC_TIMESTAMP());
+INSERT INTO teams (leagueID, name, created) VALUES (1, 'Colonial FC', UTC_TIMESTAMP());
 INSERT INTO roles (code, display) VALUES ('ADMIN', 'Administrator');

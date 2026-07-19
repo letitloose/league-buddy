@@ -10,9 +10,11 @@ import (
 )
 
 type TeamForm struct {
-	ID       int
-	LeagueID int
-	Name     string
+	ID              int
+	LeagueID        int
+	Name            string
+	Motto           string
+	EstablishedDate string // "2006-01-02" from <input type=date>
 	validator.Validator
 }
 
@@ -39,7 +41,12 @@ func (service *TeamService) CreateTeam(form *TeamForm, actorEmail string) (int, 
 		return 0, err
 	}
 
-	id, err := service.Insert(form.LeagueID, form.Name)
+	id, err := service.Insert(&models.Team{
+		LeagueID:        form.LeagueID,
+		Name:            form.Name,
+		Motto:           sql.NullString{String: form.Motto, Valid: form.Motto != ""},
+		EstablishedDate: parseOptionalDate(form.EstablishedDate),
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -68,7 +75,13 @@ func (service *TeamService) UpdateTeam(form *TeamForm, actorEmail string) error 
 		return err
 	}
 
-	err := service.Update(&models.Team{ID: form.ID, LeagueID: form.LeagueID, Name: form.Name})
+	err := service.Update(&models.Team{
+		ID:              form.ID,
+		LeagueID:        form.LeagueID,
+		Name:            form.Name,
+		Motto:           sql.NullString{String: form.Motto, Valid: form.Motto != ""},
+		EstablishedDate: parseOptionalDate(form.EstablishedDate),
+	})
 	if err != nil {
 		return err
 	}
@@ -93,7 +106,7 @@ func (service *TeamService) DeleteTeam(id int, actorEmail string) error {
 }
 
 // SetCaptain assigns playerID (0 clears) as teamID's captain. The target
-// player must already be on that team's roster.
+// player must already be a member of that team.
 func (service *TeamService) SetCaptain(teamID, playerID int, actorEmail string) error {
 	if playerID == 0 {
 		if err := service.TeamModel.SetCaptain(teamID, sql.NullInt32{}); err != nil {
@@ -108,7 +121,13 @@ func (service *TeamService) SetCaptain(teamID, playerID int, actorEmail string) 
 	if err != nil {
 		return err
 	}
-	if !player.TeamID.Valid || int(player.TeamID.Int32) != teamID {
+
+	tmm := &models.TeamMemberModel{DB: service.DB}
+	isMember, err := tmm.IsMember(playerID, teamID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
 		return models.ErrBadData
 	}
 

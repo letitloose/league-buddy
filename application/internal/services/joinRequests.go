@@ -19,19 +19,35 @@ type JoinRequestService struct {
 	InfoLog *log.Logger
 }
 
-// RequestToJoin lets an unaffiliated active player ask to join teamID. Fails
-// if the player already has a team, or already has a pending request.
+// RequestToJoin lets an active player ask to join teamID. Fails if they're
+// already a member of teamID, already belong to a different team in the
+// same league (a player may hold at most one team per league), or already
+// have a pending request in that league.
 func (service *JoinRequestService) RequestToJoin(playerID, teamID int, actorEmail string) error {
-	pm := &models.PlayerModel{DB: service.DB}
-	player, err := pm.Get(playerID)
+	tm := &models.TeamModel{DB: service.DB}
+	team, err := tm.Get(teamID)
 	if err != nil {
 		return err
 	}
-	if player.TeamID.Valid {
+
+	tmm := &models.TeamMemberModel{DB: service.DB}
+	isMember, err := tmm.IsMember(playerID, teamID)
+	if err != nil {
+		return err
+	}
+	if isMember {
 		return models.ErrBadData
 	}
 
-	if _, err := service.GetPendingByPlayer(playerID); err == nil {
+	hasTeamInLeague, err := tmm.HasTeamInLeague(playerID, team.LeagueID)
+	if err != nil {
+		return err
+	}
+	if hasTeamInLeague {
+		return models.ErrBadData
+	}
+
+	if _, err := service.GetPendingByPlayerAndLeague(playerID, team.LeagueID); err == nil {
 		return models.ErrDuplicateRequest
 	} else if !errors.Is(err, models.ErrNoRecord) {
 		return err
@@ -105,15 +121,32 @@ func (service *JoinRequestService) Approve(requestID, respondedByUserID int, act
 		return models.ErrBadData
 	}
 
-	pm := &models.PlayerModel{DB: service.DB}
-	if err := pm.SetTeam(jr.PlayerID, jr.TeamID); err != nil {
+	tm := &models.TeamModel{DB: service.DB}
+	team, err := tm.Get(jr.TeamID)
+	if err != nil {
+		return err
+	}
+
+	tmm := &models.TeamMemberModel{DB: service.DB}
+	hasTeamInLeague, err := tmm.HasTeamInLeague(jr.PlayerID, team.LeagueID)
+	if err != nil {
+		return err
+	}
+	if hasTeamInLeague {
+		// They picked up a team in this league through some other path since
+		// requesting (another approval, an invite) — the one-per-league rule
+		// still applies at approval time, not just at request time.
+		return models.ErrBadData
+	}
+
+	if err := tmm.AddMembership(jr.PlayerID, jr.TeamID); err != nil {
 		return err
 	}
 
 	if err := service.UpdateStatus(requestID, "APPROVED", respondedByUserID); err != nil {
 		return err
 	}
-	if err := service.RejectOtherPending(jr.PlayerID, requestID, respondedByUserID); err != nil {
+	if err := service.RejectOtherPending(jr.PlayerID, requestID, respondedByUserID, team.LeagueID); err != nil {
 		return err
 	}
 

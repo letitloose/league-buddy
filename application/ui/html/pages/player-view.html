@@ -28,13 +28,14 @@
     </div>
 </div>
 
-{{$managesTeam := and .TeamID.Valid $.IsCaptain (eq $.TeamID .TeamID.Int32)}}
-{{if or $.IsAdmin (eq $.PlayerID .ID) $managesTeam}}
+{{if .CanManage}}
 <div class="text-center">
     <a class="btn" href="/player/update/{{.ID}}">Edit</a>
-    {{if and .TeamID.Valid (or $.IsAdmin $managesTeam)}}
-        <button class="btn bg-red-600 hover:bg-red-700" data-delete-url="/team/{{.TeamID.Int32}}/player/delete/{{.ID}}" data-confirm-message="Remove {{.FirstName}} {{.LastName}} from the roster?" data-redirect-url="/team/{{.TeamID.Int32}}/player">Delete</button>
-    {{end}}
+</div>
+{{end}}
+{{if $.IsAdmin}}
+<div class="text-center">
+    <button class="btn bg-red-600 hover:bg-red-700" data-delete-url="/player/delete/{{.ID}}" data-confirm-message="Permanently delete {{.FirstName}} {{.LastName}}? This removes their bio, address, and every team membership." data-redirect-url="/">Delete Player</button>
 </div>
 {{end}}
 {{end}}

@@ -1,0 +1,10 @@
+{{define "breadcrumbs"}}
+{{if .Breadcrumbs}}
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+    {{range $i, $b := .Breadcrumbs}}
+        {{if $i}}<span class="breadcrumb-sep" aria-hidden="true">/</span>{{end}}
+        {{if $b.URL}}<a href="{{$b.URL}}">{{$b.Label}}</a>{{else}}<span class="breadcrumb-current" aria-current="page">{{$b.Label}}</span>{{end}}
+    {{end}}
+</nav>
+{{end}}
+{{end}}

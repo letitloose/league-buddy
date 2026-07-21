@@ -6,6 +6,7 @@
     <div class="w-full max-w-xs">
         <form class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" action='/admin/team/create' method='POST'>
             <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+            {{template "team-league-field" .}}
             {{template "team-form-fields" .}}
             <div class="flex justify-between">
                 <input class="btn m-0" type='submit' value='Add'>

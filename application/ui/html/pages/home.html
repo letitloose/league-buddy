@@ -4,11 +4,30 @@
 <div class="text-center py-8">
     <h2>Welcome to League Buddy</h2>
     {{if .IsActive}}
-        {{if .Data}}
+        {{if or .Data.Leagues .Data.Teams .IsAdmin}}
             <div class="max-w-3xl mx-auto px-4 pt-2 text-left">
+                {{with .Data.Leagues}}
+                <h3 class="px-0">My Leagues</h3>
+                <div class="grid gap-4 sm:grid-cols-2 mb-8">
+                    {{range .}}
+                    <a href="/league/{{.League.ID}}" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-green-500 transition p-5">
+                        <h4 class="text-slate-800 p-0 mb-2">{{.League.Name}}</h4>
+                        {{with .League.Motto.String}}<p class="text-sm italic text-gray-600 mb-1">&ldquo;{{.}}&rdquo;</p>{{end}}
+                        <p class="text-sm text-gray-600 mb-1">{{.TeamCount}} team{{if ne .TeamCount 1}}s{{end}}</p>
+                        {{if .League.EstablishedDate.Valid}}
+                            <p class="text-xs text-gray-400 mt-3">Est. {{humanDate .League.EstablishedDate.Time}}</p>
+                        {{else}}
+                            <p class="text-xs text-gray-400 mt-3">Est. {{humanDate .League.Created}}</p>
+                        {{end}}
+                    </a>
+                    {{end}}
+                </div>
+                {{end}}
+
+                {{with .Data.Teams}}
                 <h3 class="px-0">My Teams</h3>
-                <div class="grid gap-4 sm:grid-cols-2">
-                    {{range .Data}}
+                <div class="grid gap-4 sm:grid-cols-2 mb-8">
+                    {{range .}}
                     <a href="/team/{{.Team.ID}}" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-green-500 transition p-5">
                         <p class="text-xs uppercase tracking-wide text-gray-500 mb-1">{{.League.Name}}</p>
                         <h4 class="text-slate-800 p-0 mb-2">{{.Team.Name}}</h4>
@@ -23,6 +42,25 @@
                     </a>
                     {{end}}
                 </div>
+                {{end}}
+
+                {{if .IsAdmin}}
+                <h3 class="px-0">Site Admin</h3>
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <a href="/user/search" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-green-500 transition p-5">
+                        <h4 class="text-slate-800 p-0 mb-1">Users</h4>
+                        <p class="text-sm text-gray-600 m-0">Search and manage user accounts and player profiles.</p>
+                    </a>
+                    <a href="/admin/team/create" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-green-500 transition p-5">
+                        <h4 class="text-slate-800 p-0 mb-1">Add Team</h4>
+                        <p class="text-sm text-gray-600 m-0">Create a new team in any league.</p>
+                    </a>
+                    <a href="/admin/joinRequests" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-green-500 transition p-5">
+                        <h4 class="text-slate-800 p-0 mb-1">Join Requests</h4>
+                        <p class="text-sm text-gray-600 m-0">Review pending join requests across every team.</p>
+                    </a>
+                </div>
+                {{end}}
             </div>
         {{else}}
             <p>You're not on a team yet. <a href="/league">Browse leagues</a> to find one and request to join.</p>
@@ -30,7 +68,33 @@
     {{else if .IsAuthenticated}}
         <p>Your account is pending activation. Please check your email.</p>
     {{else}}
-        <p><a href="/user/login">Login</a> or <a href="/user/signup">Signup</a> to get started.</p>
+        <div class="max-w-4xl mx-auto px-4 pt-2 text-left">
+            <p class="text-center text-lg text-gray-600 mb-6">Your digital companion for team and league management.</p>
+            <div class="text-center mb-8">
+                <a class="btn" href="/user/login">Login</a>
+                <a class="btn-secondary" href="/user/signup">Signup</a>
+            </div>
+            <h3 class="text-center px-0 mb-6">What do you want to be?</h3>
+            <div class="grid gap-4 sm:grid-cols-3 mb-10">
+                <div class="bg-white shadow-md rounded-xl p-5 text-center">
+                    <h4 class="text-slate-800 p-0 mb-2">A Player</h4>
+                    <p class="text-sm text-gray-600 m-0">Join a team and earn glory on the field.</p>
+                </div>
+                <div class="bg-white shadow-md rounded-xl p-5 text-center">
+                    <h4 class="text-slate-800 p-0 mb-2">A Captain</h4>
+                    <p class="text-sm text-gray-600 m-0">Manage your roster and see if you can guide your team to the heights of recreational success.</p>
+                </div>
+                <div class="bg-white shadow-md rounded-xl p-5 text-center">
+                    <h4 class="text-slate-800 p-0 mb-2">A Commissioner</h4>
+                    <p class="text-sm text-gray-600 m-0">Thanklessly manage an entire league for glory-hungry ingrates.</p>
+                </div>
+            </div>
+            <div class="text-center">
+                <p class="text-gray-600 mb-3">But first, create an account.</p>
+                <a class="btn" href="/user/login">Login</a>
+                <a class="btn-secondary" href="/user/signup">Signup</a>
+            </div>
+        </div>
     {{end}}
 </div>
 {{end}}

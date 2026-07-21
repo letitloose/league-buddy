@@ -69,6 +69,32 @@ func (m *InviteModel) GetByToken(token string) (*Invite, error) {
 	return invite, nil
 }
 
+// ListPendingByTeam returns every invite for teamID that hasn't been used
+// yet, oldest first — powers the outstanding-invites list on the invite page
+// and the team page's pending-invite badge count.
+func (m *InviteModel) ListPendingByTeam(teamID int) ([]*Invite, error) {
+	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID
+		FROM invites WHERE teamID = ? AND usedAt IS NULL ORDER BY createdAt ASC`
+
+	rows, err := m.DB.Query(stmt, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	invites := []*Invite{}
+	for rows.Next() {
+		invite := &Invite{}
+		err := rows.Scan(&invite.ID, &invite.Token, &invite.TeamID, &invite.Email,
+			&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID)
+		if err != nil {
+			return nil, err
+		}
+		invites = append(invites, invite)
+	}
+	return invites, nil
+}
+
 func (m *InviteModel) MarkUsed(id, usedByUserID int) error {
 	statement := `UPDATE invites SET usedAt = UTC_TIMESTAMP(), usedByUserID = ? WHERE id = ?`
 

@@ -16,32 +16,17 @@
     {{end}}
 
     {{if .Data.CanManage}}
-    <div class="bg-white shadow-md rounded px-6 py-4 mb-6 w-full max-w-md text-center">
-        <h3 class="pt-0">Team Management</h3>
-        <div class="flex justify-center gap-2 flex-wrap mb-4">
-            <a class="btn" href="/admin/team/update/{{.Data.Team.ID}}">Edit Team</a>
-            <a class="btn" href="/team/{{.Data.Team.ID}}/invite">Invite Players</a>
-            <a class="btn" href="/team/{{.Data.Team.ID}}/joinRequests">Join Requests</a>
-            {{if .Data.CanDelete}}
-            <button class="btn bg-red-600 hover:bg-red-700" data-delete-url="/admin/team/delete/{{.Data.Team.ID}}" data-confirm-message="Delete team {{.Data.Team.Name}}? The roster must be removed first." data-redirect-url="/league/{{.Data.League.ID}}">Delete Team</button>
-            {{end}}
-        </div>
-        <form action="/admin/team/setCaptain" method="POST">
-            <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
-            <input type='hidden' name='teamID' value='{{.Data.Team.ID}}'>
-            <label class="field-label">Set Captain</label>
-            <select class="form-field" name="playerID">
-                <option value="0">-- None --</option>
-                {{range .Data.Roster}}
-                    {{if and $.Data.Team.CaptainPlayerID.Valid (eq .ID $.Data.Team.CaptainPlayerID.Int32)}}
-                        <option value="{{.ID}}" selected>{{.FirstName}} {{.LastName}}</option>
-                    {{else}}
-                        <option value="{{.ID}}">{{.FirstName}} {{.LastName}}</option>
-                    {{end}}
-                {{end}}
-            </select>
-            <input class="btn m-0" type='submit' value='Save'>
-        </form>
+    <div class="flex flex-col sm:flex-row sm:justify-center sm:flex-wrap items-stretch sm:items-center gap-2 w-full max-w-xs sm:max-w-none px-4 sm:px-0 mb-6">
+        <a class="btn-secondary text-center m-0" href="/admin/team/update/{{.Data.Team.ID}}">Edit Team</a>
+        <a class="btn-secondary text-center m-0" href="/team/{{.Data.Team.ID}}/invite">
+            Invite Players{{if .Data.PendingInviteCount}}<span class="badge-count">{{.Data.PendingInviteCount}}</span>{{end}}
+        </a>
+        <a class="btn-secondary text-center m-0" href="/team/{{.Data.Team.ID}}/joinRequests">
+            Join Requests{{if .Data.PendingJoinRequestCount}}<span class="badge-count">{{.Data.PendingJoinRequestCount}}</span>{{end}}
+        </a>
+        {{if .Data.CanDelete}}
+        <button class="btn-secondary text-red-600 m-0" data-delete-url="/admin/team/delete/{{.Data.Team.ID}}" data-confirm-message="Delete team {{.Data.Team.Name}}? The roster must be removed first." data-redirect-url="/league/{{.Data.League.ID}}">Delete Team</button>
+        {{end}}
     </div>
     {{end}}
 

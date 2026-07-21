@@ -2,9 +2,9 @@
 
 {{define "main"}}
 <div class="flex items-center flex-col">
-    <h2>Invite Players to {{.Data.Name}}</h2>
+    <h2>Invite Players to {{.Data.Team.Name}}</h2>
     <div class="w-full max-w-md">
-        <form class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" action='/team/{{.Data.ID}}/invite' method='POST'>
+        <form class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" action='/team/{{.Data.Team.ID}}/invite' method='POST'>
             <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
             {{range .Form.NonFieldErrors}}
                 <p class="error-message-big">{{.}}</p>
@@ -22,9 +22,27 @@
             </div>
             <div class="flex justify-between">
                 <input class="btn m-0" type='submit' value='Send Invites'>
-                <a class="btn m-0" href="/team/{{.Data.ID}}">Cancel</a>
+                <a class="btn m-0" href="/team/{{.Data.Team.ID}}">Cancel</a>
             </div>
         </form>
+
+        {{if .Data.PendingInvites}}
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <h3 class="pt-0 text-center">Outstanding Invites</h3>
+            <table class="text-left w-full">
+                <tr>
+                    <th>Email</th>
+                    <th>Sent</th>
+                </tr>
+                {{range .Data.PendingInvites}}
+                <tr>
+                    <td>{{.Email}}</td>
+                    <td>{{humanDate .CreatedAt}}</td>
+                </tr>
+                {{end}}
+            </table>
+        </div>
+        {{end}}
     </div>
 </div>
 {{end}}

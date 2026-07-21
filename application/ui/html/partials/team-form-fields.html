@@ -1,18 +1,8 @@
-{{define "team-form-fields"}}
-    {{range .Form.NonFieldErrors}}
-        <p class="error-message pb-2">{{.}}</p>
-    {{end}}
-    <div class="mb-4">
-        <label class="field-label">Name</label>
-        {{$errorClass := ""}}
-        {{if .Form.FieldErrors.name }}
-            {{$errorClass = "error-border"}}
-        {{end}}
-        <input class="form-field {{$errorClass}}" type='text' name='name' value='{{.Form.Name}}'>
-        {{with .Form.FieldErrors.name}}
-            <p class='error-message'>{{.}}</p>
-        {{end}}
-    </div>
+{{/* Split out from team-form-fields so team-update.html can swap it for a
+     hidden input when the viewer isn't a system admin — league reassignment
+     stays admin-only, but everyone else still needs to post the unchanged
+     value. */}}
+{{define "team-league-field"}}
     <div class="mb-4">
         <label class="field-label">League</label>
         {{$errorClass := ""}}
@@ -30,6 +20,23 @@
             {{end}}
         </select>
         {{with .Form.FieldErrors.leagueID}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+{{end}}
+
+{{define "team-form-fields"}}
+    {{range .Form.NonFieldErrors}}
+        <p class="error-message pb-2">{{.}}</p>
+    {{end}}
+    <div class="mb-4">
+        <label class="field-label">Name</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.name }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <input class="form-field {{$errorClass}}" type='text' name='name' value='{{.Form.Name}}'>
+        {{with .Form.FieldErrors.name}}
             <p class='error-message'>{{.}}</p>
         {{end}}
     </div>

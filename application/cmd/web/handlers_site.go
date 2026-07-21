@@ -15,6 +15,24 @@ type homeTeamCard struct {
 	RosterCount int
 }
 
+// homeLeagueCard is one entry in the home page's "My Leagues" area — shown
+// to system admins (every league) and league admins (just the leagues they
+// administer).
+type homeLeagueCard struct {
+	League    *models.League
+	TeamCount int
+}
+
+// homeData is the home page's role-dependent content: Leagues (system
+// admins see every league, league admins see just the ones they administer),
+// Teams (any team the player is a member of, regardless of role), and
+// whether to show the system-admin-only quick links. A player who is both a
+// league admin and a team member sees both sections.
+type homeData struct {
+	Leagues []*homeLeagueCard
+	Teams   []*homeTeamCard
+}
+
 func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		app.notFound(w)
@@ -24,22 +42,53 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	data := app.newTemplateData(r)
 
 	if app.isActive(r) {
-		teamIDs := app.getTeamIDs(r)
-		cards := make([]*homeTeamCard, 0, len(teamIDs))
-		for _, teamID := range teamIDs {
+		hd := &homeData{}
+
+		for _, teamID := range app.getTeamIDs(r) {
 			card, err := app.buildHomeTeamCard(teamID)
 			if err != nil {
 				app.serverError(w, err)
 				return
 			}
-			cards = append(cards, card)
+			hd.Teams = append(hd.Teams, card)
 		}
-		if len(cards) > 0 {
-			data.Data = cards
+
+		var leagues []*models.League
+		var err error
+		if app.isAdmin(r) {
+			leagues, err = (&models.LeagueModel{DB: app.playerService.DB}).List()
+		} else if playerID := app.getPlayerID(r); playerID > 0 {
+			leagues, err = (&models.LeagueAdminModel{DB: app.playerService.DB}).GetLeaguesForPlayer(playerID)
 		}
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		for _, league := range leagues {
+			card, err := app.buildHomeLeagueCard(league)
+			if err != nil {
+				app.serverError(w, err)
+				return
+			}
+			hd.Leagues = append(hd.Leagues, card)
+		}
+
+		data.Data = hd
 	}
 
 	app.render(w, http.StatusOK, "home.html", data)
+}
+
+// buildHomeLeagueCard loads the display data for one "My Leagues" card: the
+// league and how many teams it has.
+func (app *application) buildHomeLeagueCard(league *models.League) (*homeLeagueCard, error) {
+	tm := &models.TeamModel{DB: app.playerService.DB}
+	teams, err := tm.GetByLeague(league.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &homeLeagueCard{League: league, TeamCount: len(teams)}, nil
 }
 
 // buildHomeTeamCard loads the display data for one "My Teams" card: the

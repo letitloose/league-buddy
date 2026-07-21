@@ -30,15 +30,19 @@ func (app *application) teamBreadcrumbs(team *models.Team, league *models.League
 // league, the captain's name (blank if unassigned), whether the current
 // user may manage this team (admin or its captain), and whether they're
 // allowed to request to join (active, has a player, not already on a team
-// in this league).
+// in this league). PendingInviteCount/PendingJoinRequestCount power the
+// small badge counts on the Invite Players/Join Requests buttons — both are
+// left at zero (and unqueried) for viewers who can't manage the team.
 type teamViewData struct {
-	Team             *models.Team
-	League           *models.League
-	CaptainName      string
-	CanManage        bool
-	CanDelete        bool
-	CanRequestToJoin bool
-	Roster           []*models.Player
+	Team                    *models.Team
+	League                  *models.League
+	CaptainName             string
+	CanManage               bool
+	CanDelete               bool
+	CanRequestToJoin        bool
+	Roster                  []*models.Player
+	PendingInviteCount      int
+	PendingJoinRequestCount int
 }
 
 func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
@@ -86,24 +90,44 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		canRequestToJoin = !isMember && !hasTeamInLeague
 	}
 
-	// The roster is now shown inline on the team page to every active
-	// viewer, not just managers (it also feeds the Set Captain <select>
-	// below for managers).
+	// The roster is shown inline on the team page to every active viewer,
+	// not just managers.
 	roster, err := app.playerService.GetByTeam(team.ID)
 	if err != nil {
 		app.serverError(w, err)
 		return
 	}
 
+	pendingInviteCount := 0
+	pendingJoinRequestCount := 0
+	if canManage {
+		im := &models.InviteModel{DB: app.playerService.DB}
+		pendingInvites, err := im.ListPendingByTeam(team.ID)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		pendingInviteCount = len(pendingInvites)
+
+		pendingRequests, err := app.joinRequestService.ListPendingByTeam(team.ID)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		pendingJoinRequestCount = len(pendingRequests)
+	}
+
 	data := app.newTemplateData(r)
 	data.Data = &teamViewData{
-		Team:             team,
-		League:           league,
-		CaptainName:      captainName,
-		CanManage:        canManage,
-		CanDelete:        canDelete,
-		CanRequestToJoin: canRequestToJoin,
-		Roster:           roster,
+		Team:                    team,
+		League:                  league,
+		CaptainName:             captainName,
+		CanManage:               canManage,
+		CanDelete:               canDelete,
+		CanRequestToJoin:        canRequestToJoin,
+		Roster:                  roster,
+		PendingInviteCount:      pendingInviteCount,
+		PendingJoinRequestCount: pendingJoinRequestCount,
 	}
 	data.Breadcrumbs = app.teamBreadcrumbs(team, league, true)
 
@@ -204,6 +228,14 @@ func (app *application) teamCreate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/team/%d", id), http.StatusSeeOther)
 }
 
+// teamUpdateData wraps the team (for its current CaptainPlayerID, to
+// preselect the Captain <select>) alongside its roster (the options for
+// that <select>).
+type teamUpdateData struct {
+	Team   *models.Team
+	Roster []*models.Player
+}
+
 func (app *application) teamUpdate(w http.ResponseWriter, r *http.Request) {
 	params := httprouter.ParamsFromContext(r.Context())
 
@@ -237,6 +269,12 @@ func (app *application) teamUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	roster, err := app.playerService.GetByTeam(team.ID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
 	form := &services.TeamForm{ID: team.ID, LeagueID: team.LeagueID, Name: team.Name, Motto: team.Motto.String}
 	if team.EstablishedDate.Valid {
 		form.EstablishedDate = pickerDate(team.EstablishedDate.Time)
@@ -244,11 +282,14 @@ func (app *application) teamUpdate(w http.ResponseWriter, r *http.Request) {
 
 	data := app.newTemplateData(r)
 	data.Form = form
+	data.Data = &teamUpdateData{Team: team, Roster: roster}
 	// The leagueID <select> stays populated with every league (not just the
 	// leagues this viewer administers) so a captain — who can edit their
 	// team's info but not reassign it to another league — still sees a
 	// dropdown containing their own team's current league. Reassignment to a
-	// league they don't manage is rejected server-side in teamUpdatePost.
+	// league they don't manage is rejected server-side in teamUpdatePost. The
+	// template only renders this <select> at all for admins — everyone else
+	// gets a hidden input carrying the unchanged value instead.
 	data.SupportData = leagues
 	data.Breadcrumbs = append(app.teamBreadcrumbs(team, league, false), Breadcrumb{Label: "Edit"})
 
@@ -310,8 +351,24 @@ func (app *application) teamUpdatePost(w http.ResponseWriter, r *http.Request) {
 				app.serverError(w, lerr)
 				return
 			}
+			tm := &models.TeamModel{DB: app.playerService.DB}
+			team, terr := tm.Get(id)
+			if terr != nil {
+				if errors.Is(terr, models.ErrNoRecord) {
+					app.notFound(w)
+				} else {
+					app.serverError(w, terr)
+				}
+				return
+			}
+			roster, rerr := app.playerService.GetByTeam(id)
+			if rerr != nil {
+				app.serverError(w, rerr)
+				return
+			}
 			data := app.newTemplateData(r)
 			data.Form = form
+			data.Data = &teamUpdateData{Team: team, Roster: roster}
 			data.SupportData = leagues
 			breadcrumbs := []Breadcrumb{{Label: "Leagues", URL: "/league"}}
 			for _, league := range leagues {
@@ -330,6 +387,24 @@ func (app *application) teamUpdatePost(w http.ResponseWriter, r *http.Request) {
 		}
 		app.serverError(w, err)
 		return
+	}
+
+	// Captain reassignment rides along with the team-info edit now, rather
+	// than a separate form. The <select> always posts a value ("0" for
+	// "-- None --", or a player ID) — captainPlayerID is only absent when a
+	// caller other than team-update.html's form posts here without it, in
+	// which case the captain is left untouched.
+	if captainStr := r.PostForm.Get("captainPlayerID"); captainStr != "" {
+		captainPlayerID, _ := strconv.Atoi(captainStr)
+		if err := app.teamService.SetCaptain(id, captainPlayerID, app.getUserName(r)); err != nil {
+			if errors.Is(err, models.ErrBadData) {
+				app.sessionManager.Put(r.Context(), "flash", form.Name+" updated, but that player isn't on the roster — captain unchanged.")
+				http.Redirect(w, r, fmt.Sprintf("/team/%d", form.ID), http.StatusSeeOther)
+				return
+			}
+			app.serverError(w, err)
+			return
+		}
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", form.Name+" has been updated!")
@@ -439,9 +514,24 @@ func (app *application) teamActionBreadcrumbs(w http.ResponseWriter, team *model
 	return append(app.teamBreadcrumbs(team, league, false), extra...), true
 }
 
+// teamInviteData wraps a team alongside its outstanding (not-yet-accepted)
+// invites, shown below the send form so captains/admins can see who's
+// already been invited.
+type teamInviteData struct {
+	Team           *models.Team
+	PendingInvites []*models.Invite
+}
+
 func (app *application) teamInviteForm(w http.ResponseWriter, r *http.Request) {
 	team, ok := app.getRouteTeam(w, r)
 	if !ok {
+		return
+	}
+
+	im := &models.InviteModel{DB: app.playerService.DB}
+	pending, err := im.ListPendingByTeam(team.ID)
+	if err != nil {
+		app.serverError(w, err)
 		return
 	}
 
@@ -451,7 +541,7 @@ func (app *application) teamInviteForm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := app.newTemplateData(r)
-	data.Data = team
+	data.Data = &teamInviteData{Team: team, PendingInvites: pending}
 	data.Form = services.InviteForm{}
 	data.Breadcrumbs = breadcrumbs
 
@@ -479,12 +569,18 @@ func (app *application) teamInviteSend(w http.ResponseWriter, r *http.Request) {
 	invited, err := app.inviteService.SendInvites(team.ID, loggedInUserID, app.getUserName(r), form)
 	if err != nil {
 		if errors.Is(err, models.ErrBadData) {
+			im := &models.InviteModel{DB: app.playerService.DB}
+			pending, perr := im.ListPendingByTeam(team.ID)
+			if perr != nil {
+				app.serverError(w, perr)
+				return
+			}
 			breadcrumbs, ok := app.teamActionBreadcrumbs(w, team, Breadcrumb{Label: "Invite Players"})
 			if !ok {
 				return
 			}
 			data := app.newTemplateData(r)
-			data.Data = team
+			data.Data = &teamInviteData{Team: team, PendingInvites: pending}
 			data.Form = form
 			data.Breadcrumbs = breadcrumbs
 			app.render(w, http.StatusUnprocessableEntity, "team-invite.html", data)

@@ -7,7 +7,25 @@
         <form class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" action='/admin/team/update' method='POST'>
             <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
             <input type='hidden' name='team-id' value='{{.Form.ID}}'>
+            {{if .IsAdmin}}
+                {{template "team-league-field" .}}
+            {{else}}
+                <input type='hidden' name='leagueID' value='{{.Form.LeagueID}}'>
+            {{end}}
             {{template "team-form-fields" .}}
+            <div class="mb-4">
+                <label class="field-label">Captain</label>
+                <select class="form-field" name="captainPlayerID">
+                    <option value="0">-- None --</option>
+                    {{range .Data.Roster}}
+                        {{if and $.Data.Team.CaptainPlayerID.Valid (eq .ID $.Data.Team.CaptainPlayerID.Int32)}}
+                            <option value="{{.ID}}" selected>{{.FirstName}} {{.LastName}}</option>
+                        {{else}}
+                            <option value="{{.ID}}">{{.FirstName}} {{.LastName}}</option>
+                        {{end}}
+                    {{end}}
+                </select>
+            </div>
             <div class="flex justify-between">
                 <input class="btn m-0" type='submit' value='Update'>
                 <a class="btn m-0" href="/team/{{.Form.ID}}">Cancel</a>

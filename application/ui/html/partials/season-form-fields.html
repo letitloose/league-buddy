@@ -1,0 +1,51 @@
+{{/* Split out from season-form-fields so season-update.html can swap the
+     league field for a hidden input when the viewer isn't a system admin —
+     reassigning a season to a different league stays admin-only, same
+     pattern as team-league-field in team-form-fields.html. */}}
+{{define "season-league-field"}}
+    <div class="mb-4">
+        <label class="field-label">League</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.leagueID }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <select class="form-field {{$errorClass}}" name="leagueID">
+            <option value="">-- Select --</option>
+            {{range .SupportData.Leagues}}
+                {{if eq .ID $.Form.LeagueID}}
+                    <option value="{{.ID}}" selected>{{.Name}}</option>
+                {{else}}
+                    <option value="{{.ID}}">{{.Name}}</option>
+                {{end}}
+            {{end}}
+        </select>
+        {{with .Form.FieldErrors.leagueID}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+{{end}}
+
+{{define "season-form-fields"}}
+    {{range .Form.NonFieldErrors}}
+        <p class="error-message pb-2">{{.}}</p>
+    {{end}}
+    <div class="mb-4">
+        <label class="field-label">Name</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.name }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <input class="form-field {{$errorClass}}" type='text' name='name' value='{{.Form.Name}}' placeholder="e.g. Spring 2024">
+        {{with .Form.FieldErrors.name}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+    <div class="mb-4">
+        <label class="field-label">Start Date</label>
+        <input class="form-field" type='date' name='startdate' value='{{.Form.StartDate}}'>
+    </div>
+    <div class="mb-4">
+        <label class="field-label">End Date</label>
+        <input class="form-field" type='date' name='enddate' value='{{.Form.EndDate}}'>
+    </div>
+{{end}}

@@ -1,0 +1,66 @@
+{{define "location-form-fields"}}
+    {{range .Form.NonFieldErrors}}
+        <p class="error-message pb-2">{{.}}</p>
+    {{end}}
+    <div class="mb-4">
+        <label class="field-label">Name</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.name }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <input class="form-field {{$errorClass}}" type='text' name='name' value='{{.Form.Name}}'>
+        {{with .Form.FieldErrors.name}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+    <div class="mb-4">
+        <label class="field-label">Address 1</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.address1 }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <input class="form-field {{$errorClass}}" type='text' name='address1' value='{{.Form.Address1}}'>
+        {{with .Form.FieldErrors.address1}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+    <div class="mb-4">
+        <label class="field-label">Address 2</label>
+        <input class="form-field" type='text' name='address2' value='{{.Form.Address2}}'>
+    </div>
+    <div class="mb-4">
+        <label class="field-label">City</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.city }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <input class="form-field {{$errorClass}}" type='text' name='city' value='{{.Form.City}}'>
+        {{with .Form.FieldErrors.city}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+    <div class="mb-4">
+        <label class="field-label">State</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.stateprovince }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <select class="form-field {{$errorClass}}" name="stateprovince">
+            <option value="">-- Select --</option>
+            {{range .SupportData}}
+                {{if eq .Code $.Form.StateProvince}}
+                    <option value="{{.Code}}" selected>{{.Display}}</option>
+                {{else}}
+                    <option value="{{.Code}}">{{.Display}}</option>
+                {{end}}
+            {{end}}
+        </select>
+        {{with .Form.FieldErrors.stateprovince}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+    <div class="mb-4">
+        <label class="field-label">Zip</label>
+        <input class="form-field" type='text' name='zipcode' value='{{.Form.ZipCode}}'>
+    </div>
+{{end}}

@@ -127,6 +127,12 @@ func newTestApplication(t *testing.T) *application {
 	leagueService := &services.LeagueService{LeagueModel: leagues, DB: testDB}
 	teams := &models.TeamModel{DB: testDB}
 	teamService := &services.TeamService{TeamModel: teams, DB: testDB}
+	locations := &models.LocationModel{DB: testDB}
+	locationService := &services.LocationService{LocationModel: locations, DB: testDB}
+	seasons := &models.SeasonModel{DB: testDB}
+	seasonService := &services.SeasonService{SeasonModel: seasons, DB: testDB}
+	matches := &models.MatchModel{DB: testDB}
+	matchService := &services.MatchService{MatchModel: matches, DB: testDB}
 	invites := &models.InviteModel{DB: testDB}
 	inviteService := &services.InviteService{InviteModel: invites, DB: testDB}
 	joinRequests := &models.JoinRequestModel{DB: testDB}
@@ -139,6 +145,9 @@ func newTestApplication(t *testing.T) *application {
 		userService:        userService,
 		leagueService:      leagueService,
 		teamService:        teamService,
+		locationService:    locationService,
+		seasonService:      seasonService,
+		matchService:       matchService,
 		inviteService:      inviteService,
 		joinRequestService: joinRequestService,
 		templateCache:      templateCache,

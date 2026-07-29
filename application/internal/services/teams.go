@@ -15,6 +15,19 @@ type TeamForm struct {
 	Name            string
 	Motto           string
 	EstablishedDate string // "2006-01-02" from <input type=date>
+	LocationID      int    // 0 = no home field set
+
+	// New-location fields: redisplay-only on this form (validated and
+	// resolved to a LocationID separately, in the web layer, via
+	// LocationService.CreateLocation) — set here just so a failed
+	// submission re-renders with whatever the manager typed.
+	NewLocationName          string
+	NewLocationAddress1      string
+	NewLocationAddress2      string
+	NewLocationCity          string
+	NewLocationStateProvince string
+	NewLocationZipCode       string
+
 	validator.Validator
 }
 
@@ -41,11 +54,19 @@ func (service *TeamService) CreateTeam(form *TeamForm, actorEmail string) (int, 
 		return 0, err
 	}
 
+	if form.LocationID > 0 {
+		locm := &models.LocationModel{DB: service.DB}
+		if _, err := locm.Get(form.LocationID); err != nil {
+			return 0, err
+		}
+	}
+
 	id, err := service.Insert(&models.Team{
 		LeagueID:        form.LeagueID,
 		Name:            form.Name,
 		Motto:           sql.NullString{String: form.Motto, Valid: form.Motto != ""},
 		EstablishedDate: parseOptionalDate(form.EstablishedDate),
+		LocationID:      sql.NullInt32{Int32: int32(form.LocationID), Valid: form.LocationID > 0},
 	})
 	if err != nil {
 		return 0, err
@@ -75,12 +96,20 @@ func (service *TeamService) UpdateTeam(form *TeamForm, actorEmail string) error 
 		return err
 	}
 
+	if form.LocationID > 0 {
+		locm := &models.LocationModel{DB: service.DB}
+		if _, err := locm.Get(form.LocationID); err != nil {
+			return err
+		}
+	}
+
 	err := service.Update(&models.Team{
 		ID:              form.ID,
 		LeagueID:        form.LeagueID,
 		Name:            form.Name,
 		Motto:           sql.NullString{String: form.Motto, Valid: form.Motto != ""},
 		EstablishedDate: parseOptionalDate(form.EstablishedDate),
+		LocationID:      sql.NullInt32{Int32: int32(form.LocationID), Valid: form.LocationID > 0},
 	})
 	if err != nil {
 		return err

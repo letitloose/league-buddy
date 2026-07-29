@@ -1,0 +1,107 @@
+{{/* Home/away team pickers — create-only. Once a match exists, its teams
+     are fixed (match-update.html shows them as plain text) since changing
+     them after stats have been recorded against the original rosters would
+     orphan those stat lines. */}}
+{{define "match-team-fields"}}
+    <div class="mb-4">
+        <label class="field-label">Home Team</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.hometeamid }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <select class="form-field {{$errorClass}}" name="hometeamid">
+            <option value="">-- Select --</option>
+            {{range .Data.Teams}}
+                {{if eq .ID $.Form.HomeTeamID}}
+                    <option value="{{.ID}}" selected>{{.Name}}</option>
+                {{else}}
+                    <option value="{{.ID}}">{{.Name}}</option>
+                {{end}}
+            {{end}}
+        </select>
+        {{with .Form.FieldErrors.hometeamid}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+    <div class="mb-4">
+        <label class="field-label">Away Team</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.awayteamid }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <select class="form-field {{$errorClass}}" name="awayteamid">
+            <option value="">-- Select --</option>
+            {{range .Data.Teams}}
+                {{if eq .ID $.Form.AwayTeamID}}
+                    <option value="{{.ID}}" selected>{{.Name}}</option>
+                {{else}}
+                    <option value="{{.ID}}">{{.Name}}</option>
+                {{end}}
+            {{end}}
+        </select>
+        {{with .Form.FieldErrors.awayteamid}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+{{end}}
+
+{{/* Date/location/score/notes — shared by create and update. Needs
+     .Data.Locations in scope (present on both matchFormData and
+     matchUpdateData). */}}
+{{define "match-details-fields"}}
+    {{range .Form.NonFieldErrors}}
+        <p class="error-message pb-2">{{.}}</p>
+    {{end}}
+    <div class="mb-4">
+        <label class="field-label">Date</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.matchdate }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <input class="form-field {{$errorClass}}" type='date' name='matchdate' value='{{.Form.MatchDate}}'>
+        {{with .Form.FieldErrors.matchdate}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+    <div class="mb-4">
+        <label class="field-label">Location</label>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.locationid }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <select class="form-field {{$errorClass}}" name="locationid">
+            <option value="0">-- None --</option>
+            {{range .Data.Locations}}
+                {{if eq .ID $.Form.LocationID}}
+                    <option value="{{.ID}}" selected>{{.Name}}</option>
+                {{else}}
+                    <option value="{{.ID}}">{{.Name}}</option>
+                {{end}}
+            {{end}}
+        </select>
+        {{with .Form.FieldErrors.locationid}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+    <div class="mb-4 flex gap-4">
+        <div class="flex-1">
+            <label class="field-label">Home Score</label>
+            {{$errorClass := ""}}
+            {{if .Form.FieldErrors.homescore }}
+                {{$errorClass = "error-border"}}
+            {{end}}
+            <input class="form-field {{$errorClass}}" type='number' min='0' name='homescore' value='{{.Form.HomeScore}}'>
+        </div>
+        <div class="flex-1">
+            <label class="field-label">Away Score</label>
+            <input class="form-field" type='number' min='0' name='awayscore' value='{{.Form.AwayScore}}'>
+        </div>
+    </div>
+    {{with .Form.FieldErrors.homescore}}
+        <p class='error-message -mt-2 mb-4'>{{.}}</p>
+    {{end}}
+    <div class="mb-4">
+        <label class="field-label">Notes</label>
+        <input class="form-field" type='text' name='notes' value='{{.Form.Notes}}' placeholder="e.g. short-handed opponent">
+    </div>
+{{end}}

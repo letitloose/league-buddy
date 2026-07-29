@@ -3,16 +3,24 @@ package main
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/letitloose/league-buddy/internal/models"
 )
 
 // homeTeamCard is one entry in the home page's "My Teams" area.
+// NextMatch/NextMatchOpponent power the separate "Upcoming Matches"
+// section — NextMatch is nil when the team has no scheduled match on or
+// after today.
 type homeTeamCard struct {
-	Team        *models.Team
-	League      *models.League
-	CaptainName string
-	RosterCount int
+	Team                     *models.Team
+	League                   *models.League
+	CaptainName              string
+	NextMatch                *models.Match
+	NextMatchOpponent        string
+	NextMatchIsHome          bool
+	NextMatchLocation        *models.Location
+	NextMatchLocationAddress *models.Address
 }
 
 // homeLeagueCard is one entry in the home page's "My Leagues" area — shown
@@ -29,8 +37,9 @@ type homeLeagueCard struct {
 // whether to show the system-admin-only quick links. A player who is both a
 // league admin and a team member sees both sections.
 type homeData struct {
-	Leagues []*homeLeagueCard
-	Teams   []*homeTeamCard
+	Leagues          []*homeLeagueCard
+	Teams            []*homeTeamCard
+	HasUpcomingMatch bool
 }
 
 func (app *application) home(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +60,9 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			hd.Teams = append(hd.Teams, card)
+			if card.NextMatch != nil {
+				hd.HasUpcomingMatch = true
+			}
 		}
 
 		var leagues []*models.League
@@ -92,8 +104,7 @@ func (app *application) buildHomeLeagueCard(league *models.League) (*homeLeagueC
 }
 
 // buildHomeTeamCard loads the display data for one "My Teams" card: the
-// team, its league, the captain's name (blank if unassigned), and roster
-// size.
+// team, its league, and the captain's name (blank if unassigned).
 func (app *application) buildHomeTeamCard(teamID int) (*homeTeamCard, error) {
 	tm := &models.TeamModel{DB: app.playerService.DB}
 	team, err := tm.Get(teamID)
@@ -119,15 +130,49 @@ func (app *application) buildHomeTeamCard(teamID int) (*homeTeamCard, error) {
 		}
 	}
 
-	roster, err := app.playerService.GetByTeam(teamID)
+	card := &homeTeamCard{
+		Team:        team,
+		League:      league,
+		CaptainName: captainName,
+	}
+
+	mm := &models.MatchModel{DB: app.playerService.DB}
+	next, err := mm.NextMatchForTeam(teamID, time.Now())
+	if err != nil {
+		if !errors.Is(err, models.ErrNoRecord) {
+			return nil, err
+		}
+		return card, nil
+	}
+
+	isHome := next.HomeTeamID == teamID
+	opponentID := next.HomeTeamID
+	if isHome {
+		opponentID = next.AwayTeamID
+	}
+	opponent, err := tm.Get(opponentID)
 	if err != nil {
 		return nil, err
 	}
 
-	return &homeTeamCard{
-		Team:        team,
-		League:      league,
-		CaptainName: captainName,
-		RosterCount: len(roster),
-	}, nil
+	card.NextMatch = next
+	card.NextMatchOpponent = opponent.Name
+	card.NextMatchIsHome = isHome
+
+	if next.LocationID.Valid {
+		locm := &models.LocationModel{DB: app.playerService.DB}
+		location, err := locm.Get(int(next.LocationID.Int32))
+		if err != nil {
+			return nil, err
+		}
+		am := &models.AddressModel{DB: app.playerService.DB}
+		address, err := am.Get(location.AddressID)
+		if err != nil {
+			return nil, err
+		}
+		card.NextMatchLocation = location
+		card.NextMatchLocationAddress = address
+	}
+
+	return card, nil
 }

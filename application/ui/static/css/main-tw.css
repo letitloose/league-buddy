@@ -615,6 +615,27 @@ td {
   padding-bottom: 0.75rem;
 }
 
+/* Tighter cell padding on small screens so score/stat columns fit without
+     horizontal scrolling — back to the normal spacing at sm and up. */
+
+.table-compact th,
+  .table-compact td {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+@media (min-width: 640px) {
+  .table-compact th,
+  .table-compact td {
+    padding-left: 1rem;
+    padding-right: 1rem;
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+}
+
 table tr:nth-child(odd) {
   --tw-bg-opacity: 1;
   background-color: rgb(255 255 255 / var(--tw-bg-opacity));
@@ -754,6 +775,28 @@ table tr:nth-child(even) {
   background-color: rgb(21 128 61 / var(--tw-bg-opacity));
 }
 
+.btn-sm {
+  display: inline-block;
+  border-radius: 0.75rem;
+  --tw-bg-opacity: 1;
+  background-color: rgb(22 163 74 / var(--tw-bg-opacity));
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  --tw-text-opacity: 1;
+  color: rgb(255 255 255 / var(--tw-text-opacity));
+  text-decoration-line: none;
+}
+
+.btn-sm:hover {
+  --tw-bg-opacity: 1;
+  background-color: rgb(21 128 61 / var(--tw-bg-opacity));
+}
+
 .btn-secondary {
   margin: 0.5rem;
   display: inline-block;
@@ -834,12 +877,31 @@ table tr:nth-child(even) {
   color: rgb(156 163 175 / var(--tw-text-opacity));
 }
 
+.dialog-box {
+  width: 91.666667%;
+  max-width: 24rem;
+  border-radius: 0.5rem;
+  border-width: 0px;
+  padding: 1.5rem;
+  --tw-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --tw-shadow-colored: 0 20px 25px -5px var(--tw-shadow-color), 0 8px 10px -6px var(--tw-shadow-color);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+
 .visible {
   visibility: visible;
 }
 
+.fixed {
+  position: fixed;
+}
+
 .relative {
   position: relative;
+}
+
+.top-5 {
+  top: 1.25rem;
 }
 
 .z-50 {
@@ -858,6 +920,10 @@ table tr:nth-child(even) {
 .mx-auto {
   margin-left: auto;
   margin-right: auto;
+}
+
+.-mt-2 {
+  margin-top: -0.5rem;
 }
 
 .mb-1 {
@@ -900,6 +966,14 @@ table tr:nth-child(even) {
   margin-right: 1rem;
 }
 
+.mt-0 {
+  margin-top: 0px;
+}
+
+.mt-1 {
+  margin-top: 0.25rem;
+}
+
 .mt-2 {
   margin-top: 0.5rem;
 }
@@ -910,6 +984,10 @@ table tr:nth-child(even) {
 
 .mt-4 {
   margin-top: 1rem;
+}
+
+.mt-6 {
+  margin-top: 1.5rem;
 }
 
 .block {
@@ -952,6 +1030,10 @@ table tr:nth-child(even) {
   width: 33.333333%;
 }
 
+.w-14 {
+  width: 3.5rem;
+}
+
 .w-full {
   width: 100%;
 }
@@ -984,6 +1066,10 @@ table tr:nth-child(even) {
   flex-direction: column;
 }
 
+.flex-wrap {
+  flex-wrap: wrap;
+}
+
 .items-end {
   align-items: flex-end;
 }
@@ -994,6 +1080,10 @@ table tr:nth-child(even) {
 
 .items-stretch {
   align-items: stretch;
+}
+
+.justify-end {
+  justify-content: flex-end;
 }
 
 .justify-center {
@@ -1062,6 +1152,11 @@ table tr:nth-child(even) {
 .bg-green-100 {
   --tw-bg-opacity: 1;
   background-color: rgb(220 252 231 / var(--tw-bg-opacity));
+}
+
+.bg-green-800 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(22 101 52 / var(--tw-bg-opacity));
 }
 
 .bg-neutral-800 {
@@ -1169,6 +1264,10 @@ table tr:nth-child(even) {
   padding-top: 0.75rem;
 }
 
+.pt-4 {
+  padding-top: 1rem;
+}
+
 .pt-6 {
   padding-top: 1.5rem;
 }
@@ -1183,6 +1282,11 @@ table tr:nth-child(even) {
 
 .text-right {
   text-align: right;
+}
+
+.text-3xl {
+  font-size: 1.875rem;
+  line-height: 2.25rem;
 }
 
 .text-lg {
@@ -1254,6 +1358,11 @@ table tr:nth-child(even) {
   color: rgb(21 128 61 / var(--tw-text-opacity));
 }
 
+.text-green-800 {
+  --tw-text-opacity: 1;
+  color: rgb(22 101 52 / var(--tw-text-opacity));
+}
+
 .text-neutral-100 {
   --tw-text-opacity: 1;
   color: rgb(245 245 245 / var(--tw-text-opacity));
@@ -1290,6 +1399,10 @@ table tr:nth-child(even) {
   transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter, -webkit-backdrop-filter;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 150ms;
+}
+
+.backdrop\:bg-black\/50::backdrop {
+  background-color: rgb(0 0 0 / 0.5);
 }
 
 .hover\:border-green-500:hover {

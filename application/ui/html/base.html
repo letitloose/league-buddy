@@ -24,6 +24,22 @@
         <footer class="flex h-10 bg-neutral-800 text-neutral-300 justify-center items-center shrink-0">
             Release Date: {{.LastUpdate}}
         </footer>
+        <!-- Shared confirm/alert dialogs, used by main.js in place of the
+             browser's native confirm()/alert() for delete actions. -->
+        <dialog id="confirm-dialog" class="dialog-box backdrop:bg-black/50">
+            <p id="confirm-dialog-message" class="mb-6"></p>
+            <div class="flex justify-end gap-2">
+                <button type="button" id="confirm-dialog-cancel" class="btn-secondary m-0">Cancel</button>
+                <button type="button" id="confirm-dialog-confirm" class="btn bg-red-600 hover:bg-red-700 m-0">Delete</button>
+            </div>
+        </dialog>
+        <dialog id="alert-dialog" class="dialog-box backdrop:bg-black/50">
+            <p id="alert-dialog-message" class="mb-6"></p>
+            <div class="flex justify-end">
+                <button type="button" id="alert-dialog-ok" class="btn m-0">OK</button>
+            </div>
+        </dialog>
+
         <!-- 🐌 prancy-bouncing-snail was here -->
         <script src="/static/js/main.js" type="text/javascript"></script>
     </body>

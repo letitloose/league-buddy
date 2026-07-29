@@ -43,6 +43,13 @@
     @apply px-4 py-3;
   }
 
+  /* Tighter cell padding on small screens so score/stat columns fit without
+     horizontal scrolling — back to the normal spacing at sm and up. */
+  .table-compact th,
+  .table-compact td {
+    @apply px-2 py-2 sm:px-4 sm:py-3;
+  }
+
   table tr {
     @apply odd:bg-white even:bg-gray-200
   }
@@ -147,5 +154,9 @@
 
   .breadcrumb-sep {
     @apply mx-2 text-gray-400;
+  }
+
+  .dialog-box {
+    @apply rounded-lg shadow-xl p-6 max-w-sm w-11/12 border-0;
   }
 }

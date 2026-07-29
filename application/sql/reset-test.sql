@@ -2,6 +2,9 @@
 -- table untouched (migrations are applied once per test process, not per
 -- test, in testHelpers.go).
 SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE playerMatchStats;
+TRUNCATE TABLE matches;
+TRUNCATE TABLE seasons;
 TRUNCATE TABLE teamJoinRequests;
 TRUNCATE TABLE teamMembers;
 TRUNCATE TABLE leagueAdmins;
@@ -11,6 +14,7 @@ TRUNCATE TABLE sessions;
 TRUNCATE TABLE userRole;
 TRUNCATE TABLE roles;
 TRUNCATE TABLE players;
+TRUNCATE TABLE locations;
 TRUNCATE TABLE address;
 TRUNCATE TABLE users;
 TRUNCATE TABLE teams;

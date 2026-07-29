@@ -39,6 +39,7 @@
                             <a href='/user/search'>Users</a>
                             <a href='/admin/team/create'>Add Team</a>
                             <a href='/admin/joinRequests'>Join Requests</a>
+                            <a href='/location'>Locations</a>
                         </div>
                     </div>
                 {{end}}
@@ -87,6 +88,7 @@
             <a href='/user/search' class="block px-4 py-2 text-neutral-100">Users</a>
             <a href='/admin/team/create' class="block px-4 py-2 text-neutral-100">Add Team</a>
             <a href='/admin/joinRequests' class="block px-4 py-2 text-neutral-100">Join Requests</a>
+            <a href='/location' class="block px-4 py-2 text-neutral-100">Locations</a>
         {{end}}
         {{if .IsAuthenticated}}
             {{if and .IsActive (gt .PlayerID 0)}}

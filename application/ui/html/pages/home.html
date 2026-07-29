@@ -33,7 +33,6 @@
                         <h4 class="text-slate-800 p-0 mb-2">{{.Team.Name}}</h4>
                         {{with .Team.Motto.String}}<p class="text-sm italic text-gray-600 mb-1">&ldquo;{{.}}&rdquo;</p>{{end}}
                         <p class="text-sm text-gray-600 mb-1">Captain: {{if .CaptainName}}{{.CaptainName}}{{else}}Unassigned{{end}}</p>
-                        <p class="text-sm text-gray-600 mb-1">{{.RosterCount}} player{{if ne .RosterCount 1}}s{{end}} on the roster</p>
                         {{if .Team.EstablishedDate.Valid}}
                             <p class="text-xs text-gray-400 mt-3">Est. {{humanDate .Team.EstablishedDate.Time}}</p>
                         {{else}}
@@ -41,6 +40,32 @@
                         {{end}}
                     </a>
                     {{end}}
+                </div>
+                {{end}}
+
+                {{if .Data.HasUpcomingMatch}}
+                <h3 class="px-0">Upcoming Matches</h3>
+                <div class="overflow-x-auto mb-8">
+                <table class="text-left w-full">
+                    <tr>
+                        <th>Team</th>
+                        <th>Date</th>
+                        <th>Opponent</th>
+                        <th>Home/Away</th>
+                        <th>Location</th>
+                    </tr>
+                    {{range .Data.Teams}}
+                        {{if .NextMatch}}
+                        <tr>
+                            <td>{{.Team.Name}}</td>
+                            <td>{{humanDate .NextMatch.MatchDate}}</td>
+                            <td>{{.NextMatchOpponent}}</td>
+                            <td>{{if .NextMatchIsHome}}Home{{else}}Away{{end}}</td>
+                            <td>{{if .NextMatchLocation}}<a href="{{mapsURL .NextMatchLocationAddress}}" target="_blank" rel="noopener noreferrer">{{.NextMatchLocation.Name}}</a>{{end}}</td>
+                        </tr>
+                        {{end}}
+                    {{end}}
+                </table>
                 </div>
                 {{end}}
 
@@ -59,6 +84,10 @@
                         <h4 class="text-slate-800 p-0 mb-1">Join Requests</h4>
                         <p class="text-sm text-gray-600 m-0">Review pending join requests across every team.</p>
                     </a>
+                    <a href="/location" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-green-500 transition p-5">
+                        <h4 class="text-slate-800 p-0 mb-1">Locations</h4>
+                        <p class="text-sm text-gray-600 m-0">Manage home fields teams can be assigned to.</p>
+                    </a>
                 </div>
                 {{end}}
             </div>
@@ -70,7 +99,7 @@
     {{else}}
         <div class="max-w-4xl mx-auto px-4 pt-2 text-left">
             <p class="text-center text-lg text-gray-600 mb-6">Your digital companion for team and league management.</p>
-            <div class="text-center mb-8">
+            <div class="text-center mb-8 md:hidden">
                 <a class="btn" href="/user/login">Login</a>
                 <a class="btn-secondary" href="/user/signup">Signup</a>
             </div>

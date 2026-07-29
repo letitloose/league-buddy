@@ -1,0 +1,21 @@
+{{define "title"}}Add Match{{end}}
+
+{{define "main"}}
+<div class="flex items-center flex-col">
+    <h2>Add Match</h2>
+    <p class="mb-4 text-sm text-gray-500">{{.Data.Season.Name}} &middot; {{.Data.League.Name}}</p>
+    <div class="w-full max-w-xs">
+        <form class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" action='/admin/match/create' method='POST'>
+            <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+            <input type='hidden' name='seasonID' value='{{.Data.Season.ID}}'>
+            {{template "match-team-fields" .}}
+            {{template "match-details-fields" .}}
+            <p class="text-xs text-gray-500 mb-4">Player stats can be added once the match is saved.</p>
+            <div class="flex justify-between">
+                <input class="btn m-0" type='submit' value='Add'>
+                <a class="btn m-0" href="/season/{{.Data.Season.ID}}">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{{end}}

@@ -14,4 +14,5 @@ var (
 	ErrDuplicateRequest     = errors.New("models: player already has a pending join request")
 	ErrDuplicateMembership  = errors.New("models: player is already a member of this team")
 	ErrDuplicateLeagueAdmin = errors.New("models: player is already an admin of this league")
+	ErrDuplicateLocation    = errors.New("models: a location with this address already exists")
 )

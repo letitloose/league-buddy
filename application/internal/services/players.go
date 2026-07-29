@@ -138,7 +138,7 @@ func (service *PlayerService) AddPlayer(teamID int, form *PlayerForm, actorEmail
 		return 0, err
 	}
 
-	addressID, err := service.upsertAddress(0, form)
+	addressID, err := upsertAddress(service.DB, 0, form.Address1, form.Address2, form.City, form.StateProvince, form.ZipCode)
 	if err != nil {
 		return 0, err
 	}
@@ -187,7 +187,7 @@ func (service *PlayerService) UpdatePlayer(form *PlayerForm, actorEmail string) 
 		existingAddressID = int(existing.AddressID.Int32)
 	}
 
-	addressID, err := service.upsertAddress(existingAddressID, form)
+	addressID, err := upsertAddress(service.DB, existingAddressID, form.Address1, form.Address2, form.City, form.StateProvince, form.ZipCode)
 	if err != nil {
 		return err
 	}
@@ -208,42 +208,6 @@ func (service *PlayerService) UpdatePlayer(form *PlayerForm, actorEmail string) 
 
 	cs := &CommonService{DB: service.DB}
 	return cs.InsertAuditLog(actorEmail, time.Now(), "player record updated: "+form.FirstName+" "+form.LastName)
-}
-
-// upsertAddress inserts a new address, updates an existing one (when
-// existingAddressID > 0), or leaves things alone if no address fields were
-// supplied. Returns the resulting addressID to store on the player row.
-func (service *PlayerService) upsertAddress(existingAddressID int, form *PlayerForm) (sql.NullInt32, error) {
-	if form.Address1 == "" {
-		if existingAddressID > 0 {
-			return sql.NullInt32{Int32: int32(existingAddressID), Valid: true}, nil
-		}
-		return sql.NullInt32{}, nil
-	}
-
-	am := &models.AddressModel{DB: service.DB}
-	address := &models.Address{
-		ID:            existingAddressID,
-		Address1:      sql.NullString{String: form.Address1, Valid: true},
-		Address2:      sql.NullString{String: form.Address2, Valid: form.Address2 != ""},
-		City:          sql.NullString{String: form.City, Valid: form.City != ""},
-		StateProvince: sql.NullString{String: form.StateProvince, Valid: form.StateProvince != ""},
-		ZipCode:       sql.NullString{String: form.ZipCode, Valid: form.ZipCode != ""},
-	}
-
-	if existingAddressID > 0 {
-		_, err := am.Update(address)
-		if err != nil {
-			return sql.NullInt32{}, err
-		}
-		return sql.NullInt32{Int32: int32(existingAddressID), Valid: true}, nil
-	}
-
-	id, err := am.Insert(address)
-	if err != nil {
-		return sql.NullInt32{}, err
-	}
-	return sql.NullInt32{Int32: int32(id), Valid: true}, nil
 }
 
 // DeletePlayer wipes the player's bio, address, and every team membership,

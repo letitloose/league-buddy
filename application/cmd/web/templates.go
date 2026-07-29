@@ -3,9 +3,12 @@ package main
 import (
 	"html/template"
 	"io/fs"
+	"net/url"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/letitloose/league-buddy/internal/models"
 	"github.com/letitloose/league-buddy/ui"
 )
 
@@ -58,9 +61,40 @@ func humanDate(t time.Time) string {
 	return t.Format("01/02/2006")
 }
 
+// mapsURL builds a Google Maps search link for an address — no API key
+// needed, just the documented search-by-query URL scheme.
+func mapsURL(a *models.Address) string {
+	if a == nil {
+		return ""
+	}
+
+	parts := []string{}
+	if a.Address1.Valid && a.Address1.String != "" {
+		parts = append(parts, a.Address1.String)
+	}
+	if a.Address2.Valid && a.Address2.String != "" {
+		parts = append(parts, a.Address2.String)
+	}
+	if a.City.Valid && a.City.String != "" {
+		parts = append(parts, a.City.String)
+	}
+	if a.StateProvince.Valid && a.StateProvince.String != "" {
+		parts = append(parts, a.StateProvince.String)
+	}
+	if a.ZipCode.Valid && a.ZipCode.String != "" {
+		parts = append(parts, a.ZipCode.String)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return "https://www.google.com/maps/search/?api=1&query=" + url.QueryEscape(strings.Join(parts, ", "))
+}
+
 var functions = template.FuncMap{
 	"pickerDate": pickerDate,
 	"humanDate":  humanDate,
+	"mapsURL":    mapsURL,
 }
 
 func newTemplateCache() (map[string]*template.Template, error) {
@@ -99,6 +133,10 @@ func getTemplateSet(page string) (*template.Template, error) {
 		"./ui/html/partials/player-form-fields.html",
 		"./ui/html/partials/team-form-fields.html",
 		"./ui/html/partials/league-form-fields.html",
+		"./ui/html/partials/location-form-fields.html",
+		"./ui/html/partials/season-form-fields.html",
+		"./ui/html/partials/match-form-fields.html",
+		"./ui/html/partials/leader-tables.html",
 		"./ui/html/pages/" + page,
 	}
 

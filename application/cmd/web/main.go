@@ -25,6 +25,9 @@ type application struct {
 	userService        *services.UserService
 	leagueService      *services.LeagueService
 	teamService        *services.TeamService
+	locationService    *services.LocationService
+	seasonService      *services.SeasonService
+	matchService       *services.MatchService
 	inviteService      *services.InviteService
 	joinRequestService *services.JoinRequestService
 	emailService       *services.Email
@@ -82,6 +85,12 @@ func main() {
 	leagueService := &services.LeagueService{LeagueModel: leagues, DB: db}
 	teams := &models.TeamModel{DB: db}
 	teamService := &services.TeamService{TeamModel: teams, DB: db}
+	locations := &models.LocationModel{DB: db}
+	locationService := &services.LocationService{LocationModel: locations, DB: db}
+	seasons := &models.SeasonModel{DB: db}
+	seasonService := &services.SeasonService{SeasonModel: seasons, DB: db}
+	matches := &models.MatchModel{DB: db}
+	matchService := &services.MatchService{MatchModel: matches, DB: db}
 	invites := &models.InviteModel{DB: db}
 	inviteService := &services.InviteService{InviteModel: invites, DB: db, Email: email, InfoLog: infoLog}
 	joinRequests := &models.JoinRequestModel{DB: db}
@@ -98,6 +107,9 @@ func main() {
 		userService:        userService,
 		leagueService:      leagueService,
 		teamService:        teamService,
+		locationService:    locationService,
+		seasonService:      seasonService,
+		matchService:       matchService,
 		inviteService:      inviteService,
 		joinRequestService: joinRequestService,
 		emailService:       email,
@@ -264,6 +276,16 @@ func (app *application) reset() error {
 	}
 
 	if err := app.seedTestUsers(); err != nil {
+		app.errorLog.Println(err)
+	}
+
+	// Runs after seedTestUsers so Lou's captaincy of team 1 wins over the
+	// synthetic "Team Captain" test login seeded just above.
+	if err := app.seedColonialRoster(leagueBuddyUser); err != nil {
+		app.errorLog.Println(err)
+	}
+
+	if err := app.seedHistoricalSeasons(); err != nil {
 		app.errorLog.Println(err)
 	}
 

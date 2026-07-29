@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/letitloose/league-buddy/internal/models"
 )
@@ -386,6 +388,60 @@ func TestCaptainCanEditButNotDeleteTeam(t *testing.T) {
 	})
 }
 
+// A captain can add a brand-new location as their team's home field
+// straight from the team edit form, without going through the admin-only
+// /admin/location/create page.
+func TestCaptainCanAddNewHomeField(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Home Field Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, teamID, "captain-homefield@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "captain-homefield@test.com", "validpassword123")
+
+	_, _, body := ts.get(t, fmt.Sprintf("/admin/team/update/%d", teamID))
+	csrfToken := extractCSRFToken(t, body)
+
+	code, headers, _ := ts.postForm(t, "/admin/team/update", url.Values{
+		"team-id":             {fmt.Sprintf("%d", teamID)},
+		"leagueID":            {"1"},
+		"name":                {"Home Field Team"},
+		"newlocationname":     {"Test Field"},
+		"newlocationaddress1": {"5 Test Ln"},
+		"newlocationcity":     {"Troy"},
+		"csrf_token":          {csrfToken},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d", teamID) {
+		t.Fatalf("want Location %q; got %q", fmt.Sprintf("/team/%d", teamID), loc)
+	}
+
+	team, err := tm.Get(teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !team.LocationID.Valid {
+		t.Fatal("expected team to have a location set")
+	}
+
+	lm := &models.LocationModel{DB: testDB}
+	location, err := lm.Get(int(team.LocationID.Int32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if location.Name != "Test Field" {
+		t.Fatalf("expected location name Test Field, got %s", location.Name)
+	}
+}
+
 // The teamManager tier (requireTeamManager) must allow Admins through for
 // any team, allow a captain through only for their own team, and redirect
 // everyone else (including a captain of a *different* team) to /.
@@ -601,4 +657,498 @@ func TestInviteSignupAutoJoinsTeam(t *testing.T) {
 	if !invite.UsedAt.Valid {
 		t.Fatal("expected invite to be marked used")
 	}
+}
+
+// A league admin can create/edit/delete a season and a match within their
+// own league, but is redirected attempting any of that for a different
+// league — season/match administration reuses canManageLeague exactly like
+// team creation does.
+func TestLeagueAdminCanManageSeasonsAndMatches(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	otherLeagueID, err := lm.Insert(&models.League{Name: "Other Season League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Season Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Season Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm := &models.SeasonModel{DB: testDB}
+	otherSeasonID, err := sm.Insert(&models.Season{LeagueID: otherLeagueID, Name: "Other League Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupLeagueAdmin(t, 1, "season-league-admin@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "season-league-admin@test.com", "validpassword123")
+
+	t.Run("season create form allowed for own league", func(t *testing.T) {
+		code, _, _ := ts.get(t, "/admin/season/create?leagueID=1")
+		if code != http.StatusOK {
+			t.Errorf("want %d; got %d", http.StatusOK, code)
+		}
+	})
+
+	_, _, body := ts.get(t, "/admin/season/create?leagueID=1")
+	csrfToken := extractCSRFToken(t, body)
+
+	var seasonID int
+	t.Run("season create allowed for own league", func(t *testing.T) {
+		code, headers, _ := ts.postForm(t, "/admin/season/create", url.Values{
+			"leagueID":   {"1"},
+			"name":       {"Test Season"},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		loc := headers.Get("Location")
+		if _, err := fmt.Sscanf(loc, "/season/%d", &seasonID); err != nil || seasonID < 1 {
+			t.Fatalf("expected a /season/:id redirect, got %q", loc)
+		}
+	})
+
+	t.Run("season create redirected for other league", func(t *testing.T) {
+		code, headers, _ := ts.postForm(t, "/admin/season/create", url.Values{
+			"leagueID":   {fmt.Sprintf("%d", otherLeagueID)},
+			"name":       {"Should Not Be Created"},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Errorf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+	})
+
+	t.Run("season update form redirected for other league's season", func(t *testing.T) {
+		code, headers, _ := ts.get(t, fmt.Sprintf("/admin/season/update/%d", otherSeasonID))
+		if code != http.StatusSeeOther {
+			t.Errorf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+	})
+
+	var matchID int
+	t.Run("match create allowed for own league's season", func(t *testing.T) {
+		_, _, formBody := ts.get(t, fmt.Sprintf("/admin/match/create?seasonID=%d", seasonID))
+		matchCSRF := extractCSRFToken(t, formBody)
+
+		code, headers, _ := ts.postForm(t, "/admin/match/create", url.Values{
+			"seasonID":   {fmt.Sprintf("%d", seasonID)},
+			"hometeamid": {fmt.Sprintf("%d", homeTeamID)},
+			"awayteamid": {fmt.Sprintf("%d", awayTeamID)},
+			"matchdate":  {"2024-05-05"},
+			"csrf_token": {matchCSRF},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/season/%d", seasonID) {
+			t.Fatalf("want Location %q; got %q", fmt.Sprintf("/season/%d", seasonID), loc)
+		}
+
+		mm := &models.MatchModel{DB: testDB}
+		matches, err := mm.GetBySeason(seasonID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(matches) != 1 {
+			t.Fatalf("expected 1 match, got %d", len(matches))
+		}
+		matchID = matches[0].ID
+	})
+
+	t.Run("match update allowed for own league's match", func(t *testing.T) {
+		code, _, _ := ts.get(t, fmt.Sprintf("/admin/match/update/%d", matchID))
+		if code != http.StatusOK {
+			t.Errorf("want %d; got %d", http.StatusOK, code)
+		}
+	})
+
+	t.Run("match delete allowed for own league's match", func(t *testing.T) {
+		code, _, _ := ts.delete(t, fmt.Sprintf("/admin/match/delete/%d", matchID))
+		if code != http.StatusOK {
+			t.Errorf("want %d; got %d", http.StatusOK, code)
+		}
+	})
+
+	t.Run("season delete allowed once its matches are gone", func(t *testing.T) {
+		code, _, _ := ts.delete(t, fmt.Sprintf("/admin/season/delete/%d", seasonID))
+		if code != http.StatusOK {
+			t.Errorf("want %d; got %d", http.StatusOK, code)
+		}
+	})
+}
+
+// A plain captain (no league-admin rights) is redirected from every
+// season/match admin route, but can still view the read-only season and
+// team-schedule pages.
+func TestCaptainRedirectedFromSeasonMatchAdminRoutes(t *testing.T) {
+	app := newTestApplication(t)
+
+	// A dedicated league (rather than the shared team-1/league-1 fixtures)
+	// so this test's season doesn't leak into other tests in this file —
+	// TestMain sets up the DB once for the whole binary, it isn't reset
+	// between tests.
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Captain Season League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Captain Season Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Captain View Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, teamID, "captain-season@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "captain-season@test.com", "validpassword123")
+
+	adminGetRoutes := []struct {
+		name string
+		path string
+	}{
+		{"season create form", "/admin/season/create?leagueID=1"},
+		{"season update form", fmt.Sprintf("/admin/season/update/%d", seasonID)},
+		{"match create form", fmt.Sprintf("/admin/match/create?seasonID=%d", seasonID)},
+	}
+	for _, tt := range adminGetRoutes {
+		t.Run(tt.name+" redirected", func(t *testing.T) {
+			code, headers, _ := ts.get(t, tt.path)
+			if code != http.StatusSeeOther {
+				t.Errorf("want %d; got %d", http.StatusSeeOther, code)
+			}
+			if loc := headers.Get("Location"); loc != "/" {
+				t.Errorf("want Location %q; got %q", "/", loc)
+			}
+		})
+	}
+
+	t.Run("season delete forbidden", func(t *testing.T) {
+		code, _, _ := ts.delete(t, fmt.Sprintf("/admin/season/delete/%d", seasonID))
+		if code != http.StatusForbidden {
+			t.Errorf("want %d; got %d", http.StatusForbidden, code)
+		}
+	})
+
+	t.Run("season view allowed (read-only)", func(t *testing.T) {
+		code, _, _ := ts.get(t, fmt.Sprintf("/season/%d", seasonID))
+		if code != http.StatusOK {
+			t.Errorf("want %d; got %d", http.StatusOK, code)
+		}
+	})
+
+	t.Run("team schedule view allowed (read-only)", func(t *testing.T) {
+		code, _, _ := ts.get(t, fmt.Sprintf("/team/%d/season/%d", teamID, seasonID))
+		if code != http.StatusOK {
+			t.Errorf("want %d; got %d", http.StatusOK, code)
+		}
+	})
+}
+
+// A team's page and the home page must render without error when its
+// league has no seasons yet (the default state for a brand-new league) —
+// team 1 in the test fixtures never has a season, so these are exercised by
+// every other test in this file too, but it's worth asserting directly.
+func TestTeamAndHomeRenderWithoutSeason(t *testing.T) {
+	app := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	code, _, body := ts.get(t, "/team/1")
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if strings.Contains(body, "Schedule &amp; full stats") {
+		t.Error("expected no Schedule link without a season")
+	}
+
+	code, _, _ = ts.get(t, "/")
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+}
+
+// The league page's standings table defaults to points-descending, and
+// clicking a column header (via its ?sort=&dir= query params) re-orders it
+// by that column instead. Goals-against ranks these three teams in a
+// different order than points does, by construction, so the two page
+// renders are checked against two different expected orderings.
+func TestLeagueStandingsSortingAndLeaderTables(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Standings Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tm := &models.TeamModel{DB: testDB}
+	teamA, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Standings Team A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamB, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Standings Team B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamC, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Standings Team C"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Standings Test Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pm := &models.PlayerModel{DB: testDB}
+	scorer, err := pm.Insert(&models.Player{FirstName: "Goalie", LastName: "Scorer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assister, err := pm.Insert(&models.Player{FirstName: "Setup", LastName: "Assister"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mm := &models.MatchModel{DB: testDB}
+	pmsm := &models.PlayerMatchStatModel{DB: testDB}
+
+	// A beats B 5-1, B beats C 1-0, A beats C 2-0.
+	// Points: A=6, B=3, C=0. GoalsAgainst: A=1, C=3, B=5 — a different order.
+	match1, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamA, AwayTeamID: teamB, MatchDate: time.Now(),
+		HomeScore: sql.NullInt32{Int32: 5, Valid: true}, AwayScore: sql.NullInt32{Int32: 1, Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamA, AwayTeamID: teamC, MatchDate: time.Now(),
+		HomeScore: sql.NullInt32{Int32: 2, Valid: true}, AwayScore: sql.NullInt32{Int32: 0, Valid: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamB, AwayTeamID: teamC, MatchDate: time.Now(),
+		HomeScore: sql.NullInt32{Int32: 1, Valid: true}, AwayScore: sql.NullInt32{Int32: 0, Valid: true}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := pmsm.Upsert(&models.PlayerMatchStat{MatchID: match1, PlayerID: scorer, TeamID: teamA, Goals: 3, Assists: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pmsm.Upsert(&models.PlayerMatchStat{MatchID: match1, PlayerID: assister, TeamID: teamA, Goals: 1, Assists: 2}); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	t.Run("default sort is points descending", func(t *testing.T) {
+		code, _, body := ts.get(t, fmt.Sprintf("/league/%d", leagueID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		posA, posB, posC := strings.Index(body, "Standings Team A"), strings.Index(body, "Standings Team B"), strings.Index(body, "Standings Team C")
+		if posA < 0 || posB < 0 || posC < 0 {
+			t.Fatalf("expected all three teams in the standings table, got positions %d/%d/%d", posA, posB, posC)
+		}
+		if !(posA < posB && posB < posC) {
+			t.Fatalf("expected order A, B, C by points; got positions %d/%d/%d", posA, posB, posC)
+		}
+		if !strings.Contains(body, "Goal Leaders") || !strings.Contains(body, "Assist Leaders") {
+			t.Error("expected both leader tables on the league page")
+		}
+		if !strings.Contains(body, "Goalie Scorer") || !strings.Contains(body, "Setup Assister") {
+			t.Error("expected the seeded scorer/assister to appear in the leader tables")
+		}
+	})
+
+	t.Run("sort=goalsagainst&dir=asc reorders the table", func(t *testing.T) {
+		code, _, body := ts.get(t, fmt.Sprintf("/league/%d?sort=goalsagainst&dir=asc", leagueID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		posA, posB, posC := strings.Index(body, "Standings Team A"), strings.Index(body, "Standings Team B"), strings.Index(body, "Standings Team C")
+		if !(posA < posC && posC < posB) {
+			t.Fatalf("expected order A, C, B by goals-against ascending; got positions %d/%d/%d", posA, posB, posC)
+		}
+	})
+
+	t.Run("season page shows the same leader tables", func(t *testing.T) {
+		code, _, body := ts.get(t, fmt.Sprintf("/season/%d", seasonID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "Goal Leaders") || !strings.Contains(body, "Assist Leaders") {
+			t.Error("expected both leader tables on the season page")
+		}
+		if !strings.Contains(body, "Goalie Scorer") || !strings.Contains(body, "Setup Assister") {
+			t.Error("expected the seeded scorer/assister to appear in the leader tables")
+		}
+	})
+}
+
+// The match view page is open to any active user, but the Edit Match link
+// (and the underlying /admin/match/update route) is only offered to an
+// admin, a league admin, or a captain of one of the two teams that played —
+// captains weren't previously involved in match administration at all, so
+// this is new capability, not a change to the existing admin/league-admin
+// access. Deleting a match stays admin/league-admin-only, same as deleting
+// a team — too destructive for a single unilateral captain.
+func TestMatchViewAndCaptainEditAccess(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Match View Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Match View Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Match View Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Match View Bystander FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Match View Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now(),
+		HomeScore: sql.NullInt32{Int32: 1, Valid: true}, AwayScore: sql.NullInt32{Int32: 0, Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, awayTeamID, "match-view-captain@test.com", "validpassword123")
+	setupTeamCaptain(t, otherTeamID, "match-view-bystander-captain@test.com", "validpassword123")
+
+	t.Run("any active user can view the match", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testActiveEmail, testActivePass)
+
+		code, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "Match View Home FC") || !strings.Contains(body, "Match View Away FC") {
+			t.Error("expected both team names on the match view page")
+		}
+		if strings.Contains(body, "Edit Match") {
+			t.Error("expected no Edit Match link for a plain active user")
+		}
+	})
+
+	t.Run("captain of a team in the match can edit it", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "match-view-captain@test.com", "validpassword123")
+
+		code, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "Edit Match") {
+			t.Error("expected an Edit Match link for a captain of one of the teams")
+		}
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/admin/match/update/%d", matchID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		postCode, headers, _ := ts.postForm(t, "/admin/match/update", url.Values{
+			"match-id":   {fmt.Sprintf("%d", matchID)},
+			"matchdate":  {"2024-05-05"},
+			"homescore":  {"2"},
+			"awayscore":  {"0"},
+			"csrf_token": {csrfToken},
+		})
+		if postCode != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, postCode)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/season/%d", seasonID) {
+			t.Fatalf("want Location %q; got %q", fmt.Sprintf("/season/%d", seasonID), loc)
+		}
+
+		match, err := mm.Get(matchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !match.HomeScore.Valid || match.HomeScore.Int32 != 2 {
+			t.Fatalf("expected updated homeScore 2, got %+v", match.HomeScore)
+		}
+	})
+
+	t.Run("captain of a team in the match still cannot delete it", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "match-view-captain@test.com", "validpassword123")
+
+		code, _, _ := ts.delete(t, fmt.Sprintf("/admin/match/delete/%d", matchID))
+		if code != http.StatusForbidden {
+			t.Errorf("want %d; got %d", http.StatusForbidden, code)
+		}
+	})
+
+	t.Run("captain of an uninvolved team cannot edit", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "match-view-bystander-captain@test.com", "validpassword123")
+
+		code, headers, _ := ts.get(t, fmt.Sprintf("/admin/match/update/%d", matchID))
+		if code != http.StatusSeeOther {
+			t.Errorf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+	})
+
+	t.Run("team home page shows the schedule linking to the match view", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testActiveEmail, testActivePass)
+
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d", homeTeamID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, fmt.Sprintf("/match/%d", matchID)) {
+			t.Error("expected the team home page's schedule to link to the match view")
+		}
+		if !strings.Contains(body, "Match View Away FC") {
+			t.Error("expected the opponent's name in the schedule")
+		}
+	})
 }

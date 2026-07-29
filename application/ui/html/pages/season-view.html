@@ -1,0 +1,62 @@
+{{define "title"}}{{.Data.Season.Name}}{{end}}
+
+{{define "main"}}
+<div class="flex flex-col items-center">
+    <h2>{{.Data.Season.Name}}</h2>
+    <p class="mb-2"><a href="/league/{{.Data.League.ID}}">{{.Data.League.Name}}</a></p>
+    {{if or .Data.Season.StartDate.Valid .Data.Season.EndDate.Valid}}
+        <p class="mb-4 text-sm text-gray-500">
+            {{if .Data.Season.StartDate.Valid}}{{humanDate .Data.Season.StartDate.Time}}{{end}}
+            {{if or .Data.Season.StartDate.Valid .Data.Season.EndDate.Valid}} &ndash; {{end}}
+            {{if .Data.Season.EndDate.Valid}}{{humanDate .Data.Season.EndDate.Time}}{{end}}
+        </p>
+    {{end}}
+
+    {{if .Data.CanManage}}
+    <div class="flex flex-wrap justify-center gap-2 mb-6">
+        <a class="btn-secondary m-0" href="/admin/season/update/{{.Data.Season.ID}}">Edit Season</a>
+        <a class="btn-secondary m-0" href="/admin/match/create?seasonID={{.Data.Season.ID}}">Add Match</a>
+        <button class="btn-secondary text-red-600 m-0" data-delete-url="/admin/season/delete/{{.Data.Season.ID}}" data-confirm-message="Delete season {{.Data.Season.Name}}? Its matches must be removed first." data-conflict-message="{{.Data.Season.Name}} still has matches scheduled. Remove them first, then delete the season." data-redirect-url="/league/{{.Data.League.ID}}">Delete Season</button>
+    </div>
+    {{end}}
+
+    {{template "leader-tables" .Data}}
+
+    <div class="overflow-x-auto w-full md:w-3/4 px-2 md:px-0">
+    <table class="text-left w-full mb-4">
+        <tr>
+            <th>Date</th>
+            <th>Home</th>
+            <th>Away</th>
+            <th>Score</th>
+            <th>Location</th>
+            {{if .Data.CanManage}}<th>Actions</th>{{end}}
+        </tr>
+        {{range .Data.Matches}}
+        <tr>
+            <td><a href="/match/{{.Match.ID}}">{{humanDate .Match.MatchDate}}</a></td>
+            <td><a href="/match/{{.Match.ID}}">{{.HomeTeamName}}</a></td>
+            <td><a href="/match/{{.Match.ID}}">{{.AwayTeamName}}</a></td>
+            <td>
+                <a href="/match/{{.Match.ID}}">
+                {{if and .Match.HomeScore.Valid .Match.AwayScore.Valid}}
+                    {{.Match.HomeScore.Int32}} &ndash; {{.Match.AwayScore.Int32}}
+                {{else}}
+                    <span class="text-gray-400">&mdash;</span>
+                {{end}}
+                </a>
+                {{with .Match.Notes.String}}<p class="text-xs text-gray-500">{{.}}</p>{{end}}
+            </td>
+            <td>{{if .Location}}<a href="{{mapsURL .LocationAddress}}" target="_blank" rel="noopener noreferrer">{{.Location.Name}}</a>{{end}}</td>
+            {{if $.Data.CanManage}}
+            <td>
+                <a href="/admin/match/update/{{.Match.ID}}">Edit</a>
+                <button class="text-red-600" data-delete-url="/admin/match/delete/{{.Match.ID}}" data-confirm-message="Delete this match?" data-redirect-url="/season/{{$.Data.Season.ID}}">Delete</button>
+            </td>
+            {{end}}
+        </tr>
+        {{end}}
+    </table>
+    </div>
+</div>
+{{end}}

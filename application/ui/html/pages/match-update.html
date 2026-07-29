@@ -1,0 +1,64 @@
+{{define "title"}}{{.Data.HomeTeam.Name}} vs {{.Data.AwayTeam.Name}}{{end}}
+
+{{define "main"}}
+<div class="flex items-center flex-col">
+    <h2>{{.Data.HomeTeam.Name}} vs {{.Data.AwayTeam.Name}}</h2>
+    <p class="mb-4 text-sm text-gray-500">{{.Data.Season.Name}} &middot; {{.Data.League.Name}}</p>
+
+    <form class="w-full md:w-2/3 px-2 md:px-0" action='/admin/match/update' method='POST'>
+        <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+        <input type='hidden' name='match-id' value='{{.Data.Match.ID}}'>
+
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4 max-w-xs mx-auto">
+            {{template "match-details-fields" .}}
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-2 mb-4">
+            <div class="bg-white shadow-md rounded px-4 pt-4 pb-4">
+                <h4 class="text-center pt-0">{{.Data.HomeTeam.Name}}</h4>
+                {{template "match-roster-stats" .Data.HomeRoster}}
+            </div>
+            <div class="bg-white shadow-md rounded px-4 pt-4 pb-4">
+                <h4 class="text-center pt-0">{{.Data.AwayTeam.Name}}</h4>
+                {{template "match-roster-stats" .Data.AwayRoster}}
+            </div>
+        </div>
+
+        <div class="flex justify-center gap-2 mb-6">
+            <input class="btn m-0" type='submit' value='Save'>
+            <a class="btn-secondary m-0" href="/season/{{.Data.Season.ID}}">Cancel</a>
+        </div>
+    </form>
+</div>
+{{end}}
+
+{{define "match-roster-stats"}}
+    {{if .}}
+    <div class="overflow-x-auto">
+    <table class="text-left w-full text-sm">
+        <tr>
+            <th>Player</th>
+            <th>G</th>
+            <th>A</th>
+            <th>YC</th>
+            <th>RC</th>
+        </tr>
+        {{range .}}
+        <tr>
+            <td>
+                {{.Player.FirstName}} {{.Player.LastName}}
+                <input type='hidden' name='statPlayerIDs' value='{{.Player.ID}}'>
+                <input type='hidden' name='teamID_{{.Player.ID}}' value='{{.Stat.TeamID}}'>
+            </td>
+            <td><input class="form-field w-14" type='number' min='0' name='goals_{{.Player.ID}}' value='{{.Stat.Goals}}'></td>
+            <td><input class="form-field w-14" type='number' min='0' name='assists_{{.Player.ID}}' value='{{.Stat.Assists}}'></td>
+            <td><input class="form-field w-14" type='number' min='0' name='yellow_{{.Player.ID}}' value='{{.Stat.YellowCards}}'></td>
+            <td><input class="form-field w-14" type='number' min='0' name='red_{{.Player.ID}}' value='{{.Stat.RedCards}}'></td>
+        </tr>
+        {{end}}
+    </table>
+    </div>
+    {{else}}
+    <p class="text-center text-sm text-gray-500">No players on this roster.</p>
+    {{end}}
+{{end}}

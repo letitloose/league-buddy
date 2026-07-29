@@ -87,7 +87,7 @@ func (m *TeamMemberModel) HasTeamInLeague(playerID, leagueID int) (bool, error) 
 // GetTeamsForPlayer returns every team playerID is a member of, ordered by
 // team name — used for the nav "My Teams" list and the home page cards.
 func (m *TeamMemberModel) GetTeamsForPlayer(playerID int) ([]*Team, error) {
-	stmt := `SELECT t.id, t.leagueID, t.name, t.motto, t.establishedDate, t.captainPlayerID, t.created
+	stmt := `SELECT t.id, t.leagueID, t.name, t.motto, t.establishedDate, t.captainPlayerID, t.locationID, t.created
 		FROM teams t
 		JOIN teamMembers tm ON tm.teamID = t.id
 		WHERE tm.playerID = ?
@@ -102,7 +102,7 @@ func (m *TeamMemberModel) GetTeamsForPlayer(playerID int) ([]*Team, error) {
 	teams := []*Team{}
 	for rows.Next() {
 		team := &Team{}
-		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.Created)
+		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.LocationID, &team.Created)
 		if err != nil {
 			return nil, err
 		}

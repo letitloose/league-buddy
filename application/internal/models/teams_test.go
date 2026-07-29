@@ -120,6 +120,53 @@ func TestSetCaptain(t *testing.T) {
 	}
 }
 
+func TestGetByLocation(t *testing.T) {
+	db := NewTestDB(t)
+
+	am := AddressModel{DB: db}
+	lm := LocationModel{DB: db}
+	tm := TeamModel{DB: db}
+
+	addressID, err := am.Insert(&Address{
+		Address1: sql.NullString{String: "1 Main St", Valid: true},
+		City:     sql.NullString{String: "Troy", Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locationID, err := lm.Insert(&Location{Name: "Shared Field", AddressID: addressID, AddressKey: "1 main st||troy||"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	teams, err := tm.GetByLocation(locationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(teams) != 0 {
+		t.Fatalf("expected 0 teams before assignment, got %d", len(teams))
+	}
+
+	if err := tm.Update(&Team{ID: 1, LeagueID: 1, Name: "Test Team", LocationID: sql.NullInt32{Int32: int32(locationID), Valid: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tm.Insert(&Team{LeagueID: 1, Name: "Second Team", LocationID: sql.NullInt32{Int32: int32(locationID), Valid: true}}); err != nil {
+		t.Fatal(err)
+	}
+
+	teams, err = tm.GetByLocation(locationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(teams) != 2 {
+		t.Fatalf("expected 2 teams sharing the location, got %d", len(teams))
+	}
+	names := map[string]bool{teams[0].Name: true, teams[1].Name: true}
+	if !names["Test Team"] || !names["Second Team"] {
+		t.Fatalf("expected Test Team and Second Team, got %v", teams)
+	}
+}
+
 func TestDeleteTeamWithDependentsFails(t *testing.T) {
 	db := NewTestDB(t)
 

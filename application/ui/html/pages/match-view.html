@@ -1,0 +1,73 @@
+{{define "title"}}{{.Data.HomeTeam.Name}} vs {{.Data.AwayTeam.Name}}{{end}}
+
+{{define "main"}}
+<div class="flex flex-col items-center">
+    <h2>{{.Data.HomeTeam.Name}} vs {{.Data.AwayTeam.Name}}</h2>
+    <p class="mb-1">
+        <a href="/season/{{.Data.Season.ID}}">{{.Data.Season.Name}}</a>
+        &middot; <a href="/league/{{.Data.League.ID}}">{{.Data.League.Name}}</a>
+    </p>
+    <p class="mb-1 text-sm text-gray-500">{{humanDate .Data.Match.MatchDate}}</p>
+    {{if .Data.Location}}
+        <p class="mb-4 text-sm text-gray-500">
+            <a href="{{mapsURL .Data.LocationAddress}}" target="_blank" rel="noopener noreferrer">{{.Data.Location.Name}}</a>
+        </p>
+    {{end}}
+
+    <div class="mb-4 text-center">
+        {{if and .Data.Match.HomeScore.Valid .Data.Match.AwayScore.Valid}}
+            <p class="text-3xl font-bold">{{.Data.Match.HomeScore.Int32}} &ndash; {{.Data.Match.AwayScore.Int32}}</p>
+        {{else}}
+            <p class="text-gray-400">Score not recorded</p>
+        {{end}}
+        {{with .Data.Match.Notes.String}}<p class="text-sm text-gray-500 mt-1">{{.}}</p>{{end}}
+    </div>
+
+    {{if .Data.CanManage}}
+    <div class="mb-6">
+        <a class="btn-secondary m-0" href="/admin/match/update/{{.Data.Match.ID}}">Edit Match</a>
+    </div>
+    {{end}}
+
+    <div class="grid gap-4 sm:grid-cols-2 w-full md:w-2/3 mb-6">
+        <div class="bg-white shadow-md rounded px-4 py-4">
+            <h4 class="pt-0 text-center"><a href="/team/{{.Data.HomeTeam.ID}}">{{.Data.HomeTeam.Name}}</a></h4>
+            {{if .Data.HomeStats}}
+            <table class="text-left w-full text-sm">
+                <tr><th>Player</th><th>G</th><th>A</th><th>YC</th><th>RC</th></tr>
+                {{range .Data.HomeStats}}
+                <tr>
+                    <td>{{.PlayerName}}</td>
+                    <td>{{.Goals}}</td>
+                    <td>{{.Assists}}</td>
+                    <td>{{.YellowCards}}</td>
+                    <td>{{.RedCards}}</td>
+                </tr>
+                {{end}}
+            </table>
+            {{else}}
+            <p class="text-center text-sm text-gray-500">No stats recorded.</p>
+            {{end}}
+        </div>
+        <div class="bg-white shadow-md rounded px-4 py-4">
+            <h4 class="pt-0 text-center"><a href="/team/{{.Data.AwayTeam.ID}}">{{.Data.AwayTeam.Name}}</a></h4>
+            {{if .Data.AwayStats}}
+            <table class="text-left w-full text-sm">
+                <tr><th>Player</th><th>G</th><th>A</th><th>YC</th><th>RC</th></tr>
+                {{range .Data.AwayStats}}
+                <tr>
+                    <td>{{.PlayerName}}</td>
+                    <td>{{.Goals}}</td>
+                    <td>{{.Assists}}</td>
+                    <td>{{.YellowCards}}</td>
+                    <td>{{.RedCards}}</td>
+                </tr>
+                {{end}}
+            </table>
+            {{else}}
+            <p class="text-center text-sm text-gray-500">No stats recorded.</p>
+            {{end}}
+        </div>
+    </div>
+</div>
+{{end}}

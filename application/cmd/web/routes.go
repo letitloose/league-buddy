@@ -46,6 +46,10 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodGet, "/league/:id", active.ThenFunc(app.leagueView))
 	router.Handler(http.MethodGet, "/team/:teamID", active.ThenFunc(app.teamView))
 	router.Handler(http.MethodPost, "/team/:teamID/joinRequest", active.ThenFunc(app.joinRequestSubmit))
+	router.Handler(http.MethodGet, "/location", active.ThenFunc(app.locationList))
+	router.Handler(http.MethodGet, "/season/:id", active.ThenFunc(app.seasonView))
+	router.Handler(http.MethodGet, "/team/:teamID/season/:seasonID", active.ThenFunc(app.teamSeasonView))
+	router.Handler(http.MethodGet, "/match/:id", active.ThenFunc(app.matchView))
 
 	// team-manager routes (logged in + active + (admin OR captain OR league
 	// admin of :teamID))
@@ -78,6 +82,22 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodPost, "/admin/team/create", active.ThenFunc(app.teamCreate))
 	router.Handler(http.MethodPost, "/admin/team/update", active.ThenFunc(app.teamUpdatePost))
 	router.Handler(http.MethodPost, "/admin/team/setCaptain", active.ThenFunc(app.teamSetCaptain))
+	// Season/match administration is scoped to "anyone who can administer the
+	// league" (canManageLeague — admin or league admin, captains excluded).
+	// All on the active tier with an in-handler check, same rationale as the
+	// team routes just above: create has no URL param to key middleware off
+	// of, and match-scoped routes would need a two-hop match->season->league
+	// lookup anyway, so one consistent pattern beats two.
+	router.Handler(http.MethodGet, "/admin/season/create", active.ThenFunc(app.seasonForm))
+	router.Handler(http.MethodPost, "/admin/season/create", active.ThenFunc(app.seasonCreate))
+	router.Handler(http.MethodGet, "/admin/season/update/:id", active.ThenFunc(app.seasonUpdate))
+	router.Handler(http.MethodPost, "/admin/season/update", active.ThenFunc(app.seasonUpdatePost))
+	router.Handler(http.MethodDelete, "/admin/season/delete/:id", active.ThenFunc(app.seasonDelete))
+	router.Handler(http.MethodGet, "/admin/match/create", active.ThenFunc(app.matchForm))
+	router.Handler(http.MethodPost, "/admin/match/create", active.ThenFunc(app.matchCreate))
+	router.Handler(http.MethodGet, "/admin/match/update/:id", active.ThenFunc(app.matchUpdate))
+	router.Handler(http.MethodPost, "/admin/match/update", active.ThenFunc(app.matchUpdatePost))
+	router.Handler(http.MethodDelete, "/admin/match/delete/:id", active.ThenFunc(app.matchDelete))
 
 	// admin routes (logged in + active + ADMIN role)
 	admin := dynamic.Append(app.requireAdmin)
@@ -116,6 +136,14 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodPost, "/admin/league/admins/add", admin.ThenFunc(app.leagueAddAdmin))
 	router.Handler(http.MethodPost, "/admin/league/admins/remove", admin.ThenFunc(app.leagueRemoveAdmin))
 	router.Handler(http.MethodGet, "/admin/joinRequests", admin.ThenFunc(app.adminJoinRequestList))
+	// Locations (home fields) are admin-only to create/edit/delete, same
+	// tier as leagues — any team manager can still pick an existing one for
+	// their team's home field via the team edit form.
+	router.Handler(http.MethodGet, "/admin/location/create", admin.ThenFunc(app.locationForm))
+	router.Handler(http.MethodPost, "/admin/location/create", admin.ThenFunc(app.locationCreate))
+	router.Handler(http.MethodGet, "/admin/location/update/:id", admin.ThenFunc(app.locationUpdate))
+	router.Handler(http.MethodPost, "/admin/location/update", admin.ThenFunc(app.locationUpdatePost))
+	router.Handler(http.MethodDelete, "/admin/location/delete/:id", admin.ThenFunc(app.locationDelete))
 
 	standard := alice.New(app.recoverPanic, app.logRequest, secureHeaders)
 

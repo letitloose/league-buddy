@@ -1,0 +1,84 @@
+{{define "title"}}{{.Data.Team.Name}} Schedule{{end}}
+
+{{define "main"}}
+<div class="flex flex-col items-center">
+    <h2>{{.Data.Team.Name}}</h2>
+    <p class="mb-4"><a href="/league/{{.Data.League.ID}}">{{.Data.League.Name}}</a></p>
+
+    {{if gt (len .Data.Seasons) 1}}
+    <div class="flex flex-wrap justify-center gap-2 mb-6">
+        {{range .Data.Seasons}}
+            {{if eq .ID $.Data.Season.ID}}
+                <span class="btn-sm bg-green-800">{{.Name}}</span>
+            {{else}}
+                <a class="btn-sm" href="/team/{{$.Data.Team.ID}}/season/{{.ID}}">{{.Name}}</a>
+            {{end}}
+        {{end}}
+    </div>
+    {{else}}
+    <h3 class="mt-0">{{.Data.Season.Name}}</h3>
+    {{end}}
+
+    <div class="w-full md:w-3/4 px-2 md:px-0">
+        <h3 class="text-center">Schedule</h3>
+        {{if .Data.Matches}}
+        <div class="overflow-x-auto">
+        <table class="text-left w-full mb-8">
+            <tr>
+                <th>Date</th>
+                <th>Opponent</th>
+                <th>Home/Away</th>
+                <th>Score</th>
+                <th>Location</th>
+            </tr>
+            {{range .Data.Matches}}
+            <tr>
+                <td><a href="/match/{{.Match.ID}}">{{humanDate .Match.MatchDate}}</a></td>
+                <td><a href="/match/{{.Match.ID}}">{{.Opponent}}</a></td>
+                <td>{{if .IsHome}}Home{{else}}Away{{end}}</td>
+                <td>
+                    <a href="/match/{{.Match.ID}}">
+                    {{if and .Match.HomeScore.Valid .Match.AwayScore.Valid}}
+                        {{.Match.HomeScore.Int32}} &ndash; {{.Match.AwayScore.Int32}}
+                    {{else}}
+                        <span class="text-gray-400">&mdash;</span>
+                    {{end}}
+                    </a>
+                </td>
+                <td>{{if .Location}}<a href="{{mapsURL .LocationAddress}}" target="_blank" rel="noopener noreferrer">{{.Location.Name}}</a>{{end}}</td>
+            </tr>
+            {{end}}
+        </table>
+        </div>
+        {{else}}
+        <p class="text-center text-gray-600 mb-8">No matches scheduled for this season yet.</p>
+        {{end}}
+
+        <h3 class="text-center">Leaders</h3>
+        {{if .Data.Leaders}}
+        <div class="overflow-x-auto">
+        <table class="text-left w-full mb-4">
+            <tr>
+                <th>Player</th>
+                <th>Goals</th>
+                <th>Assists</th>
+                <th>Yellow</th>
+                <th>Red</th>
+            </tr>
+            {{range .Data.Leaders}}
+            <tr>
+                <td>{{.Name}}</td>
+                <td>{{.Goals}}</td>
+                <td>{{.Assists}}</td>
+                <td>{{.YellowCards}}</td>
+                <td>{{.RedCards}}</td>
+            </tr>
+            {{end}}
+        </table>
+        </div>
+        {{else}}
+        <p class="text-center text-gray-600 mb-4">No stats recorded for this season yet.</p>
+        {{end}}
+    </div>
+</div>
+{{end}}

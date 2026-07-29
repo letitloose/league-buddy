@@ -15,6 +15,7 @@ type Team struct {
 	Motto           sql.NullString
 	EstablishedDate sql.NullTime
 	CaptainPlayerID sql.NullInt32
+	LocationID      sql.NullInt32
 	Created         time.Time
 }
 
@@ -23,9 +24,9 @@ type TeamModel struct {
 }
 
 func (m *TeamModel) Insert(team *Team) (int, error) {
-	statement := `INSERT INTO teams (leagueID, name, motto, establishedDate, created) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())`
+	statement := `INSERT INTO teams (leagueID, name, motto, establishedDate, locationID, created) VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP())`
 
-	result, err := m.DB.Exec(statement, team.LeagueID, team.Name, team.Motto, team.EstablishedDate)
+	result, err := m.DB.Exec(statement, team.LeagueID, team.Name, team.Motto, team.EstablishedDate, team.LocationID)
 	if err != nil {
 		return 0, err
 	}
@@ -38,10 +39,10 @@ func (m *TeamModel) Insert(team *Team) (int, error) {
 }
 
 func (m *TeamModel) Get(id int) (*Team, error) {
-	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, created FROM teams WHERE id = ?`
+	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, locationID, created FROM teams WHERE id = ?`
 
 	team := &Team{}
-	err := m.DB.QueryRow(stmt, id).Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.Created)
+	err := m.DB.QueryRow(stmt, id).Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.LocationID, &team.Created)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -52,9 +53,9 @@ func (m *TeamModel) Get(id int) (*Team, error) {
 }
 
 func (m *TeamModel) Update(team *Team) error {
-	statement := `UPDATE teams SET leagueID = ?, name = ?, motto = ?, establishedDate = ? WHERE id = ?`
+	statement := `UPDATE teams SET leagueID = ?, name = ?, motto = ?, establishedDate = ?, locationID = ? WHERE id = ?`
 
-	_, err := m.DB.Exec(statement, team.LeagueID, team.Name, team.Motto, team.EstablishedDate, team.ID)
+	_, err := m.DB.Exec(statement, team.LeagueID, team.Name, team.Motto, team.EstablishedDate, team.LocationID, team.ID)
 	return err
 }
 
@@ -75,7 +76,7 @@ func (m *TeamModel) Delete(id int) error {
 }
 
 func (m *TeamModel) GetByLeague(leagueID int) ([]*Team, error) {
-	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, created FROM teams WHERE leagueID = ? ORDER BY name ASC`
+	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, locationID, created FROM teams WHERE leagueID = ? ORDER BY name ASC`
 
 	rows, err := m.DB.Query(stmt, leagueID)
 	if err != nil {
@@ -86,7 +87,30 @@ func (m *TeamModel) GetByLeague(leagueID int) ([]*Team, error) {
 	teams := []*Team{}
 	for rows.Next() {
 		team := &Team{}
-		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.Created)
+		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.LocationID, &team.Created)
+		if err != nil {
+			return nil, err
+		}
+		teams = append(teams, team)
+	}
+	return teams, nil
+}
+
+// GetByLocation returns every team whose home field is locationID — used to
+// name the teams blocking a location delete (fk_teams_location).
+func (m *TeamModel) GetByLocation(locationID int) ([]*Team, error) {
+	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, locationID, created FROM teams WHERE locationID = ? ORDER BY name ASC`
+
+	rows, err := m.DB.Query(stmt, locationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	teams := []*Team{}
+	for rows.Next() {
+		team := &Team{}
+		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.LocationID, &team.Created)
 		if err != nil {
 			return nil, err
 		}

@@ -43,6 +43,22 @@ type teamViewData struct {
 	Roster                  []*models.Player
 	PendingInviteCount      int
 	PendingJoinRequestCount int
+	Location                *models.Location
+	LocationAddress         *models.Address
+	CurrentSeason           *models.Season
+	Leaders                 []*models.StatLine
+	LeadersByPlayer         map[int]*models.StatLine
+	LeadingScorer           *models.StatLine
+	LeadingAssister         *models.StatLine
+	Schedule                []*seasonMatchRow
+}
+
+// teamFormSupportData is the SupportData shape for team-create.html and
+// team-update.html: the leagues a manager may pick from (already filtered
+// for non-admins) and every location, for the optional home-field dropdown.
+type teamFormSupportData struct {
+	Leagues   []*models.League
+	Locations []*models.Location
 }
 
 func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +114,23 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var location *models.Location
+	var locationAddress *models.Address
+	if team.LocationID.Valid {
+		locm := &models.LocationModel{DB: app.playerService.DB}
+		location, err = locm.Get(int(team.LocationID.Int32))
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		am := &models.AddressModel{DB: app.playerService.DB}
+		locationAddress, err = am.Get(location.AddressID)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+	}
+
 	pendingInviteCount := 0
 	pendingJoinRequestCount := 0
 	if canManage {
@@ -117,6 +150,56 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		pendingJoinRequestCount = len(pendingRequests)
 	}
 
+	// A fresh league with no results yet renders exactly as before — the
+	// roster table's stat columns and the schedule are only shown when
+	// CurrentSeason is set. Same "most recent season with results" pick the
+	// league page's standings use (SeasonModel.GetMostRecentWithResults),
+	// rather than the date-based GetCurrent, so the whole app defaults to
+	// one consistent notion of "the season we're showing right now".
+	var currentSeason *models.Season
+	var leaders []*models.StatLine
+	var schedule []*seasonMatchRow
+	leadersByPlayer := map[int]*models.StatLine{}
+	sm := &models.SeasonModel{DB: app.playerService.DB}
+	currentSeason, err = sm.GetMostRecentWithResults(team.LeagueID)
+	if err != nil && !errors.Is(err, models.ErrNoRecord) {
+		app.serverError(w, err)
+		return
+	}
+	if currentSeason != nil {
+		pmsm := &models.PlayerMatchStatModel{DB: app.playerService.DB}
+		leaders, err = pmsm.LeaderboardByTeamSeason(team.ID, currentSeason.ID)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		for _, line := range leaders {
+			leadersByPlayer[line.PlayerID] = line
+		}
+
+		mm := &models.MatchModel{DB: app.playerService.DB}
+		matches, err := mm.GetByTeamAndSeason(team.ID, currentSeason.ID)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		schedule, err = app.buildSeasonMatchRows(matches)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+	}
+
+	var leadingScorer, leadingAssister *models.StatLine
+	for _, line := range leaders {
+		if line.Goals > 0 && (leadingScorer == nil || line.Goals > leadingScorer.Goals) {
+			leadingScorer = line
+		}
+		if line.Assists > 0 && (leadingAssister == nil || line.Assists > leadingAssister.Assists) {
+			leadingAssister = line
+		}
+	}
+
 	data := app.newTemplateData(r)
 	data.Data = &teamViewData{
 		Team:                    team,
@@ -128,6 +211,14 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		Roster:                  roster,
 		PendingInviteCount:      pendingInviteCount,
 		PendingJoinRequestCount: pendingJoinRequestCount,
+		Location:                location,
+		LocationAddress:         locationAddress,
+		CurrentSeason:           currentSeason,
+		Leaders:                 leaders,
+		LeadersByPlayer:         leadersByPlayer,
+		LeadingScorer:           leadingScorer,
+		LeadingAssister:         leadingAssister,
+		Schedule:                schedule,
 	}
 	data.Breadcrumbs = app.teamBreadcrumbs(team, league, true)
 
@@ -161,26 +252,82 @@ func (app *application) filterManageableLeagues(r *http.Request, leagues []*mode
 	return manageable
 }
 
-func (app *application) teamForm(w http.ResponseWriter, r *http.Request) {
-	if !app.isAdmin(r) && len(app.getLeagueAdminLeagueIDs(r)) == 0 {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-
+// renderTeamCreateForm re-derives everything team-create.html needs
+// (leagues filtered to what this viewer can manage, every location) and
+// renders it — shared by the initial GET and every validation-failure
+// re-render (bad team fields, or a rejected inline new-location).
+func (app *application) renderTeamCreateForm(w http.ResponseWriter, r *http.Request, form *services.TeamForm, status int) {
 	lm := &models.LeagueModel{DB: app.playerService.DB}
 	leagues, err := lm.List()
 	if err != nil {
 		app.serverError(w, err)
 		return
 	}
-	leagues = app.filterManageableLeagues(r, leagues)
+
+	locm := &models.LocationModel{DB: app.playerService.DB}
+	locations, err := locm.List()
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
 
 	data := app.newTemplateData(r)
-	data.Form = services.TeamForm{}
-	data.SupportData = leagues
+	data.Form = form
+	data.SupportData = &teamFormSupportData{Leagues: app.filterManageableLeagues(r, leagues), Locations: locations}
 	data.Breadcrumbs = teamFormBreadcrumbs()
+	app.render(w, status, "team-create.html", data)
+}
 
-	app.render(w, http.StatusOK, "team-create.html", data)
+// resolveTeamLocationID figures out which locationID a team create/update
+// submission should use. The inline "add a new home field" fields take
+// priority over the <select> dropdown when any of them are filled in —
+// LocationService.CreateLocation either creates a new location or
+// transparently reuses an existing one at the same address, so a team
+// manager typing in a field that already exists just gets associated with
+// it instead of creating a duplicate. Returns ok=false (having already
+// attached a form error) when the new-location fields are only partially
+// filled in, or fail their own validation.
+func (app *application) resolveTeamLocationID(r *http.Request, form *services.TeamForm, actorEmail string) (int, bool) {
+	form.NewLocationName = r.PostForm.Get("newlocationname")
+	form.NewLocationAddress1 = r.PostForm.Get("newlocationaddress1")
+	form.NewLocationAddress2 = r.PostForm.Get("newlocationaddress2")
+	form.NewLocationCity = r.PostForm.Get("newlocationcity")
+	form.NewLocationStateProvince = r.PostForm.Get("newlocationstateprovince")
+	form.NewLocationZipCode = r.PostForm.Get("newlocationzipcode")
+
+	if form.NewLocationName == "" && form.NewLocationAddress1 == "" && form.NewLocationCity == "" {
+		locationID, _ := strconv.Atoi(r.PostForm.Get("locationID"))
+		return locationID, true
+	}
+
+	if form.NewLocationName == "" || form.NewLocationAddress1 == "" || form.NewLocationCity == "" {
+		form.AddNonFieldError("To add a new home field, enter at least a name, address, and city.")
+		return 0, false
+	}
+
+	locationID, err := app.locationService.CreateLocation(&services.LocationForm{
+		Name:          form.NewLocationName,
+		Address1:      form.NewLocationAddress1,
+		Address2:      form.NewLocationAddress2,
+		City:          form.NewLocationCity,
+		StateProvince: form.NewLocationStateProvince,
+		ZipCode:       form.NewLocationZipCode,
+	}, actorEmail)
+	if err != nil {
+		form.AddNonFieldError("The new home field's address couldn't be saved — check it and try again.")
+		return 0, false
+	}
+
+	return locationID, true
+}
+
+func (app *application) teamForm(w http.ResponseWriter, r *http.Request) {
+	if !app.isAdmin(r) && len(app.getLeagueAdminLeagueIDs(r)) == 0 {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	app.renderTeamCreateForm(w, r, &services.TeamForm{}, http.StatusOK)
 }
 
 func (app *application) teamCreate(w http.ResponseWriter, r *http.Request) {
@@ -204,20 +351,17 @@ func (app *application) teamCreate(w http.ResponseWriter, r *http.Request) {
 		EstablishedDate: r.PostForm.Get("establisheddate"),
 	}
 
+	locationID, ok := app.resolveTeamLocationID(r, form, app.getUserName(r))
+	if !ok {
+		app.renderTeamCreateForm(w, r, form, http.StatusUnprocessableEntity)
+		return
+	}
+	form.LocationID = locationID
+
 	id, err := app.teamService.CreateTeam(form, app.getUserName(r))
 	if err != nil {
 		if errors.Is(err, models.ErrBadData) || errors.Is(err, models.ErrNoRecord) {
-			lm := &models.LeagueModel{DB: app.playerService.DB}
-			leagues, lerr := lm.List()
-			if lerr != nil {
-				app.serverError(w, lerr)
-				return
-			}
-			data := app.newTemplateData(r)
-			data.Form = form
-			data.SupportData = app.filterManageableLeagues(r, leagues)
-			data.Breadcrumbs = teamFormBreadcrumbs()
-			app.render(w, http.StatusUnprocessableEntity, "team-create.html", data)
+			app.renderTeamCreateForm(w, r, form, http.StatusUnprocessableEntity)
 			return
 		}
 		app.serverError(w, err)
@@ -234,6 +378,59 @@ func (app *application) teamCreate(w http.ResponseWriter, r *http.Request) {
 type teamUpdateData struct {
 	Team   *models.Team
 	Roster []*models.Player
+}
+
+// renderTeamUpdateForm re-derives everything team-update.html needs (the
+// team + its roster, every league, every location) and renders it — shared
+// by the initial GET and every validation-failure re-render (bad team
+// fields, a rejected inline new-location, or an unassignable captain).
+// The leagueID <select> stays populated with every league (not just the
+// leagues this viewer administers) so a captain — who can edit their team's
+// info but not reassign it to another league — still sees a dropdown
+// containing their own team's current league. Reassignment to a league they
+// don't manage is rejected server-side in teamUpdatePost. The template only
+// renders this <select> at all for admins — everyone else gets a hidden
+// input carrying the unchanged value instead.
+func (app *application) renderTeamUpdateForm(w http.ResponseWriter, r *http.Request, form *services.TeamForm, team *models.Team, status int) {
+	lm := &models.LeagueModel{DB: app.playerService.DB}
+	leagues, err := lm.List()
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	locm := &models.LocationModel{DB: app.playerService.DB}
+	locations, err := locm.List()
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	roster, err := app.playerService.GetByTeam(team.ID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	data := app.newTemplateData(r)
+	data.Form = form
+	data.Data = &teamUpdateData{Team: team, Roster: roster}
+	data.SupportData = &teamFormSupportData{Leagues: leagues, Locations: locations}
+
+	breadcrumbs := []Breadcrumb{{Label: "Leagues", URL: "/league"}}
+	for _, league := range leagues {
+		if league.ID == form.LeagueID {
+			breadcrumbs = append(breadcrumbs, Breadcrumb{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)})
+			break
+		}
+	}
+	breadcrumbs = append(breadcrumbs,
+		Breadcrumb{Label: form.Name, URL: fmt.Sprintf("/team/%d", form.ID)},
+		Breadcrumb{Label: "Edit"},
+	)
+	data.Breadcrumbs = breadcrumbs
+
+	app.render(w, status, "team-update.html", data)
 }
 
 func (app *application) teamUpdate(w http.ResponseWriter, r *http.Request) {
@@ -256,44 +453,12 @@ func (app *application) teamUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lm := &models.LeagueModel{DB: app.playerService.DB}
-	leagues, err := lm.List()
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-
-	league, err := lm.Get(team.LeagueID)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-
-	roster, err := app.playerService.GetByTeam(team.ID)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-
-	form := &services.TeamForm{ID: team.ID, LeagueID: team.LeagueID, Name: team.Name, Motto: team.Motto.String}
+	form := &services.TeamForm{ID: team.ID, LeagueID: team.LeagueID, Name: team.Name, Motto: team.Motto.String, LocationID: int(team.LocationID.Int32)}
 	if team.EstablishedDate.Valid {
 		form.EstablishedDate = pickerDate(team.EstablishedDate.Time)
 	}
 
-	data := app.newTemplateData(r)
-	data.Form = form
-	data.Data = &teamUpdateData{Team: team, Roster: roster}
-	// The leagueID <select> stays populated with every league (not just the
-	// leagues this viewer administers) so a captain — who can edit their
-	// team's info but not reassign it to another league — still sees a
-	// dropdown containing their own team's current league. Reassignment to a
-	// league they don't manage is rejected server-side in teamUpdatePost. The
-	// template only renders this <select> at all for admins — everyone else
-	// gets a hidden input carrying the unchanged value instead.
-	data.SupportData = leagues
-	data.Breadcrumbs = append(app.teamBreadcrumbs(team, league, false), Breadcrumb{Label: "Edit"})
-
-	app.render(w, http.StatusOK, "team-update.html", data)
+	app.renderTeamUpdateForm(w, r, form, team, http.StatusOK)
 }
 
 func (app *application) teamUpdatePost(w http.ResponseWriter, r *http.Request) {
@@ -342,47 +507,41 @@ func (app *application) teamUpdatePost(w http.ResponseWriter, r *http.Request) {
 		EstablishedDate: r.PostForm.Get("establisheddate"),
 	}
 
+	// getRouteTeamByID re-fetches the team fresh (needed both to build the
+	// error re-render and because the row must still exist).
+	getRouteTeamByID := func() (*models.Team, bool) {
+		tm := &models.TeamModel{DB: app.playerService.DB}
+		team, terr := tm.Get(id)
+		if terr != nil {
+			if errors.Is(terr, models.ErrNoRecord) {
+				app.notFound(w)
+			} else {
+				app.serverError(w, terr)
+			}
+			return nil, false
+		}
+		return team, true
+	}
+
+	locationID, ok := app.resolveTeamLocationID(r, form, app.getUserName(r))
+	if !ok {
+		team, ok := getRouteTeamByID()
+		if !ok {
+			return
+		}
+		app.renderTeamUpdateForm(w, r, form, team, http.StatusUnprocessableEntity)
+		return
+	}
+	form.LocationID = locationID
+
 	err = app.teamService.UpdateTeam(form, app.getUserName(r))
 	if err != nil {
 		if errors.Is(err, models.ErrBadData) || errors.Is(err, models.ErrNoRecord) {
-			lm := &models.LeagueModel{DB: app.playerService.DB}
-			leagues, lerr := lm.List()
-			if lerr != nil {
-				app.serverError(w, lerr)
+			team, ok := getRouteTeamByID()
+			if !ok {
 				return
 			}
-			tm := &models.TeamModel{DB: app.playerService.DB}
-			team, terr := tm.Get(id)
-			if terr != nil {
-				if errors.Is(terr, models.ErrNoRecord) {
-					app.notFound(w)
-				} else {
-					app.serverError(w, terr)
-				}
-				return
-			}
-			roster, rerr := app.playerService.GetByTeam(id)
-			if rerr != nil {
-				app.serverError(w, rerr)
-				return
-			}
-			data := app.newTemplateData(r)
-			data.Form = form
-			data.Data = &teamUpdateData{Team: team, Roster: roster}
-			data.SupportData = leagues
-			breadcrumbs := []Breadcrumb{{Label: "Leagues", URL: "/league"}}
-			for _, league := range leagues {
-				if league.ID == form.LeagueID {
-					breadcrumbs = append(breadcrumbs, Breadcrumb{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)})
-					break
-				}
-			}
-			breadcrumbs = append(breadcrumbs,
-				Breadcrumb{Label: form.Name, URL: fmt.Sprintf("/team/%d", form.ID)},
-				Breadcrumb{Label: "Edit"},
-			)
-			data.Breadcrumbs = breadcrumbs
-			app.render(w, http.StatusUnprocessableEntity, "team-update.html", data)
+			app.renderTeamUpdateForm(w, r, form, team, http.StatusUnprocessableEntity)
 			return
 		}
 		app.serverError(w, err)

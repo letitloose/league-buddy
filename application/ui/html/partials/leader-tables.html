@@ -1,0 +1,42 @@
+{{/* Shared "Goal Leaders" / "Assist Leaders" pair of top-5 tables — used on
+     both league-view.html (most recent season with results) and
+     season-view.html (that specific season), so pass whatever context has
+     GoalLeaders/AssistLeaders fields (both []*models.LeagueLeaderLine). */}}
+{{define "leader-tables"}}
+<div class="grid gap-4 sm:grid-cols-2 w-full md:w-2/3 mb-6">
+    <div class="bg-white shadow-md rounded px-4 py-4">
+        <h3 class="pt-0 text-center">Goal Leaders</h3>
+        {{if .GoalLeaders}}
+        <table class="text-left w-full text-sm">
+            <tr><th>Player</th><th>Team</th><th>Goals</th></tr>
+            {{range .GoalLeaders}}
+            <tr>
+                <td>{{.Name}}</td>
+                <td>{{.TeamName}}</td>
+                <td>{{.Total}}</td>
+            </tr>
+            {{end}}
+        </table>
+        {{else}}
+        <p class="text-center text-sm text-gray-500">No goals recorded yet.</p>
+        {{end}}
+    </div>
+    <div class="bg-white shadow-md rounded px-4 py-4">
+        <h3 class="pt-0 text-center">Assist Leaders</h3>
+        {{if .AssistLeaders}}
+        <table class="text-left w-full text-sm">
+            <tr><th>Player</th><th>Team</th><th>Assists</th></tr>
+            {{range .AssistLeaders}}
+            <tr>
+                <td>{{.Name}}</td>
+                <td>{{.TeamName}}</td>
+                <td>{{.Total}}</td>
+            </tr>
+            {{end}}
+        </table>
+        {{else}}
+        <p class="text-center text-sm text-gray-500">No assists recorded yet.</p>
+        {{end}}
+    </div>
+</div>
+{{end}}

@@ -20,7 +20,7 @@
             {{if $.IsAdmin}}
             <td>
                 <a href="/admin/league/update/{{.ID}}">Edit</a>
-                <button class="text-red-600" data-delete-url="/admin/league/delete/{{.ID}}" data-confirm-message="Delete league {{.Name}}?" data-redirect-url="/league">Delete</button>
+                <button class="text-red-600" data-delete-url="/admin/league/delete/{{.ID}}" data-confirm-message="Delete league {{.Name}}?" data-conflict-message="{{.Name}} still has teams in it. Remove them first, then delete the league." data-redirect-url="/league">Delete</button>
             </td>
             {{end}}
         </tr>

@@ -11,7 +11,7 @@
         {{end}}
         <select class="form-field {{$errorClass}}" name="leagueID">
             <option value="">-- Select --</option>
-            {{range .SupportData}}
+            {{range .SupportData.Leagues}}
                 {{if eq .ID $.Form.LeagueID}}
                     <option value="{{.ID}}" selected>{{.Name}}</option>
                 {{else}}
@@ -47,5 +47,28 @@
     <div class="mb-4">
         <label class="field-label">Established</label>
         <input class="form-field" type='date' name='establisheddate' value='{{.Form.EstablishedDate}}'>
+    </div>
+    <div class="mb-4">
+        <label class="field-label">Home Field</label>
+        <select class="form-field" name="locationID">
+            <option value="0">-- None --</option>
+            {{range .SupportData.Locations}}
+                {{if eq .ID $.Form.LocationID}}
+                    <option value="{{.ID}}" selected>{{.Name}}</option>
+                {{else}}
+                    <option value="{{.ID}}">{{.Name}}</option>
+                {{end}}
+            {{end}}
+        </select>
+    </div>
+    <div class="mb-4 border-t-2 pt-2">
+        <p class="field-label">Or add a new home field</p>
+        <p class="text-xs text-gray-500 mb-2">If this address already exists as a location, it'll be reused instead of creating a duplicate.</p>
+        <input class="form-field mb-2" type='text' name='newlocationname' placeholder='Name' value='{{.Form.NewLocationName}}'>
+        <input class="form-field mb-2" type='text' name='newlocationaddress1' placeholder='Address 1' value='{{.Form.NewLocationAddress1}}'>
+        <input class="form-field mb-2" type='text' name='newlocationaddress2' placeholder='Address 2' value='{{.Form.NewLocationAddress2}}'>
+        <input class="form-field mb-2" type='text' name='newlocationcity' placeholder='City' value='{{.Form.NewLocationCity}}'>
+        <input class="form-field mb-2" type='text' name='newlocationstateprovince' placeholder='State (2-letter code)' value='{{.Form.NewLocationStateProvince}}'>
+        <input class="form-field" type='text' name='newlocationzipcode' placeholder='Zip' value='{{.Form.NewLocationZipCode}}'>
     </div>
 {{end}}

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/julienschmidt/httprouter"
@@ -31,10 +33,129 @@ func (app *application) leagueList(w http.ResponseWriter, r *http.Request) {
 // panel where CanManage of the admin themselves does not — Admins is only
 // populated for system admins, who alone can assign/revoke league admins.
 type leagueViewData struct {
-	League    *models.League
-	Teams     []*models.Team
-	CanManage bool
-	Admins    []*models.Player
+	League           *models.League
+	Teams            []*models.Team
+	CanManage        bool
+	Admins           []*models.Player
+	Seasons          []*models.Season
+	StandingsSeason  *models.Season
+	Standings        []*standingRow
+	StandingsColumns []standingsColumn
+	GoalLeaders      []*models.LeagueLeaderLine
+	AssistLeaders    []*models.LeagueLeaderLine
+}
+
+// standingRow is one team's line in a season's standings table.
+type standingRow struct {
+	TeamID       int
+	TeamName     string
+	Points       int
+	Wins         int
+	Losses       int
+	Draws        int
+	GoalsFor     int
+	GoalsAgainst int
+}
+
+// standingsColumn is one sortable column header on the standings table —
+// URL already carries the query params clicking it should navigate to
+// (toggling direction if it's already the active sort column).
+type standingsColumn struct {
+	Label  string
+	Key    string
+	URL    string
+	Active bool
+}
+
+var validStandingsSortKeys = map[string]bool{
+	"points": true, "wins": true, "losses": true, "draws": true, "goalsfor": true, "goalsagainst": true,
+}
+
+// buildStandings merges every team in the league (so a winless team still
+// shows up with all zeros) with its season aggregate, computing Points from
+// the 3/1/0 win/draw/loss rule. Unsorted — callers sort separately.
+func buildStandings(db *sql.DB, teams []*models.Team, seasonID int) ([]*standingRow, error) {
+	mm := &models.MatchModel{DB: db}
+	aggregates, err := mm.GetSeasonAggregatesByTeam(seasonID)
+	if err != nil {
+		return nil, err
+	}
+
+	byTeam := make(map[int]*models.TeamMatchAggregate, len(aggregates))
+	for _, agg := range aggregates {
+		byTeam[agg.TeamID] = agg
+	}
+
+	rows := make([]*standingRow, 0, len(teams))
+	for _, team := range teams {
+		row := &standingRow{TeamID: team.ID, TeamName: team.Name}
+		if agg, ok := byTeam[team.ID]; ok {
+			row.Wins = agg.Wins
+			row.Losses = agg.Losses
+			row.Draws = agg.Draws
+			row.GoalsFor = agg.GoalsFor
+			row.GoalsAgainst = agg.GoalsAgainst
+			row.Points = agg.Wins*3 + agg.Draws
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+// sortStandings sorts rows in place by sortKey (validated against
+// validStandingsSortKeys by the caller), descending unless dir is "asc".
+func sortStandings(rows []*standingRow, sortKey, dir string) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		var a, b int
+		switch sortKey {
+		case "wins":
+			a, b = rows[i].Wins, rows[j].Wins
+		case "losses":
+			a, b = rows[i].Losses, rows[j].Losses
+		case "draws":
+			a, b = rows[i].Draws, rows[j].Draws
+		case "goalsfor":
+			a, b = rows[i].GoalsFor, rows[j].GoalsFor
+		case "goalsagainst":
+			a, b = rows[i].GoalsAgainst, rows[j].GoalsAgainst
+		default:
+			a, b = rows[i].Points, rows[j].Points
+		}
+		if dir == "asc" {
+			return a < b
+		}
+		return a > b
+	})
+}
+
+// buildStandingsColumns builds the six sortable column headers — clicking
+// an inactive column sorts by it descending; clicking the already-active
+// column toggles direction.
+func buildStandingsColumns(leagueID int, currentSort, currentDir string) []standingsColumn {
+	defs := []struct{ Label, Key string }{
+		{"Pts", "points"},
+		{"W", "wins"},
+		{"L", "losses"},
+		{"D", "draws"},
+		{"GF", "goalsfor"},
+		{"GA", "goalsagainst"},
+	}
+
+	cols := make([]standingsColumn, len(defs))
+	for i, d := range defs {
+		active := d.Key == currentSort
+		nextDir := "desc"
+		if active && currentDir == "desc" {
+			nextDir = "asc"
+		}
+		cols[i] = standingsColumn{
+			Label:  d.Label,
+			Key:    d.Key,
+			URL:    fmt.Sprintf("/league/%d?sort=%s&dir=%s", leagueID, d.Key, nextDir),
+			Active: active,
+		}
+	}
+	return cols
 }
 
 func (app *application) leagueView(w http.ResponseWriter, r *http.Request) {
@@ -74,12 +195,64 @@ func (app *application) leagueView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	sm := &models.SeasonModel{DB: app.playerService.DB}
+	seasons, err := sm.GetByLeague(id)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	sortKey := r.URL.Query().Get("sort")
+	if !validStandingsSortKeys[sortKey] {
+		sortKey = "points"
+	}
+	dir := r.URL.Query().Get("dir")
+	if dir != "asc" {
+		dir = "desc"
+	}
+
+	var standingsSeason *models.Season
+	var standings []*standingRow
+	var goalLeaders, assistLeaders []*models.LeagueLeaderLine
+
+	standingsSeason, err = sm.GetMostRecentWithResults(id)
+	if err != nil && !errors.Is(err, models.ErrNoRecord) {
+		app.serverError(w, err)
+		return
+	}
+	if standingsSeason != nil {
+		standings, err = buildStandings(app.playerService.DB, teams, standingsSeason.ID)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		sortStandings(standings, sortKey, dir)
+
+		pmsm := &models.PlayerMatchStatModel{DB: app.playerService.DB}
+		goalLeaders, err = pmsm.TopScorersForSeason(standingsSeason.ID, 5)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		assistLeaders, err = pmsm.TopAssistersForSeason(standingsSeason.ID, 5)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+	}
+
 	data := app.newTemplateData(r)
 	data.Data = &leagueViewData{
-		League:    league,
-		Teams:     teams,
-		CanManage: app.canManageLeague(r, id),
-		Admins:    admins,
+		League:           league,
+		Teams:            teams,
+		CanManage:        app.canManageLeague(r, id),
+		Admins:           admins,
+		Seasons:          seasons,
+		StandingsSeason:  standingsSeason,
+		Standings:        standings,
+		StandingsColumns: buildStandingsColumns(id, sortKey, dir),
+		GoalLeaders:      goalLeaders,
+		AssistLeaders:    assistLeaders,
 	}
 	data.Breadcrumbs = []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},

@@ -53,6 +53,28 @@ CREATE TABLE address (
     zipCode VARCHAR(10)
 );
 
+-- A physical field/venue a team can call its home field. Address is
+-- required (a location without one isn't useful) and reuses the same
+-- `address` table players use. addressKey is a normalized (lowercased,
+-- trimmed) concatenation of the address fields, computed in Go — the
+-- uniqueness constraint on it is what lets team managers add a "new"
+-- location that happens to match an existing one and transparently get
+-- routed to the existing row instead of creating a duplicate.
+CREATE TABLE locations (
+    id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(255) NOT NULL,
+    addressID INTEGER NOT NULL,
+    addressKey VARCHAR(512) NOT NULL,
+    created DATETIME NOT NULL
+);
+ALTER TABLE locations ADD CONSTRAINT fk_locations_address FOREIGN KEY (addressID) REFERENCES address(id);
+ALTER TABLE locations ADD CONSTRAINT uq_locations_addresskey UNIQUE (addressKey);
+
+-- A team's home field is optional and set independently of its league,
+-- same forward-reference pattern as captainPlayerID below.
+ALTER TABLE teams ADD COLUMN locationID INTEGER NULL;
+ALTER TABLE teams ADD CONSTRAINT fk_teams_location FOREIGN KEY (locationID) REFERENCES locations(id);
+
 -- Team membership lives in teamMembers now (see below) — a self-registered
 -- user's placeholder player starts unaffiliated (zero memberships) until an
 -- invite (at signup) or an approved join request adds one.
@@ -101,6 +123,67 @@ ALTER TABLE leagueAdmins ADD CONSTRAINT fk_leagueadmins_player FOREIGN KEY (play
 ALTER TABLE leagueAdmins ADD CONSTRAINT fk_leagueadmins_league FOREIGN KEY (leagueID) REFERENCES leagues(id);
 CREATE INDEX leagueadmins_league_idx ON leagueAdmins (leagueID);
 CREATE INDEX leagueadmins_player_idx ON leagueAdmins (playerID);
+
+-- A league-scoped block of time (e.g. "Spring 2024") containing a
+-- round-robin of matches. startDate/endDate are optional and used only to
+-- pick a sensible "current" season for a league (see SeasonModel.GetCurrent)
+-- when several exist.
+CREATE TABLE seasons (
+    id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    leagueID INTEGER NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    startDate DATE NULL,
+    endDate DATE NULL,
+    created DATETIME NOT NULL
+);
+ALTER TABLE seasons ADD CONSTRAINT fk_seasons_league FOREIGN KEY (leagueID) REFERENCES leagues(id);
+CREATE INDEX seasons_league_idx ON seasons (leagueID);
+
+-- A single game within a season. homeScore/awayScore are nullable — a
+-- scheduled-but-not-yet-played (or historically unrecorded) match has no
+-- score. notes covers free-text asides (e.g. a short-handed opponent) and,
+-- for historical rows where only a win/loss/draw outcome is known but not
+-- the exact score, a human-readable stand-in for the missing number.
+CREATE TABLE matches (
+    id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    seasonID INTEGER NOT NULL,
+    homeTeamID INTEGER NOT NULL,
+    awayTeamID INTEGER NOT NULL,
+    matchDate DATE NOT NULL,
+    locationID INTEGER NULL,
+    homeScore INTEGER NULL,
+    awayScore INTEGER NULL,
+    notes VARCHAR(255) NULL,
+    created DATETIME NOT NULL
+);
+ALTER TABLE matches ADD CONSTRAINT fk_matches_season FOREIGN KEY (seasonID) REFERENCES seasons(id);
+ALTER TABLE matches ADD CONSTRAINT fk_matches_hometeam FOREIGN KEY (homeTeamID) REFERENCES teams(id);
+ALTER TABLE matches ADD CONSTRAINT fk_matches_awayteam FOREIGN KEY (awayTeamID) REFERENCES teams(id);
+ALTER TABLE matches ADD CONSTRAINT fk_matches_location FOREIGN KEY (locationID) REFERENCES locations(id);
+CREATE INDEX matches_season_idx ON matches (seasonID);
+CREATE INDEX matches_hometeam_idx ON matches (homeTeamID);
+CREATE INDEX matches_awayteam_idx ON matches (awayTeamID);
+CREATE INDEX matches_date_idx ON matches (matchDate);
+
+-- One player's stat line for one match. teamID is denormalized (not derived
+-- via a join to matches) since a player's team can differ season to
+-- season — this records which team they were on for that specific match.
+CREATE TABLE playerMatchStats (
+    id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    matchID INTEGER NOT NULL,
+    playerID INTEGER NOT NULL,
+    teamID INTEGER NOT NULL,
+    goals INTEGER NOT NULL DEFAULT 0,
+    assists INTEGER NOT NULL DEFAULT 0,
+    yellowCards INTEGER NOT NULL DEFAULT 0,
+    redCards INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT uq_pms_match_player UNIQUE (matchID, playerID)
+);
+ALTER TABLE playerMatchStats ADD CONSTRAINT fk_pms_match FOREIGN KEY (matchID) REFERENCES matches(id);
+ALTER TABLE playerMatchStats ADD CONSTRAINT fk_pms_player FOREIGN KEY (playerID) REFERENCES players(id);
+ALTER TABLE playerMatchStats ADD CONSTRAINT fk_pms_team FOREIGN KEY (teamID) REFERENCES teams(id);
+CREATE INDEX pms_player_idx ON playerMatchStats (playerID);
+CREATE INDEX pms_team_idx ON playerMatchStats (teamID);
 
 -- Login/auth. playerID links a user to their roster profile (nullable — an
 -- admin/coach account need not be a player; a player need not have signed up
@@ -181,5 +264,9 @@ CREATE INDEX tjr_player_status_idx ON teamJoinRequests (playerID, status);
 CREATE INDEX tjr_team_status_idx ON teamJoinRequests (teamID, status);
 
 INSERT INTO leagues (name, created) VALUES ('CapReg over 30', UTC_TIMESTAMP());
-INSERT INTO teams (leagueID, name, created) VALUES (1, 'Colonial FC', UTC_TIMESTAMP());
+INSERT INTO teams (leagueID, name, motto, created) VALUES (1, 'Colonial FC', 'just an animal looking for a home', UTC_TIMESTAMP());
 INSERT INTO roles (code, display) VALUES ('ADMIN', 'Administrator');
+
+INSERT INTO address (address1, city, stateProvince) VALUES ('100 Phillips Rd', 'East Greenbush', 'NY');
+INSERT INTO locations (name, addressID, addressKey, created) VALUES ('East Greenbush Soccer Club', LAST_INSERT_ID(), '100 phillips rd||east greenbush|ny|', UTC_TIMESTAMP());
+UPDATE teams SET locationID = LAST_INSERT_ID() WHERE id = 1;

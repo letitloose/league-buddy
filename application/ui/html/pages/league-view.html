@@ -8,7 +8,7 @@
     {{if .IsAdmin}}
     <div class="mb-4 flex gap-2">
         <a class="btn" href="/admin/league/update/{{.Data.League.ID}}">Edit League</a>
-        <button class="btn bg-red-600 hover:bg-red-700" data-delete-url="/admin/league/delete/{{.Data.League.ID}}" data-confirm-message="Delete league {{.Data.League.Name}}? Teams must be removed first." data-redirect-url="/league">Delete League</button>
+        <button class="btn bg-red-600 hover:bg-red-700" data-delete-url="/admin/league/delete/{{.Data.League.ID}}" data-confirm-message="Delete league {{.Data.League.Name}}? Teams must be removed first." data-conflict-message="{{.Data.League.Name}} still has teams in it. Remove them first, then delete the league." data-redirect-url="/league">Delete League</button>
     </div>
     {{end}}
     {{if .Data.CanManage}}
@@ -16,6 +16,43 @@
         <a class="btn" href="/admin/team/create">Add Team</a>
     </div>
     {{end}}
+
+    {{if .Data.StandingsSeason}}
+    <div class="w-full md:w-2/3 px-2 md:px-0">
+        <h3 class="text-center mb-1">Standings</h3>
+        <p class="text-center text-sm text-gray-500 mb-3">{{.Data.StandingsSeason.Name}}</p>
+        <div class="overflow-x-auto">
+        <table class="text-left w-full mb-6">
+            <tr>
+                <th>Team</th>
+                {{range .Data.StandingsColumns}}
+                <th><a class="{{if .Active}}font-bold no-underline text-green-800{{end}}" href="{{.URL}}">{{.Label}}</a></th>
+                {{end}}
+                {{if .Data.CanManage}}<th>Actions</th>{{end}}
+            </tr>
+            {{range .Data.Standings}}
+            <tr>
+                <td><a href="/team/{{.TeamID}}">{{.TeamName}}</a></td>
+                <td>{{.Points}}</td>
+                <td>{{.Wins}}</td>
+                <td>{{.Losses}}</td>
+                <td>{{.Draws}}</td>
+                <td>{{.GoalsFor}}</td>
+                <td>{{.GoalsAgainst}}</td>
+                {{if $.Data.CanManage}}
+                <td>
+                    <a href="/admin/team/update/{{.TeamID}}">Edit</a>
+                    <button class="text-red-600" data-delete-url="/admin/team/delete/{{.TeamID}}" data-confirm-message="Delete team {{.TeamName}}?" data-conflict-message="{{.TeamName}} still has players on its roster. Remove them first, then delete the team." data-redirect-url="/league/{{$.Data.League.ID}}">Delete</button>
+                </td>
+                {{end}}
+            </tr>
+            {{end}}
+        </table>
+        </div>
+    </div>
+
+    {{template "leader-tables" .Data}}
+    {{else}}
     <div class="overflow-x-auto w-full md:w-2/3 px-2 md:px-0">
     <table class="text-left w-full mb-4">
         <tr>
@@ -28,12 +65,39 @@
             {{if $.Data.CanManage}}
             <td>
                 <a href="/admin/team/update/{{.ID}}">Edit</a>
-                <button class="text-red-600" data-delete-url="/admin/team/delete/{{.ID}}" data-confirm-message="Delete team {{.Name}}?" data-redirect-url="/league/{{$.Data.League.ID}}">Delete</button>
+                <button class="text-red-600" data-delete-url="/admin/team/delete/{{.ID}}" data-confirm-message="Delete team {{.Name}}?" data-conflict-message="{{.Name}} still has players on its roster. Remove them first, then delete the team." data-redirect-url="/league/{{$.Data.League.ID}}">Delete</button>
             </td>
             {{end}}
         </tr>
         {{end}}
     </table>
+    </div>
+    {{end}}
+
+    <div class="bg-white shadow-md rounded px-6 py-4 mt-2 mb-6 w-full md:w-2/3 mx-2 md:mx-0">
+        <h3 class="pt-0 text-center">Seasons</h3>
+        {{if .Data.Seasons}}
+        <table class="text-left w-full mb-4">
+            <tr><th>Name</th><th>Dates</th></tr>
+            {{range .Data.Seasons}}
+            <tr>
+                <td><a href="/season/{{.ID}}">{{.Name}}</a></td>
+                <td>
+                    {{if .StartDate.Valid}}{{humanDate .StartDate.Time}}{{end}}
+                    {{if or .StartDate.Valid .EndDate.Valid}} &ndash; {{end}}
+                    {{if .EndDate.Valid}}{{humanDate .EndDate.Time}}{{end}}
+                </td>
+            </tr>
+            {{end}}
+        </table>
+        {{else}}
+        <p class="text-center text-gray-600 mb-4">No seasons yet.</p>
+        {{end}}
+        {{if .Data.CanManage}}
+        <div class="text-center">
+            <a class="btn m-0" href="/admin/season/create?leagueID={{.Data.League.ID}}">Add Season</a>
+        </div>
+        {{end}}
     </div>
 
     {{if .IsAdmin}}

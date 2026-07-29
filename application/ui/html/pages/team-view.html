@@ -5,7 +5,10 @@
     <h2>{{.Data.Team.Name}}</h2>
     {{with .Data.Team.Motto.String}}<p class="italic text-gray-600 mb-2">&ldquo;{{.}}&rdquo;</p>{{end}}
     <p class="mb-2"><a href="/league/{{.Data.League.ID}}">{{.Data.League.Name}}</a></p>
-    <p class="mb-1">Captain: {{if .Data.CaptainName}}{{.Data.CaptainName}}{{else}}Unassigned{{end}}</p>
+    <p class="mb-1">Captain: {{if .Data.CaptainName}}<a href="/player/view/{{.Data.Team.CaptainPlayerID.Int32}}">{{.Data.CaptainName}}</a>{{else}}Unassigned{{end}}</p>
+    {{if .Data.Location}}
+        <p class="mb-1">Home Field: <a href="{{mapsURL .Data.LocationAddress}}" target="_blank" rel="noopener noreferrer">{{.Data.Location.Name}}</a></p>
+    {{end}}
     {{if .Data.Team.EstablishedDate.Valid}}<p class="mb-4 text-sm text-gray-500">Est. {{humanDate .Data.Team.EstablishedDate.Time}}</p>{{end}}
 
     {{if .Data.CanRequestToJoin}}
@@ -25,32 +28,90 @@
             Join Requests{{if .Data.PendingJoinRequestCount}}<span class="badge-count">{{.Data.PendingJoinRequestCount}}</span>{{end}}
         </a>
         {{if .Data.CanDelete}}
-        <button class="btn-secondary text-red-600 m-0" data-delete-url="/admin/team/delete/{{.Data.Team.ID}}" data-confirm-message="Delete team {{.Data.Team.Name}}? The roster must be removed first." data-redirect-url="/league/{{.Data.League.ID}}">Delete Team</button>
+        <button class="btn-secondary text-red-600 m-0" data-delete-url="/admin/team/delete/{{.Data.Team.ID}}" data-confirm-message="Delete team {{.Data.Team.Name}}? The roster must be removed first." data-conflict-message="{{.Data.Team.Name}} still has players on its roster. Remove them first, then delete the team." data-redirect-url="/league/{{.Data.League.ID}}">Delete Team</button>
         {{end}}
     </div>
     {{end}}
 
+    {{if .Data.CurrentSeason}}
     <div class="w-full md:w-3/4 px-2 md:px-0">
+        <h3 class="text-center mb-1">Schedule</h3>
+        <p class="text-center text-sm text-gray-500 mb-3">{{.Data.CurrentSeason.Name}} &middot; <a href="/team/{{.Data.Team.ID}}/season/{{.Data.CurrentSeason.ID}}">All Seasons</a></p>
+        {{if .Data.Schedule}}
+        <div class="overflow-x-auto">
+        <table class="table-compact text-left w-full mb-4">
+            <tr>
+                <th>Date</th>
+                <th>Home</th>
+                <th>Away</th>
+                <th>Score</th>
+                <th>Location</th>
+            </tr>
+            {{range .Data.Schedule}}
+            <tr>
+                <td><a href="/match/{{.Match.ID}}">{{humanDate .Match.MatchDate}}</a></td>
+                <td><a href="/match/{{.Match.ID}}">{{.HomeTeamName}}</a></td>
+                <td><a href="/match/{{.Match.ID}}">{{.AwayTeamName}}</a></td>
+                <td>
+                    <a href="/match/{{.Match.ID}}">
+                    {{if and .Match.HomeScore.Valid .Match.AwayScore.Valid}}
+                        {{.Match.HomeScore.Int32}} &ndash; {{.Match.AwayScore.Int32}}
+                    {{else}}
+                        <span class="text-gray-400">&mdash;</span>
+                    {{end}}
+                    </a>
+                </td>
+                <td>{{if .Location}}<a href="{{mapsURL .LocationAddress}}" target="_blank" rel="noopener noreferrer">{{.Location.Name}}</a>{{end}}</td>
+            </tr>
+            {{end}}
+        </table>
+        </div>
+        {{else}}
+        <p class="text-center text-gray-600 mb-4">No matches scheduled for this season yet.</p>
+        {{end}}
+    </div>
+    {{end}}
+
+    <div class="w-full md:w-3/4 px-2 md:px-0 mt-6">
         <div class="text-center">
             <h3 class="mb-1">Roster</h3>
             <p class="text-sm text-gray-500 mb-3">{{len .Data.Roster}} player{{if ne (len .Data.Roster) 1}}s{{end}}</p>
+            {{if .Data.CurrentSeason}}
+                {{if or .Data.LeadingScorer .Data.LeadingAssister}}
+                <p class="text-sm text-gray-600 mb-3">
+                    {{with .Data.LeadingScorer}}Leading scorer: {{.Name}} ({{.Goals}}){{end}}
+                    {{if and .Data.LeadingScorer .Data.LeadingAssister}} &middot; {{end}}
+                    {{with .Data.LeadingAssister}}Leading assister: {{.Name}} ({{.Assists}}){{end}}
+                </p>
+                {{end}}
+            {{end}}
             {{if .Data.CanManage}}
                 <a class="btn mb-3" href="/team/{{.Data.Team.ID}}/player/create">Add Player</a>
             {{end}}
         </div>
         <div class="overflow-x-auto">
-        <table class="text-left w-full mb-4">
+        <table class="table-compact text-left w-full mb-4">
             <tr>
                 <th>Name</th>
-                <th>Email</th>
-                <th>Phone</th>
+                {{if .Data.CurrentSeason}}<th>G</th><th>A</th><th>YC</th><th>RC</th>{{end}}
                 {{if .Data.CanManage}}<th>Actions</th>{{end}}
             </tr>
             {{range .Data.Roster}}
             <tr>
                 <td><a href="/player/view/{{.ID}}">{{.FirstName}} {{.LastName}}</a></td>
-                <td>{{.Email.String}}</td>
-                <td>{{.PhoneNumber.String}}</td>
+                {{if $.Data.CurrentSeason}}
+                    {{with index $.Data.LeadersByPlayer .ID}}
+                        <td>{{.Goals}}</td>
+                        <td>{{.Assists}}</td>
+                        <td>{{.YellowCards}}</td>
+                        <td>{{.RedCards}}</td>
+                    {{else}}
+                        <td>0</td>
+                        <td>0</td>
+                        <td>0</td>
+                        <td>0</td>
+                    {{end}}
+                {{end}}
                 {{if $.Data.CanManage}}
                 <td>
                     <button class="text-red-600" data-delete-url="/team/{{$.Data.Team.ID}}/player/{{.ID}}/remove" data-confirm-message="Remove {{.FirstName}} {{.LastName}} from {{$.Data.Team.Name}}'s roster?" data-redirect-url="/team/{{$.Data.Team.ID}}">Remove from Team</button>

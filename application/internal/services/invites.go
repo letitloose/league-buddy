@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -54,19 +55,37 @@ func parseEmailList(raw string) []string {
 	return emails
 }
 
-// SendInvites parses form.Emails, validates each address, creates one
-// invite token per address, and emails (or logs, in dev mode without
-// EMAIL_USER configured) a signup link for each. Returns the addresses
-// actually invited.
+// SendInvites parses form.Emails, validates each address (including
+// rejecting any address that already belongs to a player on this team's
+// roster — see the field error text for why), creates one invite token per
+// address, and emails (or logs, in dev mode without EMAIL_USER configured) a
+// signup link for each. Returns the addresses actually invited.
 func (service *InviteService) SendInvites(teamID, createdByUserID int, actorEmail string, form *InviteForm) ([]string, error) {
 	emails := parseEmailList(form.Emails)
 	if len(emails) == 0 {
 		form.AddFieldError("emails", "You must enter at least one email address.")
 	}
+
+	pm := &models.PlayerModel{DB: service.DB}
+	tmm := &models.TeamMemberModel{DB: service.DB}
 	for _, addr := range emails {
 		if !validator.ValidEmail(addr) {
 			form.AddFieldError("emails", "You must enter a valid email: name@domain.ext")
 			break
+		}
+		existing, err := pm.GetByEmail(addr)
+		if err != nil && !errors.Is(err, models.ErrNoRecord) {
+			return nil, err
+		}
+		if err == nil {
+			isMember, err := tmm.IsMember(existing.ID, teamID)
+			if err != nil {
+				return nil, err
+			}
+			if isMember {
+				form.AddFieldError("emails", addr+" is already on this team's roster — use the roster list below to invite them instead.")
+				break
+			}
 		}
 	}
 
@@ -80,48 +99,111 @@ func (service *InviteService) SendInvites(teamID, createdByUserID int, actorEmai
 		return nil, err
 	}
 
-	cs := &CommonService{DB: service.DB}
 	invited := []string{}
-
 	for _, addr := range emails {
-		token, err := generateInviteToken()
-		if err != nil {
+		if err := service.sendOneInvite(team, createdByUserID, addr, actorEmail); err != nil {
 			return invited, err
 		}
-
-		_, err = service.Insert(&models.Invite{
-			Token:           token,
-			TeamID:          teamID,
-			Email:           addr,
-			CreatedByUserID: createdByUserID,
-		})
-		if err != nil {
-			return invited, err
-		}
-
-		signupLink := fmt.Sprintf("https://%s/user/signup?invite=%s", os.Getenv("PUBLIC_HOST"), token)
-		if service.Email != nil {
-			body := fmt.Sprintf(
-				`<html>
-					<body>
-						<p>You've been invited to join %s on Blame the Ball. <a href="%s">Sign up here</a>.</p>
-					</body>
-				</html>`, team.Name, signupLink)
-			if err := service.SendEmailV2(fmt.Sprintf("You're invited to join %s", team.Name), "", body, addr); err != nil {
-				return invited, err
-			}
-		} else if service.InfoLog != nil {
-			service.InfoLog.Printf("no email configured -- invite link for %s (team %d): %s", addr, teamID, signupLink)
-		}
-
-		if err := cs.InsertAuditLog(actorEmail, time.Now(), "invited "+addr+" to team: "+team.Name); err != nil {
-			return invited, err
-		}
-
 		invited = append(invited, addr)
 	}
 
 	return invited, nil
+}
+
+// InviteRosterPlayers invites specific existing roster members by player ID
+// — the picker on the invite page for roster placeholders who haven't
+// signed up yet. Unlike SendInvites, these players are *expected* to already
+// be on the roster, so that check doesn't apply here. Silently skips any
+// playerID that turns out not to be on this team, already has an account, or
+// has no email on file (a tampered request, since the picker itself never
+// offers those) rather than failing the whole batch. Returns the addresses
+// actually invited.
+func (service *InviteService) InviteRosterPlayers(teamID int, playerIDs []int, createdByUserID int, actorEmail string) ([]string, error) {
+	tm := &models.TeamModel{DB: service.DB}
+	team, err := tm.Get(teamID)
+	if err != nil {
+		return nil, err
+	}
+
+	pm := &models.PlayerModel{DB: service.DB}
+	tmm := &models.TeamMemberModel{DB: service.DB}
+	um := &models.UserModel{DB: service.DB}
+
+	invited := []string{}
+	for _, playerID := range playerIDs {
+		player, err := pm.Get(playerID)
+		if err != nil {
+			if errors.Is(err, models.ErrNoRecord) {
+				continue
+			}
+			return invited, err
+		}
+		if !player.Email.Valid || player.Email.String == "" {
+			continue
+		}
+
+		isMember, err := tmm.IsMember(playerID, teamID)
+		if err != nil {
+			return invited, err
+		}
+		if !isMember {
+			continue
+		}
+
+		hasAccount, err := um.ListPlayerIDsWithAccounts([]int{playerID})
+		if err != nil {
+			return invited, err
+		}
+		if hasAccount[playerID] {
+			continue
+		}
+
+		addr := player.Email.String
+		if err := service.sendOneInvite(team, createdByUserID, addr, actorEmail); err != nil {
+			return invited, err
+		}
+		invited = append(invited, addr)
+	}
+
+	return invited, nil
+}
+
+// sendOneInvite generates a token, records the invite, sends (or logs) the
+// signup email, and audit-logs it — the part shared by SendInvites and
+// InviteRosterPlayers regardless of how the recipient's address was chosen.
+func (service *InviteService) sendOneInvite(team *models.Team, createdByUserID int, addr, actorEmail string) error {
+	token, err := generateInviteToken()
+	if err != nil {
+		return err
+	}
+
+	_, err = service.Insert(&models.Invite{
+		Token:           token,
+		TeamID:          team.ID,
+		Email:           addr,
+		CreatedByUserID: createdByUserID,
+	})
+	if err != nil {
+		return err
+	}
+
+	signupLink := fmt.Sprintf("https://%s/user/signup?invite=%s", os.Getenv("PUBLIC_HOST"), token)
+	if service.Email != nil {
+		body := fmt.Sprintf(
+			`<html>
+				<body>
+					<p>You've been invited to join %s on Blame the Ball. <a href="%s">Sign up here</a>.</p>
+				</body>
+			</html>`, team.Name, signupLink)
+		if err := service.SendEmailV2(fmt.Sprintf("You're invited to join %s", team.Name), "", body, addr); err != nil {
+			return err
+		}
+	} else if service.InfoLog != nil {
+		service.InfoLog.Printf("no email configured -- invite link for %s (team %d): %s", addr, team.ID, signupLink)
+	}
+
+	cs := &CommonService{DB: service.DB}
+	return cs.InsertAuditLog(actorEmail, time.Now(), "invited "+addr+" to team: "+team.Name)
 }
 
 // CancelInvite revokes an outstanding invite so its signup link no longer

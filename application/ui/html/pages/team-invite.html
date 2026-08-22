@@ -26,6 +26,27 @@
             </div>
         </form>
 
+        {{if .Data.RosterWithoutAccount}}
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <h3 class="pt-0 text-center">Invite Existing Roster Members</h3>
+            <p class="text-sm text-gray-500 text-center mb-4">These players are already on the roster but haven't signed up for an account yet.</p>
+            <form action="/team/{{.Data.Team.ID}}/invite/roster" method="POST">
+                <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                <div class="mb-4">
+                {{range .Data.RosterWithoutAccount}}
+                    <label class="flex items-center gap-2 mb-2">
+                        <input type="checkbox" name="playerIDs" value="{{.ID}}">
+                        <span>{{.FirstName}} {{.LastName}} <span class="text-gray-500 text-sm">({{.Email.String}})</span></span>
+                    </label>
+                {{end}}
+                </div>
+                <div class="text-center">
+                    <input class="btn m-0" type='submit' value='Invite Selected'>
+                </div>
+            </form>
+        </div>
+        {{end}}
+
         {{if .Data.PendingInvites}}
         <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
             <h3 class="pt-0 text-center">Outstanding Invites</h3>

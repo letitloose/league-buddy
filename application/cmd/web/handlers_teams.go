@@ -693,10 +693,45 @@ func (app *application) teamActionBreadcrumbs(w http.ResponseWriter, team *model
 
 // teamInviteData wraps a team alongside its outstanding (not-yet-accepted)
 // invites, shown below the send form so captains/admins can see who's
-// already been invited.
+// already been invited, and RosterWithoutAccount — current roster players
+// who have an email on file but no linked login yet, offered as a picker so
+// a manager can invite them by selecting rather than retyping their address.
 type teamInviteData struct {
-	Team           *models.Team
-	PendingInvites []*models.Invite
+	Team                 *models.Team
+	PendingInvites       []*models.Invite
+	RosterWithoutAccount []*models.Player
+}
+
+// rosterWithoutAccount returns teamID's roster filtered down to players who
+// have an email on file but no linked user account — candidates for the
+// invite page's roster picker.
+func (app *application) rosterWithoutAccount(teamID int) ([]*models.Player, error) {
+	roster, err := app.playerService.GetByTeam(teamID)
+	if err != nil {
+		return nil, err
+	}
+
+	playerIDs := make([]int, len(roster))
+	for i, player := range roster {
+		playerIDs[i] = player.ID
+	}
+	um := &models.UserModel{DB: app.playerService.DB}
+	hasAccount, err := um.ListPlayerIDsWithAccounts(playerIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	withoutAccount := []*models.Player{}
+	for _, player := range roster {
+		if hasAccount[player.ID] {
+			continue
+		}
+		if !player.Email.Valid || player.Email.String == "" {
+			continue
+		}
+		withoutAccount = append(withoutAccount, player)
+	}
+	return withoutAccount, nil
 }
 
 func (app *application) teamInviteForm(w http.ResponseWriter, r *http.Request) {
@@ -712,13 +747,19 @@ func (app *application) teamInviteForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	withoutAccount, err := app.rosterWithoutAccount(team.ID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
 	breadcrumbs, ok := app.teamActionBreadcrumbs(w, team, Breadcrumb{Label: "Invite Players"})
 	if !ok {
 		return
 	}
 
 	data := app.newTemplateData(r)
-	data.Data = &teamInviteData{Team: team, PendingInvites: pending}
+	data.Data = &teamInviteData{Team: team, PendingInvites: pending, RosterWithoutAccount: withoutAccount}
 	data.Form = services.InviteForm{}
 	data.Breadcrumbs = breadcrumbs
 
@@ -752,17 +793,58 @@ func (app *application) teamInviteSend(w http.ResponseWriter, r *http.Request) {
 				app.serverError(w, perr)
 				return
 			}
+			withoutAccount, werr := app.rosterWithoutAccount(team.ID)
+			if werr != nil {
+				app.serverError(w, werr)
+				return
+			}
 			breadcrumbs, ok := app.teamActionBreadcrumbs(w, team, Breadcrumb{Label: "Invite Players"})
 			if !ok {
 				return
 			}
 			data := app.newTemplateData(r)
-			data.Data = &teamInviteData{Team: team, PendingInvites: pending}
+			data.Data = &teamInviteData{Team: team, PendingInvites: pending, RosterWithoutAccount: withoutAccount}
 			data.Form = form
 			data.Breadcrumbs = breadcrumbs
 			app.render(w, http.StatusUnprocessableEntity, "team-invite.html", data)
 			return
 		}
+		app.serverError(w, err)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", fmt.Sprintf("Invited %d player(s) to %s.", len(invited), team.Name))
+	http.Redirect(w, r, fmt.Sprintf("/team/%d", team.ID), http.StatusSeeOther)
+}
+
+// teamInviteFromRoster invites specific roster players (selected by
+// checkbox, by player ID) rather than free-typed emails — the counterpart
+// to teamInviteSend for players already on the roster who just haven't
+// signed up yet.
+func (app *application) teamInviteFromRoster(w http.ResponseWriter, r *http.Request) {
+	team, ok := app.getRouteTeam(w, r)
+	if !ok {
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	playerIDs := make([]int, 0, len(r.PostForm["playerIDs"]))
+	for _, idStr := range r.PostForm["playerIDs"] {
+		id, err := strconv.Atoi(idStr)
+		if err != nil || id < 1 {
+			continue
+		}
+		playerIDs = append(playerIDs, id)
+	}
+
+	loggedInUserID := app.sessionManager.GetInt(r.Context(), "authenticatedUserID")
+
+	invited, err := app.inviteService.InviteRosterPlayers(team.ID, playerIDs, loggedInUserID, app.getUserName(r))
+	if err != nil {
 		app.serverError(w, err)
 		return
 	}

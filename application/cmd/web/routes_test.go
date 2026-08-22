@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -726,6 +727,79 @@ func TestCaptainCanCancelInvite(t *testing.T) {
 		code, _, _ := ts.delete(t, fmt.Sprintf("/team/%d/invite/%d/cancel", teamID, inviteID))
 		if code != http.StatusConflict {
 			t.Errorf("want %d; got %d", http.StatusConflict, code)
+		}
+	})
+}
+
+// Inviting a free-text email address that already belongs to a player on
+// this team's roster is rejected with a field error; inviting a roster
+// player who has no account yet, via the roster picker, succeeds.
+func TestTeamInviteRosterValidationAndPicker(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Roster Invite Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, teamID, "roster-invite-captain@test.com", "validpassword123")
+
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	playerID, err := pm.Insert(&models.Player{
+		FirstName: "Roster",
+		LastName:  "Placeholder",
+		Email:     sql.NullString{String: "roster-invite-placeholder@test.com", Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, teamID); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "roster-invite-captain@test.com", "validpassword123")
+
+	t.Run("free-text invite to an existing roster member's email is rejected", func(t *testing.T) {
+		_, _, getBody := ts.get(t, fmt.Sprintf("/team/%d/invite", teamID))
+		csrfToken := extractCSRFToken(t, getBody)
+
+		form := url.Values{}
+		form.Add("csrf_token", csrfToken)
+		form.Add("emails", "roster-invite-placeholder@test.com")
+		code, _, body := ts.postForm(t, fmt.Sprintf("/team/%d/invite", teamID), form)
+		if code != http.StatusUnprocessableEntity {
+			t.Errorf("want %d; got %d", http.StatusUnprocessableEntity, code)
+		}
+		if !strings.Contains(body, "already on this team") {
+			t.Errorf("expected a roster-conflict error message in the response body")
+		}
+	})
+
+	t.Run("inviting via the roster picker succeeds", func(t *testing.T) {
+		_, _, getBody := ts.get(t, fmt.Sprintf("/team/%d/invite", teamID))
+		csrfToken := extractCSRFToken(t, getBody)
+
+		form := url.Values{}
+		form.Add("csrf_token", csrfToken)
+		form.Add("playerIDs", strconv.Itoa(playerID))
+		code, headers, _ := ts.postForm(t, fmt.Sprintf("/team/%d/invite/roster", teamID), form)
+		if code != http.StatusSeeOther {
+			t.Errorf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d", teamID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d", teamID), loc)
+		}
+
+		im := &models.InviteModel{DB: testDB}
+		pending, err := im.ListPendingByTeam(teamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(pending) != 1 || pending[0].Email != "roster-invite-placeholder@test.com" {
+			t.Fatalf("expected one pending invite for roster-invite-placeholder@test.com, got %v", pending)
 		}
 	})
 }

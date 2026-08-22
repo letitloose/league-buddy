@@ -53,27 +53,27 @@ jobs:
           push: true
           tags: ghcr.io/letitloose/league-buddy:latest
 
-  # deploy:
-  #   needs: build-and-push
-  #   if: github.ref == 'refs/heads/main'
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Get current date
-  #       id: date
-  #       run: echo "date=$(TZ=America/New_York date +'%m\/%d\/%Y %I:%M %p')" >> $GITHUB_OUTPUT
-  #     - name: Deploy to server
-  #       uses: appleboy/ssh-action@master
-  #       env:
-  #         GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #       with:
-  #         host: ${{ secrets.SERVER_IP }}
-  #         username: ${{ secrets.SERVER_USERNAME }}
-  #         key: ${{ secrets.SERVER_KEY }}
-  #         envs: GHCR_TOKEN
-  #         script: |
-  #           echo "$GHCR_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-  #           cd league-buddy
-  #           git pull
-  #           sed -i~ '/^SOFTWARE_LAST_UPDATE=/s/=.*/=${{ steps.date.outputs.date }}/' .env
-  #           docker compose pull
-  #           docker compose up -d
+  deploy:
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get current date
+        id: date
+        run: echo "date=$(TZ=America/New_York date +'%m\/%d\/%Y %I:%M %p')" >> $GITHUB_OUTPUT
+      - name: Deploy to server
+        uses: appleboy/ssh-action@master
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_KEY }}
+          envs: GHCR_TOKEN
+          script: |
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            cd league-buddy
+            git pull
+            sed -i~ '/^SOFTWARE_LAST_UPDATE=/s/=.*/=${{ steps.date.outputs.date }}/' .env
+            docker compose pull
+            docker compose up -d

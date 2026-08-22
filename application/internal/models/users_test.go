@@ -207,6 +207,49 @@ func TestSetPlayerID(t *testing.T) {
 	}
 }
 
+func TestListPlayerIDsWithAccounts(t *testing.T) {
+	db := NewTestDB(t)
+
+	pm := PlayerModel{DB: db}
+	um := UserModel{DB: db}
+
+	linkedPlayerID, err := pm.Insert(&Player{FirstName: "Linked", LastName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlinkedPlayerID, err := pm.Insert(&Player{FirstName: "Unlinked", LastName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	userID, err := um.Insert("has-account@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetPlayerID(userID, linkedPlayerID); err != nil {
+		t.Fatal(err)
+	}
+
+	accounts, err := um.ListPlayerIDsWithAccounts([]int{linkedPlayerID, unlinkedPlayerID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !accounts[linkedPlayerID] {
+		t.Errorf("expected %d to have an account", linkedPlayerID)
+	}
+	if accounts[unlinkedPlayerID] {
+		t.Errorf("expected %d to NOT have an account", unlinkedPlayerID)
+	}
+
+	empty, err := um.ListPlayerIDsWithAccounts([]int{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("expected an empty map for an empty input slice, got %v", empty)
+	}
+}
+
 func TestToggleActive(t *testing.T) {
 	db := NewTestDB(t)
 

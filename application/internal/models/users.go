@@ -559,6 +559,40 @@ func (m *UserModel) List() ([]*User, error) {
 	return users, nil
 }
 
+// ListPlayerIDsWithAccounts returns the subset of playerIDs that have a
+// linked user account (any active/verification status) — powers the roster
+// page's "has an account" indicator for team managers. Callers pass an
+// empty slice safely; no query is run and an empty map comes back.
+func (m *UserModel) ListPlayerIDsWithAccounts(playerIDs []int) (map[int]bool, error) {
+	result := make(map[int]bool, len(playerIDs))
+	if len(playerIDs) == 0 {
+		return result, nil
+	}
+
+	placeholders := make([]string, len(playerIDs))
+	args := make([]any, len(playerIDs))
+	for i, id := range playerIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	stmt := fmt.Sprintf(`SELECT playerID FROM users WHERE playerID IN (%s)`, strings.Join(placeholders, ","))
+
+	rows, err := m.DB.Query(stmt, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var playerID int
+		if err := rows.Scan(&playerID); err != nil {
+			return nil, err
+		}
+		result[playerID] = true
+	}
+	return result, nil
+}
+
 func (m *UserModel) ToggleActive(userID int) error {
 	statement := "update users set active = !active where id = ?;"
 

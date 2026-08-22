@@ -29,6 +29,7 @@
         {{if .Data.PendingInvites}}
         <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
             <h3 class="pt-0 text-center">Outstanding Invites</h3>
+            <div class="overflow-x-auto">
             <table class="text-left w-full">
                 <tr>
                     <th>Email</th>
@@ -45,6 +46,7 @@
                 </tr>
                 {{end}}
             </table>
+            </div>
         </div>
         {{end}}
     </div>

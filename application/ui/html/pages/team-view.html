@@ -94,7 +94,7 @@
             <tr>
                 <th>Name</th>
                 {{if .Data.CurrentSeason}}<th>G</th><th>A</th><th>YC</th><th>RC</th>{{end}}
-                {{if .Data.CanManage}}<th>Actions</th>{{end}}
+                {{if .Data.CanManage}}<th>Account</th><th>Actions</th>{{end}}
             </tr>
             {{range .Data.Roster}}
             <tr>
@@ -113,6 +113,13 @@
                     {{end}}
                 {{end}}
                 {{if $.Data.CanManage}}
+                <td>
+                    {{if index $.Data.HasAccount .ID}}
+                        <span class="text-green-700" title="Has signed up">&check;</span>
+                    {{else}}
+                        <span class="text-gray-400" title="Hasn't signed up yet">&mdash;</span>
+                    {{end}}
+                </td>
                 <td>
                     <button class="text-red-600" data-delete-url="/team/{{$.Data.Team.ID}}/player/{{.ID}}/remove" data-confirm-message="Remove {{.FirstName}} {{.LastName}} from {{$.Data.Team.Name}}'s roster?" data-redirect-url="/team/{{$.Data.Team.ID}}">Remove from Team</button>
                 </td>

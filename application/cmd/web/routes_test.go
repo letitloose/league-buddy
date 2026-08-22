@@ -1296,3 +1296,73 @@ func TestMatchViewAndCaptainEditAccess(t *testing.T) {
 		}
 	})
 }
+
+// The roster's "has an account" indicator is only visible to team managers
+// (admin, league admin, or captain) — a plain active viewer sees the roster
+// with no such column at all.
+func TestRosterAccountIndicatorVisibleOnlyToManagers(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Account Indicator Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pm := &models.PlayerModel{DB: testDB}
+	linkedPlayerID, err := pm.Insert(&models.Player{FirstName: "Linked", LastName: "Guy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlinkedPlayerID, err := pm.Insert(&models.Player{FirstName: "Unlinked", LastName: "Guy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	if err := tmm.AddMembership(linkedPlayerID, teamID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(unlinkedPlayerID, teamID); err != nil {
+		t.Fatal(err)
+	}
+
+	um := &models.UserModel{DB: testDB}
+	linkedUserID, err := um.Insert("roster-account-linked@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetPlayerID(linkedUserID, linkedPlayerID); err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, teamID, "roster-account-captain@test.com", "validpassword123")
+
+	t.Run("captain sees the account column", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "roster-account-captain@test.com", "validpassword123")
+
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d", teamID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "Has signed up") {
+			t.Error("expected the linked player to show a signed-up indicator")
+		}
+		if !strings.Contains(body, "Hasn't signed up yet") {
+			t.Error("expected the unlinked player to show a not-signed-up indicator")
+		}
+	})
+
+	t.Run("plain active viewer sees no account column", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testActiveEmail, testActivePass)
+
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d", teamID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if strings.Contains(body, "Has signed up") || strings.Contains(body, "Hasn't signed up yet") {
+			t.Error("expected no account indicator for a plain active viewer")
+		}
+	})
+}

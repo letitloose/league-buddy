@@ -51,6 +51,7 @@ type teamViewData struct {
 	LeadingScorer           *models.StatLine
 	LeadingAssister         *models.StatLine
 	Schedule                []*seasonMatchRow
+	HasAccount              map[int]bool
 }
 
 // teamFormSupportData is the SupportData shape for team-create.html and
@@ -112,6 +113,22 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		app.serverError(w, err)
 		return
+	}
+
+	// Who's already got a login is only shown to managers — left empty
+	// (and unqueried) for a plain viewer.
+	hasAccount := map[int]bool{}
+	if canManage {
+		playerIDs := make([]int, len(roster))
+		for i, player := range roster {
+			playerIDs[i] = player.ID
+		}
+		um := &models.UserModel{DB: app.playerService.DB}
+		hasAccount, err = um.ListPlayerIDsWithAccounts(playerIDs)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
 	}
 
 	var location *models.Location
@@ -219,6 +236,7 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		LeadingScorer:           leadingScorer,
 		LeadingAssister:         leadingAssister,
 		Schedule:                schedule,
+		HasAccount:              hasAccount,
 	}
 	data.Breadcrumbs = app.teamBreadcrumbs(team, league, true)
 

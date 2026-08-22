@@ -81,7 +81,7 @@ func (service *JoinRequestService) notifyCaptain(teamID int) {
 		return
 	}
 
-	link := fmt.Sprintf("https://%s/team/%d/joinRequests", os.Getenv("VIRTUAL_HOST"), teamID)
+	link := fmt.Sprintf("https://%s/team/%d/joinRequests", os.Getenv("PUBLIC_HOST"), teamID)
 
 	if !team.CaptainPlayerID.Valid {
 		if service.InfoLog != nil {

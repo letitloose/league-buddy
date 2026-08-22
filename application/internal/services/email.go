@@ -20,7 +20,7 @@ func (email *Email) SendEmailV2(subject, mime, body, recipient string) error {
 		{
 			From: &mailjet.RecipientV31{
 				Email: email.Sender, // Must be validated with Mailjet
-				Name:  "League Buddy",
+				Name:  "Blame the Ball",
 			},
 			To: &mailjet.RecipientsV31{
 				mailjet.RecipientV31{

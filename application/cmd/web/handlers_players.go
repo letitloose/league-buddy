@@ -99,15 +99,15 @@ func (app *application) playerCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if form.Email != "" {
-		signupLink := fmt.Sprintf("https://%s/user/signup", os.Getenv("VIRTUAL_HOST"))
+		signupLink := fmt.Sprintf("https://%s/user/signup", os.Getenv("PUBLIC_HOST"))
 		if app.emailService != nil {
 			body := fmt.Sprintf(
 				`<html>
 					<body>
-						<p>You've been added to the League Buddy roster. <a href="%s">Sign up here</a> to manage your profile.<p>
+						<p>You've been added to the Blame the Ball roster. <a href="%s">Sign up here</a> to manage your profile.<p>
 					</body>
 				</html>`, signupLink)
-			_ = app.emailService.SendEmailV2("You've been added to the League Buddy roster", "", body, form.Email)
+			_ = app.emailService.SendEmailV2("You've been added to the Blame the Ball roster", "", body, form.Email)
 		} else {
 			app.infoLog.Printf("no email configured -- roster invite for %s: %s", form.Email, signupLink)
 		}

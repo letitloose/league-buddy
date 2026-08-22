@@ -10,3 +10,5 @@ data
 logs/*
 !logs/.gitkeep
 tools
+league-buddy-key
+league-buddy-key.pub

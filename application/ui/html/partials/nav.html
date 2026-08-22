@@ -4,15 +4,15 @@
     {{/* ── Top bar: always visible ── */}}
     <div class="flex justify-between items-center px-4 py-2">
         <div class="flex items-center">
-            <a href="/" class="mr-4 text-green-400 no-underline font-bold brand-font">League Buddy</a>
+            <a href="/" class="mr-4 text-orange-400 no-underline font-bold brand-font">Blame the Ball</a>
 
             {{/* ── Desktop left-side links ── */}}
             <div class="hidden md:flex items-center">
-                <a href="/" class="mr-4 text-neutral-100 hover:text-green-400 no-underline">Home</a>
+                <a href="/" class="mr-4 text-neutral-100 hover:text-orange-400 no-underline">Home</a>
                 {{if .IsActive}}
-                    <a href="/league" class="mr-4 text-neutral-100 hover:text-green-400 no-underline">Leagues</a>
+                    <a href="/league" class="mr-4 text-neutral-100 hover:text-orange-400 no-underline">Leagues</a>
                     {{if .MyTeams}}
-                        <div class="dropdown text-neutral-100 hover:text-green-400 mr-4">
+                        <div class="dropdown text-neutral-100 hover:text-orange-400 mr-4">
                             <button class="dropbtn">My Teams</button>
                             <div class="dropdown-content">
                                 {{range .MyTeams}}
@@ -22,7 +22,7 @@
                         </div>
                     {{end}}
                     {{if .MyAdminLeagues}}
-                        <div class="dropdown text-neutral-100 hover:text-green-400 mr-4">
+                        <div class="dropdown text-neutral-100 hover:text-orange-400 mr-4">
                             <button class="dropbtn">My Leagues (Admin)</button>
                             <div class="dropdown-content">
                                 {{range .MyAdminLeagues}}
@@ -33,7 +33,7 @@
                     {{end}}
                 {{end}}
                 {{if .IsAdmin}}
-                    <div class="dropdown text-neutral-100 hover:text-green-400 mr-4">
+                    <div class="dropdown text-neutral-100 hover:text-orange-400 mr-4">
                         <button class="dropbtn">Admin</button>
                         <div class="dropdown-content">
                             <a href='/user/search'>Users</a>
@@ -50,7 +50,7 @@
             {{/* ── Desktop right-side links ── */}}
             <div class="hidden md:flex">
                 {{if .IsAuthenticated}}
-                <div class="dropdown text-neutral-100 hover:text-green-400 mr-4">
+                <div class="dropdown text-neutral-100 hover:text-orange-400 mr-4">
                     <button class="dropbtn">{{.UserName}}</button>
                     <div class="dropdown-content" style="right: 0; width: 140px;">
                         {{if and .IsActive (gt .PlayerID 0)}}
@@ -63,7 +63,7 @@
                     </div>
                 </div>
                 {{else}}
-                    <a href='/user/login' class="text-neutral-100 hover:text-green-400 mr-4">Login/Signup</a>
+                    <a href='/user/login' class="text-neutral-100 hover:text-orange-400 mr-4">Login/Signup</a>
                 {{end}}
             </div>
 

@@ -51,7 +51,7 @@ func (service *UserService) ForgotPassword(uf *UserForm) error {
 		}
 	}
 
-	resetLink := fmt.Sprintf("https://%s/user/resetPassword?hash=%s", os.Getenv("VIRTUAL_HOST"), verificationHash)
+	resetLink := fmt.Sprintf("https://%s/user/resetPassword?hash=%s", os.Getenv("PUBLIC_HOST"), verificationHash)
 
 	if service.Email != nil {
 		body := fmt.Sprintf(
@@ -60,7 +60,7 @@ func (service *UserService) ForgotPassword(uf *UserForm) error {
 					<p>Please <a href="%s">click here</a> to reset your password.<p>
 				</body>
 			</html>`, resetLink)
-		err = service.SendEmailV2("League Buddy Password Reset", "", body, uf.Email)
+		err = service.SendEmailV2("Blame the Ball Password Reset", "", body, uf.Email)
 		if err != nil {
 			return err
 		}
@@ -115,7 +115,7 @@ func (service *UserService) InsertUser(uf *UserForm) error {
 	if err != nil {
 		return err
 	}
-	activationLink := fmt.Sprintf("https://%s/user/activate?hash=%s", os.Getenv("VIRTUAL_HOST"), verificationHash)
+	activationLink := fmt.Sprintf("https://%s/user/activate?hash=%s", os.Getenv("PUBLIC_HOST"), verificationHash)
 
 	if service.Email != nil {
 		body := fmt.Sprintf(
@@ -125,7 +125,7 @@ func (service *UserService) InsertUser(uf *UserForm) error {
 					<p>Please <a href="%s">click here</a> to validate your email and activate your account.<p>
 				</body>
 			</html>`, activationLink)
-		err = service.SendEmailV2("Activate your League Buddy account", "", body, uf.Email)
+		err = service.SendEmailV2("Activate your Blame the Ball account", "", body, uf.Email)
 		if err != nil {
 			return err
 		}

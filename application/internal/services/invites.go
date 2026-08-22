@@ -99,12 +99,12 @@ func (service *InviteService) SendInvites(teamID, createdByUserID int, actorEmai
 			return invited, err
 		}
 
-		signupLink := fmt.Sprintf("https://%s/user/signup?invite=%s", os.Getenv("VIRTUAL_HOST"), token)
+		signupLink := fmt.Sprintf("https://%s/user/signup?invite=%s", os.Getenv("PUBLIC_HOST"), token)
 		if service.Email != nil {
 			body := fmt.Sprintf(
 				`<html>
 					<body>
-						<p>You've been invited to join %s on League Buddy. <a href="%s">Sign up here</a>.</p>
+						<p>You've been invited to join %s on Blame the Ball. <a href="%s">Sign up here</a>.</p>
 					</body>
 				</html>`, team.Name, signupLink)
 			if err := service.SendEmailV2(fmt.Sprintf("You're invited to join %s", team.Name), "", body, addr); err != nil {

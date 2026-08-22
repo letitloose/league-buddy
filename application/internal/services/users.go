@@ -101,9 +101,9 @@ func (service *UserService) InsertUser(uf *UserForm) error {
 		if err != nil && !errors.Is(err, models.ErrNoRecord) {
 			return err
 		}
-		// A stale/unknown/already-used token is treated as "no invite" —
-		// never block signup because of a bad URL param.
-		if err == nil && !invite.UsedAt.Valid {
+		// A stale/unknown/already-used/canceled token is treated as "no
+		// invite" — never block signup because of a bad URL param.
+		if err == nil && !invite.UsedAt.Valid && !invite.CanceledAt.Valid {
 			if err := service.UserModel.SetPendingInvite(userID, invite.ID); err != nil {
 				return err
 			}

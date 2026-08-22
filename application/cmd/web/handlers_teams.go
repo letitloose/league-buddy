@@ -753,6 +753,50 @@ func (app *application) teamInviteSend(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/team/%d", team.ID), http.StatusSeeOther)
 }
 
+func (app *application) inviteCancel(w http.ResponseWriter, r *http.Request) {
+	params := httprouter.ParamsFromContext(r.Context())
+
+	teamID, err := strconv.Atoi(params.ByName("teamID"))
+	if err != nil || teamID < 1 {
+		app.notFound(w)
+		return
+	}
+	inviteID, err := strconv.Atoi(params.ByName("inviteID"))
+	if err != nil || inviteID < 1 {
+		app.notFound(w)
+		return
+	}
+
+	im := &models.InviteModel{DB: app.playerService.DB}
+	invite, err := im.Get(inviteID)
+	if err != nil {
+		if errors.Is(err, models.ErrNoRecord) {
+			app.notFound(w)
+		} else {
+			app.serverError(w, err)
+		}
+		return
+	}
+	// Defense in depth: a captain guessing another team's invite id should
+	// still 404, not act on it, even though requireTeamManager already
+	// confirmed they manage :teamID.
+	if invite.TeamID != teamID {
+		app.notFound(w)
+		return
+	}
+
+	if err := app.inviteService.CancelInvite(inviteID, app.getUserName(r)); err != nil {
+		if errors.Is(err, models.ErrNoRecord) {
+			app.clientError(w, http.StatusConflict)
+			return
+		}
+		app.serverError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // joinRequestListData wraps join-request rows alongside the team they're
 // scoped to (nil for the cross-team admin view, whose template shows a Team
 // column instead of a page-level team heading).

@@ -123,3 +123,25 @@ func (service *InviteService) SendInvites(teamID, createdByUserID int, actorEmai
 
 	return invited, nil
 }
+
+// CancelInvite revokes an outstanding invite so its signup link no longer
+// works. No-ops (returns ErrNoRecord) if it was already used or canceled.
+func (service *InviteService) CancelInvite(id int, actorEmail string) error {
+	invite, err := service.Get(id)
+	if err != nil {
+		return err
+	}
+
+	if err := service.Cancel(id); err != nil {
+		return err
+	}
+
+	tm := &models.TeamModel{DB: service.DB}
+	team, err := tm.Get(invite.TeamID)
+	if err != nil {
+		return err
+	}
+
+	cs := &CommonService{DB: service.DB}
+	return cs.InsertAuditLog(actorEmail, time.Now(), "canceled invite for "+invite.Email+" to team: "+team.Name)
+}

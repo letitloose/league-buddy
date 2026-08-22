@@ -59,6 +59,7 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodDelete, "/team/:teamID/player/:id/remove", teamManager.ThenFunc(app.playerRemoveFromTeam))
 	router.Handler(http.MethodGet, "/team/:teamID/invite", teamManager.ThenFunc(app.teamInviteForm))
 	router.Handler(http.MethodPost, "/team/:teamID/invite", teamManager.ThenFunc(app.teamInviteSend))
+	router.Handler(http.MethodDelete, "/team/:teamID/invite/:inviteID/cancel", teamManager.ThenFunc(app.inviteCancel))
 	router.Handler(http.MethodGet, "/team/:teamID/joinRequests", teamManager.ThenFunc(app.joinRequestList))
 	router.Handler(http.MethodPost, "/team/:teamID/joinRequests/:requestID/approve", teamManager.ThenFunc(app.joinRequestApprove))
 	router.Handler(http.MethodPost, "/team/:teamID/joinRequests/:requestID/reject", teamManager.ThenFunc(app.joinRequestReject))

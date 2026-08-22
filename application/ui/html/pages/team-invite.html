@@ -33,11 +33,15 @@
                 <tr>
                     <th>Email</th>
                     <th>Sent</th>
+                    <th>Actions</th>
                 </tr>
                 {{range .Data.PendingInvites}}
                 <tr>
                     <td>{{.Email}}</td>
                     <td>{{humanDate .CreatedAt}}</td>
+                    <td>
+                        <button class="text-red-600" data-delete-url="/team/{{$.Data.Team.ID}}/invite/{{.ID}}/cancel" data-confirm-message="Cancel the invite to {{.Email}}?" data-redirect-url="/team/{{$.Data.Team.ID}}/invite">Cancel</button>
+                    </td>
                 </tr>
                 {{end}}
             </table>

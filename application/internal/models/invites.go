@@ -15,6 +15,7 @@ type Invite struct {
 	CreatedAt       time.Time
 	UsedAt          sql.NullTime
 	UsedByUserID    sql.NullInt32
+	CanceledAt      sql.NullTime
 }
 
 type InviteModel struct {
@@ -38,12 +39,12 @@ func (m *InviteModel) Insert(invite *Invite) (int, error) {
 }
 
 func (m *InviteModel) Get(id int) (*Invite, error) {
-	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID
+	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID, canceledAt
 		FROM invites WHERE id = ?`
 
 	invite := &Invite{}
 	err := m.DB.QueryRow(stmt, id).Scan(&invite.ID, &invite.Token, &invite.TeamID, &invite.Email,
-		&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID)
+		&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID, &invite.CanceledAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -54,12 +55,12 @@ func (m *InviteModel) Get(id int) (*Invite, error) {
 }
 
 func (m *InviteModel) GetByToken(token string) (*Invite, error) {
-	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID
+	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID, canceledAt
 		FROM invites WHERE token = ?`
 
 	invite := &Invite{}
 	err := m.DB.QueryRow(stmt, token).Scan(&invite.ID, &invite.Token, &invite.TeamID, &invite.Email,
-		&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID)
+		&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID, &invite.CanceledAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -69,12 +70,12 @@ func (m *InviteModel) GetByToken(token string) (*Invite, error) {
 	return invite, nil
 }
 
-// ListPendingByTeam returns every invite for teamID that hasn't been used
-// yet, oldest first — powers the outstanding-invites list on the invite page
-// and the team page's pending-invite badge count.
+// ListPendingByTeam returns every invite for teamID that hasn't been used or
+// canceled, oldest first — powers the outstanding-invites list on the invite
+// page and the team page's pending-invite badge count.
 func (m *InviteModel) ListPendingByTeam(teamID int) ([]*Invite, error) {
-	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID
-		FROM invites WHERE teamID = ? AND usedAt IS NULL ORDER BY createdAt ASC`
+	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID, canceledAt
+		FROM invites WHERE teamID = ? AND usedAt IS NULL AND canceledAt IS NULL ORDER BY createdAt ASC`
 
 	rows, err := m.DB.Query(stmt, teamID)
 	if err != nil {
@@ -86,7 +87,7 @@ func (m *InviteModel) ListPendingByTeam(teamID int) ([]*Invite, error) {
 	for rows.Next() {
 		invite := &Invite{}
 		err := rows.Scan(&invite.ID, &invite.Token, &invite.TeamID, &invite.Email,
-			&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID)
+			&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID, &invite.CanceledAt)
 		if err != nil {
 			return nil, err
 		}
@@ -100,4 +101,25 @@ func (m *InviteModel) MarkUsed(id, usedByUserID int) error {
 
 	_, err := m.DB.Exec(statement, usedByUserID, id)
 	return err
+}
+
+// Cancel revokes an outstanding invite, so its token can no longer be used
+// to sign up. A no-op guarded update: only touches a row that hasn't already
+// been used or canceled. Returns ErrNoRecord if there was nothing to cancel
+// (already used, already canceled, or doesn't exist).
+func (m *InviteModel) Cancel(id int) error {
+	statement := `UPDATE invites SET canceledAt = UTC_TIMESTAMP() WHERE id = ? AND usedAt IS NULL AND canceledAt IS NULL`
+
+	result, err := m.DB.Exec(statement, id)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNoRecord
+	}
+	return nil
 }

@@ -659,6 +659,150 @@ func TestInviteSignupAutoJoinsTeam(t *testing.T) {
 	}
 }
 
+// A team manager (captain, league admin, or admin) can cancel an
+// outstanding invite, which both drops it from the pending list and stops
+// its signup link from working.
+func TestCaptainCanCancelInvite(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Cancel Invite Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTeamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Cancel Invite Other Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, teamID, "cancel-invite-captain@test.com", "validpassword123")
+
+	um := &models.UserModel{DB: testDB}
+	captainUser, err := um.GetUserByEmail("cancel-invite-captain@test.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	im := &models.InviteModel{DB: testDB}
+	inviteID, err := im.Insert(&models.Invite{
+		Token:           "cancel-route-token",
+		TeamID:          teamID,
+		Email:           "someone@test.com",
+		CreatedByUserID: captainUser.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "cancel-invite-captain@test.com", "validpassword123")
+
+	t.Run("captain of a different team cannot cancel", func(t *testing.T) {
+		code, headers, _ := ts.delete(t, fmt.Sprintf("/team/%d/invite/%d/cancel", otherTeamID, inviteID))
+		if code != http.StatusSeeOther {
+			t.Errorf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+	})
+
+	t.Run("captain of the team can cancel", func(t *testing.T) {
+		code, _, _ := ts.delete(t, fmt.Sprintf("/team/%d/invite/%d/cancel", teamID, inviteID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+
+		pending, err := im.ListPendingByTeam(teamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(pending) != 0 {
+			t.Fatalf("expected the canceled invite to drop off the pending list, got %d", len(pending))
+		}
+	})
+
+	t.Run("canceling again reports a conflict", func(t *testing.T) {
+		code, _, _ := ts.delete(t, fmt.Sprintf("/team/%d/invite/%d/cancel", teamID, inviteID))
+		if code != http.StatusConflict {
+			t.Errorf("want %d; got %d", http.StatusConflict, code)
+		}
+	})
+}
+
+// A canceled invite's signup link no longer auto-joins the team — the
+// account can still be created, but linkOrCreatePlayer never sees a valid
+// pending invite to act on.
+func TestCanceledInviteSignupDoesNotAutoJoin(t *testing.T) {
+	app := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Canceled Invite Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	um := &models.UserModel{DB: testDB}
+	admin, err := um.GetUserByEmail(testAdminEmail)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	im := &models.InviteModel{DB: testDB}
+	inviteID, err := im.Insert(&models.Invite{
+		Token:           "canceled-signup-token",
+		TeamID:          teamID,
+		Email:           "canceled-invite-signup@test.com",
+		CreatedByUserID: admin.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := im.Cancel(inviteID); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, body := ts.get(t, "/user/signup?invite=canceled-signup-token")
+	csrfToken := extractCSRFToken(t, body)
+
+	code, _, _ := ts.postForm(t, "/user/signup", url.Values{
+		"email":           {"canceled-invite-signup@test.com"},
+		"password":        {"validpassword123"},
+		"confirmPassword": {"validpassword123"},
+		"inviteToken":     {"canceled-signup-token"},
+		"csrf_token":      {csrfToken},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("signup: want %d; got %d", http.StatusSeeOther, code)
+	}
+
+	hash, err := app.userService.GetVerificationHashByEmail("canceled-invite-signup@test.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.userService.ActivateUser(hash); err != nil {
+		t.Fatal(err)
+	}
+
+	user, err := um.GetUserByEmail("canceled-invite-signup@test.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !user.PlayerID.Valid {
+		t.Fatal("expected a placeholder player to still be linked")
+	}
+
+	tmm := &models.TeamMemberModel{DB: testDB}
+	isMember, err := tmm.IsMember(int(user.PlayerID.Int32), teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isMember {
+		t.Fatal("expected a canceled invite to NOT auto-join the team")
+	}
+}
+
 // A league admin can create/edit/delete a season and a match within their
 // own league, but is redirected attempting any of that for a different
 // league — season/match administration reuses canManageLeague exactly like

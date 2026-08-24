@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/letitloose/league-buddy/internal/models"
@@ -311,6 +312,14 @@ type matchStatDisplayRow struct {
 	RedCards    int
 }
 
+// rsvpDisplayRow is one roster player who RSVP'd with a given status
+// ("yes" or "no") — a no-response roster player never gets a row, since the
+// point of these lists is "who actually answered," not a full roll call.
+type rsvpDisplayRow struct {
+	PlayerName string
+	Message    string
+}
+
 type matchViewData struct {
 	Match           *models.Match
 	Season          *models.Season
@@ -322,41 +331,68 @@ type matchViewData struct {
 	HomeStats       []*matchStatDisplayRow
 	AwayStats       []*matchStatDisplayRow
 	CanManage       bool
+	CanRSVP         bool
+	IsPast          bool
+	HomeRSVPsIn     []*rsvpDisplayRow
+	AwayRSVPsIn     []*rsvpDisplayRow
+	HomeRSVPsOut    []*rsvpDisplayRow
+	AwayRSVPsOut    []*rsvpDisplayRow
 }
 
-// matchView is the read-only "match screen" any active user can reach by
-// clicking a schedule row (team home page, season page) — score, location,
-// and every recorded player stat. CanManage gates the Edit link to
-// /admin/match/update/:id (admins, league admins, or a captain of either
-// team — see canManageMatch).
-func (app *application) matchView(w http.ResponseWriter, r *http.Request) {
-	match, ok := app.getRouteMatch(w, r)
-	if !ok {
-		return
+// buildRSVPRows returns a row for every roster player who RSVP'd status
+// ("yes" or "no"), skipping anyone who hasn't responded.
+func buildRSVPRows(roster []*models.Player, rsvpsByPlayer map[int]*models.RSVP, status string) []*rsvpDisplayRow {
+	rows := make([]*rsvpDisplayRow, 0, len(roster))
+	for _, player := range roster {
+		rsvp := rsvpsByPlayer[player.ID]
+		if rsvp == nil || rsvp.Status != status {
+			continue
+		}
+		rows = append(rows, &rsvpDisplayRow{
+			PlayerName: player.FirstName + " " + player.LastName,
+			Message:    rsvp.Message.String,
+		})
 	}
+	return rows
+}
 
+// matchIsPast reports whether match's date is strictly before today — used
+// to close RSVPing once a match has already happened. Compared at day
+// granularity (today itself still counts as open) rather than exact
+// kickoff time, since MatchDate is a plain DATE with no time component.
+// "Now" is converted into MatchDate's own location before extracting the
+// year/month/day, rather than the server process's local location, so a
+// same-calendar-day match is never miscounted as past by a few hours of
+// UTC/local skew.
+func matchIsPast(match *models.Match) bool {
+	now := time.Now().In(match.MatchDate.Location())
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, match.MatchDate.Location())
+	return match.MatchDate.Before(today)
+}
+
+// buildMatchViewData assembles everything match-view.html needs. Split out
+// of matchView so a failed RSVP submission can re-render the same page
+// (with the just-submitted, possibly-invalid form re-attached) without
+// duplicating this lookup logic.
+func (app *application) buildMatchViewData(r *http.Request, match *models.Match) (*matchViewData, error) {
 	sm := &models.SeasonModel{DB: app.playerService.DB}
 	season, err := sm.Get(match.SeasonID)
 	if err != nil {
-		app.serverError(w, err)
-		return
+		return nil, err
 	}
 	lm := &models.LeagueModel{DB: app.playerService.DB}
 	league, err := lm.Get(season.LeagueID)
 	if err != nil {
-		app.serverError(w, err)
-		return
+		return nil, err
 	}
 	tm := &models.TeamModel{DB: app.playerService.DB}
 	homeTeam, err := tm.Get(match.HomeTeamID)
 	if err != nil {
-		app.serverError(w, err)
-		return
+		return nil, err
 	}
 	awayTeam, err := tm.Get(match.AwayTeamID)
 	if err != nil {
-		app.serverError(w, err)
-		return
+		return nil, err
 	}
 
 	var location *models.Location
@@ -365,22 +401,19 @@ func (app *application) matchView(w http.ResponseWriter, r *http.Request) {
 		locm := &models.LocationModel{DB: app.playerService.DB}
 		location, err = locm.Get(int(match.LocationID.Int32))
 		if err != nil {
-			app.serverError(w, err)
-			return
+			return nil, err
 		}
 		am := &models.AddressModel{DB: app.playerService.DB}
 		locationAddress, err = am.Get(location.AddressID)
 		if err != nil {
-			app.serverError(w, err)
-			return
+			return nil, err
 		}
 	}
 
 	pmsm := &models.PlayerMatchStatModel{DB: app.playerService.DB}
 	stats, err := pmsm.ListByMatch(match.ID)
 	if err != nil {
-		app.serverError(w, err)
-		return
+		return nil, err
 	}
 	pm := &models.PlayerModel{DB: app.playerService.DB}
 	var homeStats, awayStats []*matchStatDisplayRow
@@ -390,8 +423,7 @@ func (app *application) matchView(w http.ResponseWriter, r *http.Request) {
 		}
 		player, err := pm.Get(stat.PlayerID)
 		if err != nil {
-			app.serverError(w, err)
-			return
+			return nil, err
 		}
 		row := &matchStatDisplayRow{
 			PlayerName:  player.FirstName + " " + player.LastName,
@@ -407,14 +439,34 @@ func (app *application) matchView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	canManage, err := app.canManageMatch(r, match)
+	homeRoster, err := app.playerService.GetByTeam(match.HomeTeamID)
 	if err != nil {
-		app.serverError(w, err)
-		return
+		return nil, err
+	}
+	awayRoster, err := app.playerService.GetByTeam(match.AwayTeamID)
+	if err != nil {
+		return nil, err
+	}
+	rm := &models.RSVPModel{DB: app.playerService.DB}
+	rsvps, err := rm.ListByMatch(match.ID)
+	if err != nil {
+		return nil, err
+	}
+	rsvpsByPlayer := make(map[int]*models.RSVP, len(rsvps))
+	for _, rsvp := range rsvps {
+		rsvpsByPlayer[rsvp.PlayerID] = rsvp
 	}
 
-	data := app.newTemplateData(r)
-	data.Data = &matchViewData{
+	canManage, err := app.canManageMatch(r, match)
+	if err != nil {
+		return nil, err
+	}
+
+	playerID := app.getPlayerID(r)
+	isPast := matchIsPast(match)
+	canRSVP := playerID > 0 && !isPast && (app.isMemberOfTeam(r, match.HomeTeamID) || app.isMemberOfTeam(r, match.AwayTeamID))
+
+	return &matchViewData{
 		Match:           match,
 		Season:          season,
 		League:          league,
@@ -425,15 +477,121 @@ func (app *application) matchView(w http.ResponseWriter, r *http.Request) {
 		HomeStats:       homeStats,
 		AwayStats:       awayStats,
 		CanManage:       canManage,
-	}
-	data.Breadcrumbs = []Breadcrumb{
+		CanRSVP:         canRSVP,
+		IsPast:          isPast,
+		HomeRSVPsIn:     buildRSVPRows(homeRoster, rsvpsByPlayer, "yes"),
+		AwayRSVPsIn:     buildRSVPRows(awayRoster, rsvpsByPlayer, "yes"),
+		HomeRSVPsOut:    buildRSVPRows(homeRoster, rsvpsByPlayer, "no"),
+		AwayRSVPsOut:    buildRSVPRows(awayRoster, rsvpsByPlayer, "no"),
+	}, nil
+}
+
+func matchViewBreadcrumbs(league *models.League, season *models.Season, homeTeam, awayTeam *models.Team) []Breadcrumb {
+	return []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},
 		{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)},
 		{Label: season.Name, URL: fmt.Sprintf("/season/%d", season.ID)},
 		{Label: fmt.Sprintf("%s vs %s", homeTeam.Name, awayTeam.Name)},
 	}
+}
 
-	app.render(w, http.StatusOK, "match-view.html", data)
+// renderMatchView renders match-view.html for viewData, with form attached
+// as the sticky RSVP widget's contents (the viewer's existing response on a
+// plain GET, or a just-submitted-but-invalid one on a failed POST).
+func (app *application) renderMatchView(w http.ResponseWriter, r *http.Request, viewData *matchViewData, form *services.RSVPForm, status int) {
+	data := app.newTemplateData(r)
+	data.Data = viewData
+	data.Form = form
+	data.Breadcrumbs = matchViewBreadcrumbs(viewData.League, viewData.Season, viewData.HomeTeam, viewData.AwayTeam)
+
+	app.render(w, status, "match-view.html", data)
+}
+
+// matchView is the read-only "match screen" any active user can reach by
+// clicking a schedule row (team home page, season page) — score, location,
+// every recorded player stat, and (for a roster member of either team) an
+// RSVP widget plus the full in/out roll call. CanManage gates the Edit link
+// to /admin/match/update/:id (admins, league admins, or a captain of either
+// team — see canManageMatch).
+func (app *application) matchView(w http.ResponseWriter, r *http.Request) {
+	match, ok := app.getRouteMatch(w, r)
+	if !ok {
+		return
+	}
+
+	viewData, err := app.buildMatchViewData(r, match)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	form := &services.RSVPForm{}
+	if viewData.CanRSVP {
+		rm := &models.RSVPModel{DB: app.playerService.DB}
+		existing, err := rm.GetByMatchAndPlayer(match.ID, app.getPlayerID(r))
+		if err != nil && !errors.Is(err, models.ErrNoRecord) {
+			app.serverError(w, err)
+			return
+		}
+		if err == nil {
+			form.Status = existing.Status
+			form.Message = existing.Message.String
+		}
+	}
+
+	app.renderMatchView(w, r, viewData, form, http.StatusOK)
+}
+
+// matchRSVPSubmit records the current player's yes/no response (plus an
+// optional message) to a match. Eligibility is "on the roster of either the
+// home or away team" (isMemberOfTeam), the same bar joinRequestSubmit uses
+// for its own in-handler check rather than a dedicated middleware tier.
+func (app *application) matchRSVPSubmit(w http.ResponseWriter, r *http.Request) {
+	match, ok := app.getRouteMatch(w, r)
+	if !ok {
+		return
+	}
+
+	playerID := app.getPlayerID(r)
+	isHome := app.isMemberOfTeam(r, match.HomeTeamID)
+	isAway := app.isMemberOfTeam(r, match.AwayTeamID)
+	if playerID <= 0 || !(isHome || isAway) || matchIsPast(match) {
+		http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
+		return
+	}
+	// A player on both rosters (a rare cross-team case) defaults to the
+	// home side — there's no team selector in the RSVP widget itself.
+	teamID := match.AwayTeamID
+	if isHome {
+		teamID = match.HomeTeamID
+	}
+
+	if err := r.ParseForm(); err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+	form := &services.RSVPForm{
+		Status:  r.PostForm.Get("status"),
+		Message: r.PostForm.Get("message"),
+	}
+
+	err := app.rsvpService.SubmitRSVP(match.ID, playerID, teamID, form)
+	if err != nil {
+		if errors.Is(err, models.ErrBadData) {
+			viewData, buildErr := app.buildMatchViewData(r, match)
+			if buildErr != nil {
+				app.serverError(w, buildErr)
+				return
+			}
+			app.renderMatchView(w, r, viewData, form, http.StatusUnprocessableEntity)
+			return
+		}
+		app.serverError(w, err)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", "RSVP saved.")
+	http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
 }
 
 func (app *application) matchUpdate(w http.ResponseWriter, r *http.Request) {

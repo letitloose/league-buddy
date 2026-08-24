@@ -41,7 +41,11 @@ func (app *application) seedHistoricalSeasons() error {
 		return err
 	}
 
-	return seedHistoricalMatchRows(db, teamIDs, locationIDs, seasonIDs)
+	if err := seedHistoricalMatchRows(db, teamIDs, locationIDs, seasonIDs); err != nil {
+		return err
+	}
+
+	return seedFall2026Season(db, teamIDs, locationIDs)
 }
 
 // "Fulmont FC" isn't listed separately — per the site owner, it's the same
@@ -256,6 +260,70 @@ func seedHistoricalMatchRows(db *sql.DB, teamIDs, locationIDs, seasonIDs map[str
 			match.AwayScore = sql.NullInt32{Int32: int32(*hm.AwayScore), Valid: true}
 		}
 
+		if _, err := mm.Insert(match); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// fall2026MatchDefs is a synthetic, unplayed (no scores) upcoming season —
+// dev-only fixture data so the RSVP feature has something to click through
+// locally, not real schedule data. Weekly on Sundays starting 2026-09-13,
+// skipping Columbus Day weekend (2026-10-11) per the site owner's ask,
+// picking back up the following Sunday — 7 matches total. Reuses the
+// opponent teams/locations seedHistoricalTeams/seedHistoricalLocations
+// already created above rather than inventing new ones.
+var fall2026MatchDefs = []struct {
+	Date     string
+	Home     string
+	Away     string
+	Location string
+}{
+	{"2026-09-13", "Colonial FC", "Strikers FC", "clifton"},
+	{"2026-09-20", "Brunswick FC", "Colonial FC", "rte2"},
+	{"2026-09-27", "Colonial FC", "Chatham SOMA", "eastgreenbush"},
+	{"2026-10-04", "GSL FC - Active Ingredient Brewing Co", "Colonial FC", "gloversville"},
+	// Columbus Day weekend (2026-10-10/11) — no match.
+	{"2026-10-18", "Colonial FC", "Bethlehem FC", "eastgreenbush"},
+	{"2026-10-25", "Albany - Parkitects", "Colonial FC", "clifton"},
+	{"2026-11-01", "Colonial FC", "Hudson FC", "eastgreenbush"},
+}
+
+func seedFall2026Season(db *sql.DB, teamIDs, locationIDs map[string]int) error {
+	sm := &models.SeasonModel{DB: db}
+	start, err := time.Parse("2006-01-02", "2026-09-13")
+	if err != nil {
+		return err
+	}
+	end, err := time.Parse("2006-01-02", "2026-11-01")
+	if err != nil {
+		return err
+	}
+	seasonID, err := sm.Insert(&models.Season{
+		LeagueID:  1,
+		Name:      "Fall 2026",
+		StartDate: sql.NullTime{Time: start, Valid: true},
+		EndDate:   sql.NullTime{Time: end, Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+
+	mm := &models.MatchModel{DB: db}
+	for _, def := range fall2026MatchDefs {
+		matchDate, err := time.Parse("2006-01-02", def.Date)
+		if err != nil {
+			return err
+		}
+
+		match := &models.Match{
+			SeasonID:   seasonID,
+			HomeTeamID: teamIDs[def.Home],
+			AwayTeamID: teamIDs[def.Away],
+			MatchDate:  matchDate,
+			LocationID: sql.NullInt32{Int32: int32(locationIDs[def.Location]), Valid: true},
+		}
 		if _, err := mm.Insert(match); err != nil {
 			return err
 		}

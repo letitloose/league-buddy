@@ -18,6 +18,7 @@ type homeTeamCard struct {
 	CaptainName              string
 	NextMatch                *models.Match
 	NextMatchOpponent        string
+	NextMatchOpponentID      int
 	NextMatchIsHome          bool
 	NextMatchLocation        *models.Location
 	NextMatchLocationAddress *models.Address
@@ -157,6 +158,7 @@ func (app *application) buildHomeTeamCard(teamID int) (*homeTeamCard, error) {
 
 	card.NextMatch = next
 	card.NextMatchOpponent = opponent.Name
+	card.NextMatchOpponentID = opponent.ID
 	card.NextMatchIsHome = isHome
 
 	if next.LocationID.Valid {

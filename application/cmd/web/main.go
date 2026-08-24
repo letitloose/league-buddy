@@ -28,6 +28,7 @@ type application struct {
 	locationService    *services.LocationService
 	seasonService      *services.SeasonService
 	matchService       *services.MatchService
+	rsvpService        *services.RSVPService
 	inviteService      *services.InviteService
 	joinRequestService *services.JoinRequestService
 	emailService       *services.Email
@@ -91,6 +92,8 @@ func main() {
 	seasonService := &services.SeasonService{SeasonModel: seasons, DB: db}
 	matches := &models.MatchModel{DB: db}
 	matchService := &services.MatchService{MatchModel: matches, DB: db}
+	rsvps := &models.RSVPModel{DB: db}
+	rsvpService := &services.RSVPService{RSVPModel: rsvps}
 	invites := &models.InviteModel{DB: db}
 	inviteService := &services.InviteService{InviteModel: invites, DB: db, Email: email, InfoLog: infoLog}
 	joinRequests := &models.JoinRequestModel{DB: db}
@@ -110,6 +113,7 @@ func main() {
 		locationService:    locationService,
 		seasonService:      seasonService,
 		matchService:       matchService,
+		rsvpService:        rsvpService,
 		inviteService:      inviteService,
 		joinRequestService: joinRequestService,
 		emailService:       email,

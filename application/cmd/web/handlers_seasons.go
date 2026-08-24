@@ -22,6 +22,10 @@ type seasonMatchRow struct {
 	AwayTeamName    string
 	Location        *models.Location
 	LocationAddress *models.Address
+	HomeIn          int
+	HomeOut         int
+	AwayIn          int
+	AwayOut         int
 }
 
 type seasonViewData struct {
@@ -37,6 +41,7 @@ func (app *application) buildSeasonMatchRows(matches []*models.Match) ([]*season
 	tm := &models.TeamModel{DB: app.playerService.DB}
 	locm := &models.LocationModel{DB: app.playerService.DB}
 	am := &models.AddressModel{DB: app.playerService.DB}
+	rm := &models.RSVPModel{DB: app.playerService.DB}
 
 	rows := make([]*seasonMatchRow, 0, len(matches))
 	for _, match := range matches {
@@ -62,12 +67,25 @@ func (app *application) buildSeasonMatchRows(matches []*models.Match) ([]*season
 			}
 		}
 
+		homeIn, homeOut, err := rm.CountsByMatchAndTeam(match.ID, match.HomeTeamID)
+		if err != nil {
+			return nil, err
+		}
+		awayIn, awayOut, err := rm.CountsByMatchAndTeam(match.ID, match.AwayTeamID)
+		if err != nil {
+			return nil, err
+		}
+
 		rows = append(rows, &seasonMatchRow{
 			Match:           match,
 			HomeTeamName:    homeTeam.Name,
 			AwayTeamName:    awayTeam.Name,
 			Location:        location,
 			LocationAddress: locationAddress,
+			HomeIn:          homeIn,
+			HomeOut:         homeOut,
+			AwayIn:          awayIn,
+			AwayOut:         awayOut,
 		})
 	}
 	return rows, nil

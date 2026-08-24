@@ -161,3 +161,46 @@ func (m *SeasonModel) GetCurrent(leagueID int, asOf time.Time) (*Season, error) 
 	}
 	return seasons[0], nil
 }
+
+// GetCurrentOrNext is GetCurrent's schedule-oriented counterpart: same
+// in-progress pick, but between seasons it prefers the earliest
+// not-yet-started one over the most recently ended one (the opposite
+// tie-break from GetCurrent, which favors a wrapped-up season's recap).
+// This lets an upcoming, fully-scheduled-but-unplayed season's schedule and
+// RSVPs surface on the team page before its first match, rather than
+// staying hidden behind the previous season until kickoff. Returns
+// ErrNoRecord if the league has no seasons at all.
+func (m *SeasonModel) GetCurrentOrNext(leagueID int, asOf time.Time) (*Season, error) {
+	seasons, err := m.GetByLeague(leagueID)
+	if err != nil {
+		return nil, err
+	}
+	if len(seasons) == 0 {
+		return nil, ErrNoRecord
+	}
+
+	var mostRecentlyEnded *Season
+	var earliestUpcoming *Season
+	for _, season := range seasons {
+		started := !season.StartDate.Valid || !season.StartDate.Time.After(asOf)
+		ended := season.EndDate.Valid && season.EndDate.Time.Before(asOf)
+
+		if started && !ended {
+			return season, nil
+		}
+		if ended && (mostRecentlyEnded == nil || season.EndDate.Time.After(mostRecentlyEnded.EndDate.Time)) {
+			mostRecentlyEnded = season
+		}
+		if !started && (earliestUpcoming == nil || season.StartDate.Time.Before(earliestUpcoming.StartDate.Time)) {
+			earliestUpcoming = season
+		}
+	}
+
+	if earliestUpcoming != nil {
+		return earliestUpcoming, nil
+	}
+	if mostRecentlyEnded != nil {
+		return mostRecentlyEnded, nil
+	}
+	return seasons[0], nil
+}

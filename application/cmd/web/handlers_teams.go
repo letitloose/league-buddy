@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/letitloose/league-buddy/internal/models"
@@ -45,7 +46,8 @@ type teamViewData struct {
 	PendingJoinRequestCount int
 	Location                *models.Location
 	LocationAddress         *models.Address
-	CurrentSeason           *models.Season
+	LeadersSeason           *models.Season
+	ScheduleSeason          *models.Season
 	Leaders                 []*models.StatLine
 	LeadersByPlayer         map[int]*models.StatLine
 	LeadingScorer           *models.StatLine
@@ -168,24 +170,28 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A fresh league with no results yet renders exactly as before — the
-	// roster table's stat columns and the schedule are only shown when
-	// CurrentSeason is set. Same "most recent season with results" pick the
-	// league page's standings use (SeasonModel.GetMostRecentWithResults),
-	// rather than the date-based GetCurrent, so the whole app defaults to
-	// one consistent notion of "the season we're showing right now".
-	var currentSeason *models.Season
+	// roster table's stat columns are only shown when LeadersSeason is set.
+	// LeadersSeason deliberately requires a played match (same
+	// SeasonModel.GetMostRecentWithResults pick the league standings page
+	// uses, so both agree on "the season with real results to show") — an
+	// all-zero leaderboard isn't useful. ScheduleSeason is a separate pick
+	// (date-based GetCurrentOrNext, which — unlike GetCurrent — prefers an
+	// upcoming season over a recently-ended one) so a fully-scheduled-but-
+	// unplayed season still shows its schedule/RSVP block ahead of its
+	// first match, not just once it starts.
+	var leadersSeason, scheduleSeason *models.Season
 	var leaders []*models.StatLine
 	var schedule []*seasonMatchRow
 	leadersByPlayer := map[int]*models.StatLine{}
 	sm := &models.SeasonModel{DB: app.playerService.DB}
-	currentSeason, err = sm.GetMostRecentWithResults(team.LeagueID)
+	leadersSeason, err = sm.GetMostRecentWithResults(team.LeagueID)
 	if err != nil && !errors.Is(err, models.ErrNoRecord) {
 		app.serverError(w, err)
 		return
 	}
-	if currentSeason != nil {
+	if leadersSeason != nil {
 		pmsm := &models.PlayerMatchStatModel{DB: app.playerService.DB}
-		leaders, err = pmsm.LeaderboardByTeamSeason(team.ID, currentSeason.ID)
+		leaders, err = pmsm.LeaderboardByTeamSeason(team.ID, leadersSeason.ID)
 		if err != nil {
 			app.serverError(w, err)
 			return
@@ -193,9 +199,16 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		for _, line := range leaders {
 			leadersByPlayer[line.PlayerID] = line
 		}
+	}
 
+	scheduleSeason, err = sm.GetCurrentOrNext(team.LeagueID, time.Now())
+	if err != nil && !errors.Is(err, models.ErrNoRecord) {
+		app.serverError(w, err)
+		return
+	}
+	if scheduleSeason != nil {
 		mm := &models.MatchModel{DB: app.playerService.DB}
-		matches, err := mm.GetByTeamAndSeason(team.ID, currentSeason.ID)
+		matches, err := mm.GetByTeamAndSeason(team.ID, scheduleSeason.ID)
 		if err != nil {
 			app.serverError(w, err)
 			return
@@ -230,7 +243,8 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		PendingJoinRequestCount: pendingJoinRequestCount,
 		Location:                location,
 		LocationAddress:         locationAddress,
-		CurrentSeason:           currentSeason,
+		LeadersSeason:           leadersSeason,
+		ScheduleSeason:          scheduleSeason,
 		Leaders:                 leaders,
 		LeadersByPlayer:         leadersByPlayer,
 		LeadingScorer:           leadingScorer,

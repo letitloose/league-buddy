@@ -253,15 +253,18 @@ func (service *PlayerService) DeletePlayer(id int, actorEmail string) error {
 		return err
 	}
 
-	am := &models.AddressModel{DB: service.DB}
-	err = am.DeleteByPlayer(id)
-	if err != nil {
+	// The player row must go before its address, not after — fk_players_address
+	// blocks deleting an address a player row still references. addressID was
+	// captured from player above, before any of these deletes ran.
+	if err := service.Delete(id); err != nil {
 		return err
 	}
 
-	err = service.Delete(id)
-	if err != nil {
-		return err
+	if player.AddressID.Valid {
+		am := &models.AddressModel{DB: service.DB}
+		if err := am.Delete(int(player.AddressID.Int32)); err != nil {
+			return err
+		}
 	}
 
 	cs := &CommonService{DB: service.DB}

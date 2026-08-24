@@ -128,6 +128,49 @@ func TestDeletePlayer(t *testing.T) {
 	}
 }
 
+// A player with an address on file (e.g. one filled out via the full
+// player-update form, or the site-owner's own seeded profile) must still
+// delete cleanly. fk_players_address blocks deleting an address a player
+// row still references, so the player row has to go first — this
+// regression-tests that the two are deleted in the right order (an earlier
+// version deleted the address first via a subquery through the still-extant
+// player row, which is exactly backwards and failed with a 1451).
+func TestDeletePlayerWithAddress(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	players := &models.PlayerModel{DB: db}
+	playerService := PlayerService{PlayerModel: players, DB: db}
+	am := &models.AddressModel{DB: db}
+
+	id, err := playerService.AddPlayer(1, &PlayerForm{
+		FirstName: "Lou", LastName: "Garwood",
+		Address1: "100 Phillips Rd", City: "East Greenbush", StateProvince: "NY", ZipCode: "12061",
+	}, "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	player, err := players.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !player.AddressID.Valid {
+		t.Fatal("expected an address to have been created")
+	}
+	addressID := int(player.AddressID.Int32)
+
+	if err := playerService.DeletePlayer(id, "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := players.Get(id); err != models.ErrNoRecord {
+		t.Fatalf("expected ErrNoRecord for the deleted player, got %v", err)
+	}
+	if _, err := am.Get(addressID); err != models.ErrNoRecord {
+		t.Fatalf("expected the player's address to be deleted too, got %v", err)
+	}
+}
+
 func TestRemoveFromRoster(t *testing.T) {
 	db := models.NewTestDB(t)
 

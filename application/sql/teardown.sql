@@ -3,6 +3,7 @@
 -- touch the database/schema itself — that's created by the MariaDB
 -- container's MYSQL_DATABASE env var.
 SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS rsvps;
 DROP TABLE IF EXISTS playerMatchStats;
 DROP TABLE IF EXISTS matches;
 DROP TABLE IF EXISTS seasons;

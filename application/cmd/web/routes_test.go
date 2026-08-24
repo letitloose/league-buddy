@@ -804,6 +804,76 @@ func TestTeamInviteRosterValidationAndPicker(t *testing.T) {
 	})
 }
 
+// Inviting an email address that already belongs to a User account (just
+// not yet on this team) adds them to the roster immediately, end to end
+// through the route — no dangling invite, since they'd have no reason to
+// go through signup again.
+func TestTeamInviteExistingAccountAddsImmediately(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Existing Account Invite Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, teamID, "existing-account-invite-captain@test.com", "validpassword123")
+
+	pm := &models.PlayerModel{DB: testDB}
+	um := &models.UserModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+
+	playerID, err := pm.Insert(&models.Player{
+		FirstName: "Elsewhere",
+		LastName:  "Already",
+		Email:     sql.NullString{String: "elsewhere-already@test.com", Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, err := um.Insert("elsewhere-already@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetPlayerID(userID, playerID); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "existing-account-invite-captain@test.com", "validpassword123")
+
+	_, _, getBody := ts.get(t, fmt.Sprintf("/team/%d/invite", teamID))
+	csrfToken := extractCSRFToken(t, getBody)
+
+	form := url.Values{}
+	form.Add("csrf_token", csrfToken)
+	form.Add("emails", "elsewhere-already@test.com")
+	code, headers, _ := ts.postForm(t, fmt.Sprintf("/team/%d/invite", teamID), form)
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d", teamID) {
+		t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d", teamID), loc)
+	}
+
+	isMember, err := tmm.IsMember(playerID, teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isMember {
+		t.Fatal("expected the existing account's player to be added to the roster immediately")
+	}
+
+	im := &models.InviteModel{DB: testDB}
+	pending, err := im.ListPendingByTeam(teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected no dangling invite for an existing account, got %v", pending)
+	}
+}
+
 // A canceled invite's signup link no longer auto-joins the team — the
 // account can still be created, but linkOrCreatePlayer never sees a valid
 // pending invite to act on.
@@ -1367,6 +1437,322 @@ func TestMatchViewAndCaptainEditAccess(t *testing.T) {
 		}
 		if !strings.Contains(body, "Match View Away FC") {
 			t.Error("expected the opponent's name in the schedule")
+		}
+	})
+}
+
+// A roster player on either side of a match can RSVP yes/no with an
+// optional message; resubmitting updates their existing response instead of
+// adding a duplicate; a plain active user with no roster tie to either team
+// is redirected rather than allowed to record a response.
+func TestMatchRSVP(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "RSVP Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "RSVP Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "RSVP Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "RSVP Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now(),
+		// Scored so the team page's GetMostRecentWithResults picks up this
+		// season and renders the schedule table the last subtest checks.
+		HomeScore: sql.NullInt32{Int32: 1, Valid: true}, AwayScore: sql.NullInt32{Int32: 0, Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rosterPlayerID := setupTeamCaptain(t, homeTeamID, "rsvp-player@test.com", "validpassword123")
+
+	rm := &models.RSVPModel{DB: testDB}
+
+	t.Run("a roster player can RSVP and resubmit updates the same response", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "rsvp-player@test.com", "validpassword123")
+
+		_, _, getBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		csrfToken := extractCSRFToken(t, getBody)
+
+		code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/rsvp", matchID), url.Values{
+			"csrf_token": {csrfToken},
+			"status":     {"yes"},
+			"message":    {"count me in"},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", matchID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/match/%d", matchID), loc)
+		}
+
+		_, _, viewBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if !strings.Contains(viewBody, "count me in") {
+			t.Error("expected the RSVP message to appear on the match view")
+		}
+
+		_, _, getBody2 := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		csrfToken2 := extractCSRFToken(t, getBody2)
+		code2, _, _ := ts.postForm(t, fmt.Sprintf("/match/%d/rsvp", matchID), url.Values{
+			"csrf_token": {csrfToken2},
+			"status":     {"no"},
+			"message":    {"can't make it"},
+		})
+		if code2 != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code2)
+		}
+
+		rsvps, err := rm.ListByMatch(matchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rsvps) != 1 {
+			t.Fatalf("expected resubmitting to update the same row, got %d rows", len(rsvps))
+		}
+		if rsvps[0].PlayerID != rosterPlayerID || rsvps[0].Status != "no" {
+			t.Fatalf("expected the latest response (no) to have won, got %+v", rsvps[0])
+		}
+	})
+
+	t.Run("a plain active user with no roster tie is redirected, not recorded", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testActiveEmail, testActivePass)
+
+		_, _, getBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		csrfToken := extractCSRFToken(t, getBody)
+
+		code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/rsvp", matchID), url.Values{
+			"csrf_token": {csrfToken},
+			"status":     {"yes"},
+		})
+		if code != http.StatusSeeOther {
+			t.Errorf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", matchID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/match/%d", matchID), loc)
+		}
+
+		rsvps, err := rm.ListByMatch(matchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rsvps) != 1 {
+			t.Fatalf("expected no new RSVP row from an ineligible user, got %d rows", len(rsvps))
+		}
+	})
+
+	t.Run("the team schedule table reflects the recorded in/out count", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testActiveEmail, testActivePass)
+
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d", homeTeamID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "0 in / 1 out") {
+			t.Errorf("expected the schedule row to show 0 in / 1 out for the home team, body: %s", body)
+		}
+	})
+}
+
+// A match that already happened can no longer be RSVP'd to: the widget
+// doesn't render, and a direct POST is redirected away without recording a
+// response — the same "in-handler eligibility check" enforced server-side,
+// not just hidden in the UI.
+func TestMatchRSVPClosedForPastMatches(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Past Match RSVP League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Past Match Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Past Match Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Past Match Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID,
+		MatchDate: time.Now().AddDate(0, 0, -7),
+		HomeScore: sql.NullInt32{Int32: 2, Valid: true}, AwayScore: sql.NullInt32{Int32: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, homeTeamID, "past-rsvp-player@test.com", "validpassword123")
+	rm := &models.RSVPModel{DB: testDB}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "past-rsvp-player@test.com", "validpassword123")
+
+	_, _, getBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+	if strings.Contains(getBody, "Your RSVP") {
+		t.Error("expected no RSVP widget for a match that already happened")
+	}
+	// The match page itself has no form (no RSVP widget, no session-scoped
+	// form field) to pull a token from, so grab one from another page in the
+	// same session — nosurf's token isn't page-specific.
+	_, _, signupBody := ts.get(t, "/user/signup")
+	csrfToken := extractCSRFToken(t, signupBody)
+
+	code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/rsvp", matchID), url.Values{
+		"csrf_token": {csrfToken},
+		"status":     {"yes"},
+	})
+	if code != http.StatusSeeOther {
+		t.Errorf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", matchID) {
+		t.Errorf("want Location %q; got %q", fmt.Sprintf("/match/%d", matchID), loc)
+	}
+
+	rsvps, err := rm.ListByMatch(matchID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rsvps) != 0 {
+		t.Fatalf("expected no RSVP recorded for a past match, got %d rows", len(rsvps))
+	}
+}
+
+// The match view's "Not Attending" list shows roster players who RSVP'd
+// "no" (with their message) while the match is still upcoming, but drops
+// off the page once the match has happened — only "Confirmed" (who
+// actually showed) matters in hindsight.
+func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Attendance Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Attendance Test Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Attendance Test Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Attendance Test Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	rm := &models.RSVPModel{DB: testDB}
+
+	comingPlayerID, err := pm.Insert(&models.Player{FirstName: "Coming", LastName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(comingPlayerID, homeTeamID); err != nil {
+		t.Fatal(err)
+	}
+	outPlayerID, err := pm.Insert(&models.Player{FirstName: "Out", LastName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(outPlayerID, homeTeamID); err != nil {
+		t.Fatal(err)
+	}
+
+	mm := &models.MatchModel{DB: testDB}
+
+	t.Run("upcoming match shows both Confirmed and Not Attending", func(t *testing.T) {
+		matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rm.Upsert(&models.RSVP{MatchID: matchID, PlayerID: comingPlayerID, TeamID: homeTeamID, Status: "yes", Message: sql.NullString{String: "bringing snacks", Valid: true}, RespondedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := rm.Upsert(&models.RSVP{MatchID: matchID, PlayerID: outPlayerID, TeamID: homeTeamID, Status: "no", Message: sql.NullString{String: "out of town", Valid: true}, RespondedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testActiveEmail, testActivePass)
+
+		code, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "Confirmed") || !strings.Contains(body, "bringing snacks") {
+			t.Error("expected the Confirmed list with the yes-RSVP's message")
+		}
+		if !strings.Contains(body, "Not Attending") || !strings.Contains(body, "out of town") {
+			t.Error("expected the Not Attending list with the no-RSVP's message for an upcoming match")
+		}
+	})
+
+	t.Run("past match hides Not Attending, keeps Confirmed", func(t *testing.T) {
+		pastMatchID, err := mm.Insert(&models.Match{
+			SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID,
+			MatchDate: time.Now().AddDate(0, 0, -3),
+			HomeScore: sql.NullInt32{Int32: 3, Valid: true}, AwayScore: sql.NullInt32{Int32: 1, Valid: true},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rm.Upsert(&models.RSVP{MatchID: pastMatchID, PlayerID: comingPlayerID, TeamID: homeTeamID, Status: "yes", RespondedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := rm.Upsert(&models.RSVP{MatchID: pastMatchID, PlayerID: outPlayerID, TeamID: homeTeamID, Status: "no", Message: sql.NullString{String: "out of town", Valid: true}, RespondedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testActiveEmail, testActivePass)
+
+		code, _, body := ts.get(t, fmt.Sprintf("/match/%d", pastMatchID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "Confirmed") {
+			t.Error("expected the Confirmed list to still show for a past match")
+		}
+		if strings.Contains(body, "Not Attending") {
+			t.Error("expected no Not Attending list for a match that already happened")
 		}
 	})
 }

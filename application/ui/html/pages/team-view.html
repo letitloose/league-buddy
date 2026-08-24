@@ -33,10 +33,10 @@
     </div>
     {{end}}
 
-    {{if .Data.CurrentSeason}}
+    {{if .Data.ScheduleSeason}}
     <div class="w-full md:w-3/4 px-2 md:px-0">
         <h3 class="text-center mb-1">Schedule</h3>
-        <p class="text-center text-sm text-gray-500 mb-3">{{.Data.CurrentSeason.Name}} &middot; <a href="/team/{{.Data.Team.ID}}/season/{{.Data.CurrentSeason.ID}}">All Seasons</a></p>
+        <p class="text-center text-sm text-gray-500 mb-3">{{.Data.ScheduleSeason.Name}} &middot; <a href="/team/{{.Data.Team.ID}}/season/{{.Data.ScheduleSeason.ID}}">All Seasons</a></p>
         {{if .Data.Schedule}}
         <div class="overflow-x-auto">
         <table class="table-compact text-left w-full mb-4">
@@ -50,8 +50,14 @@
             {{range .Data.Schedule}}
             <tr>
                 <td><a href="/match/{{.Match.ID}}">{{humanDate .Match.MatchDate}}</a></td>
-                <td><a href="/match/{{.Match.ID}}">{{.HomeTeamName}}</a></td>
-                <td><a href="/match/{{.Match.ID}}">{{.AwayTeamName}}</a></td>
+                <td>
+                    <a href="/match/{{.Match.ID}}">{{.HomeTeamName}}</a>
+                    {{if eq .Match.HomeTeamID $.Data.Team.ID}}<span class="text-xs text-gray-500">({{.HomeIn}} in / {{.HomeOut}} out)</span>{{end}}
+                </td>
+                <td>
+                    <a href="/match/{{.Match.ID}}">{{.AwayTeamName}}</a>
+                    {{if eq .Match.AwayTeamID $.Data.Team.ID}}<span class="text-xs text-gray-500">({{.AwayIn}} in / {{.AwayOut}} out)</span>{{end}}
+                </td>
                 <td>
                     <a href="/match/{{.Match.ID}}">
                     {{if and .Match.HomeScore.Valid .Match.AwayScore.Valid}}
@@ -76,7 +82,7 @@
         <div class="text-center">
             <h3 class="mb-1">Roster</h3>
             <p class="text-sm text-gray-500 mb-3">{{len .Data.Roster}} player{{if ne (len .Data.Roster) 1}}s{{end}}</p>
-            {{if .Data.CurrentSeason}}
+            {{if .Data.LeadersSeason}}
                 {{if or .Data.LeadingScorer .Data.LeadingAssister}}
                 <p class="text-sm text-gray-600 mb-3">
                     {{with .Data.LeadingScorer}}Leading scorer: {{.Name}} ({{.Goals}}){{end}}
@@ -93,13 +99,13 @@
         <table class="table-compact text-left w-full mb-4">
             <tr>
                 <th>Name</th>
-                {{if .Data.CurrentSeason}}<th>G</th><th>A</th><th>YC</th><th>RC</th>{{end}}
+                {{if .Data.LeadersSeason}}<th>G</th><th>A</th><th>YC</th><th>RC</th>{{end}}
                 {{if .Data.CanManage}}<th>Account</th><th>Actions</th>{{end}}
             </tr>
             {{range .Data.Roster}}
             <tr>
                 <td><a href="/player/view/{{.ID}}">{{.FirstName}} {{.LastName}}</a></td>
-                {{if $.Data.CurrentSeason}}
+                {{if $.Data.LeadersSeason}}
                     {{with index $.Data.LeadersByPlayer .ID}}
                         <td>{{.Goals}}</td>
                         <td>{{.Assists}}</td>

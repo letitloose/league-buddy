@@ -87,10 +87,3 @@ func (m *AddressModel) Delete(id int) error {
 	return err
 }
 
-func (m *AddressModel) DeleteByPlayer(playerID int) error {
-	statement := "delete from address where id = (select addressID from players where id = ?)"
-
-	_, err := m.DB.Exec(statement, playerID)
-
-	return err
-}

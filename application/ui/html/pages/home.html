@@ -6,6 +6,35 @@
     {{if .IsActive}}
         {{if or .Data.Leagues .Data.Teams .IsAdmin}}
             <div class="max-w-3xl mx-auto px-4 pt-2 text-left">
+                {{if .Data.HasUpcomingMatch}}
+                <h3 class="px-0">Upcoming Matches</h3>
+                <div class="overflow-x-auto mb-8">
+                <table class="text-left w-full">
+                    <tr>
+                        <th>Date</th>
+                        <th>Home</th>
+                        <th>Away</th>
+                        <th>Location</th>
+                    </tr>
+                    {{range .Data.Teams}}
+                        {{if .NextMatch}}
+                        <tr>
+                            <td><a href="/match/{{.NextMatch.ID}}">{{humanDate .NextMatch.MatchDate}}</a></td>
+                            {{if .NextMatchIsHome}}
+                            <td><a href="/team/{{.Team.ID}}">{{.Team.Name}}</a></td>
+                            <td><a href="/team/{{.NextMatchOpponentID}}">{{.NextMatchOpponent}}</a></td>
+                            {{else}}
+                            <td><a href="/team/{{.NextMatchOpponentID}}">{{.NextMatchOpponent}}</a></td>
+                            <td><a href="/team/{{.Team.ID}}">{{.Team.Name}}</a></td>
+                            {{end}}
+                            <td>{{if .NextMatchLocation}}<a href="{{mapsURL .NextMatchLocationAddress}}" target="_blank" rel="noopener noreferrer">{{.NextMatchLocation.Name}}</a>{{end}}</td>
+                        </tr>
+                        {{end}}
+                    {{end}}
+                </table>
+                </div>
+                {{end}}
+
                 {{with .Data.Leagues}}
                 <h3 class="px-0">My Leagues</h3>
                 <div class="grid gap-4 sm:grid-cols-2 mb-8">
@@ -40,32 +69,6 @@
                         {{end}}
                     </a>
                     {{end}}
-                </div>
-                {{end}}
-
-                {{if .Data.HasUpcomingMatch}}
-                <h3 class="px-0">Upcoming Matches</h3>
-                <div class="overflow-x-auto mb-8">
-                <table class="text-left w-full">
-                    <tr>
-                        <th>Team</th>
-                        <th>Date</th>
-                        <th>Opponent</th>
-                        <th>Home/Away</th>
-                        <th>Location</th>
-                    </tr>
-                    {{range .Data.Teams}}
-                        {{if .NextMatch}}
-                        <tr>
-                            <td>{{.Team.Name}}</td>
-                            <td>{{humanDate .NextMatch.MatchDate}}</td>
-                            <td>{{.NextMatchOpponent}}</td>
-                            <td>{{if .NextMatchIsHome}}Home{{else}}Away{{end}}</td>
-                            <td>{{if .NextMatchLocation}}<a href="{{mapsURL .NextMatchLocationAddress}}" target="_blank" rel="noopener noreferrer">{{.NextMatchLocation.Name}}</a>{{end}}</td>
-                        </tr>
-                        {{end}}
-                    {{end}}
-                </table>
                 </div>
                 {{end}}
 

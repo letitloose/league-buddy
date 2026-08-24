@@ -57,9 +57,11 @@ func parseEmailList(raw string) []string {
 
 // SendInvites parses form.Emails, validates each address (including
 // rejecting any address that already belongs to a player on this team's
-// roster — see the field error text for why), creates one invite token per
-// address, and emails (or logs, in dev mode without EMAIL_USER configured) a
-// signup link for each. Returns the addresses actually invited.
+// roster — see the field error text for why), then either adds the address
+// straight to the roster (if it already belongs to a User account — see
+// addExistingAccountToRoster) or creates an invite token and emails (or
+// logs, in dev mode without EMAIL_USER configured) a signup link. Returns
+// the addresses actually invited/added.
 func (service *InviteService) SendInvites(teamID, createdByUserID int, actorEmail string, form *InviteForm) ([]string, error) {
 	emails := parseEmailList(form.Emails)
 	if len(emails) == 0 {
@@ -99,8 +101,24 @@ func (service *InviteService) SendInvites(teamID, createdByUserID int, actorEmai
 		return nil, err
 	}
 
+	um := &models.UserModel{DB: service.DB}
 	invited := []string{}
 	for _, addr := range emails {
+		// An address that already belongs to a User account will never sign
+		// up again, so a token-based invite for it would just dangle
+		// forever — add them to the roster immediately instead.
+		user, err := um.GetUserByEmail(addr)
+		if err != nil && !errors.Is(err, models.ErrNoRecord) {
+			return invited, err
+		}
+		if err == nil {
+			if err := service.addExistingAccountToRoster(team, user, actorEmail); err != nil {
+				return invited, err
+			}
+			invited = append(invited, addr)
+			continue
+		}
+
 		if err := service.sendOneInvite(team, createdByUserID, addr, actorEmail); err != nil {
 			return invited, err
 		}
@@ -204,6 +222,71 @@ func (service *InviteService) sendOneInvite(team *models.Team, createdByUserID i
 
 	cs := &CommonService{DB: service.DB}
 	return cs.InsertAuditLog(actorEmail, time.Now(), "invited "+addr+" to team: "+team.Name)
+}
+
+// addExistingAccountToRoster adds an existing User account straight onto
+// team's roster, skipping the token/signup-link flow entirely — that flow
+// only ever gets consumed by a brand-new signup, so inviting an address
+// that already has an account would otherwise leave the invite dangling
+// forever (see SendInvites). Creates a placeholder player first if the
+// account somehow has none yet (e.g. an admin-created login that was never
+// linked). Skips the membership add (but still reports success and emails
+// nothing further) if the player already holds a team in this league,
+// mirroring linkOrCreatePlayer's identical one-team-per-league rule.
+func (service *InviteService) addExistingAccountToRoster(team *models.Team, user *models.User, actorEmail string) error {
+	pm := &models.PlayerModel{DB: service.DB}
+	tmm := &models.TeamMemberModel{DB: service.DB}
+	um := &models.UserModel{DB: service.DB}
+
+	playerID := int(user.PlayerID.Int32)
+	if !user.PlayerID.Valid {
+		newPlayer := &models.Player{
+			FirstName: models.PlaceholderFirstName,
+			LastName:  models.PlaceholderLastName,
+			Email:     sql.NullString{String: user.Email, Valid: true},
+		}
+		id, err := pm.Insert(newPlayer)
+		if err != nil {
+			return err
+		}
+		playerID = id
+		if err := um.SetPlayerID(user.UserID, playerID); err != nil {
+			return err
+		}
+	}
+
+	hasTeamInLeague, err := tmm.HasTeamInLeague(playerID, team.LeagueID)
+	if err != nil {
+		return err
+	}
+	if hasTeamInLeague {
+		if service.InfoLog != nil {
+			service.InfoLog.Printf("invite auto-add skipped for %s: already on a team in league %d", user.Email, team.LeagueID)
+		}
+		return nil
+	}
+
+	if err := tmm.AddMembership(playerID, team.ID); err != nil && !errors.Is(err, models.ErrDuplicateMembership) {
+		return err
+	}
+
+	teamLink := fmt.Sprintf("https://%s/team/%d", os.Getenv("PUBLIC_HOST"), team.ID)
+	if service.Email != nil {
+		body := fmt.Sprintf(
+			`<html>
+				<body>
+					<p>You've been added to %s on Blame the Ball. <a href="%s">View your team</a>.</p>
+				</body>
+			</html>`, team.Name, teamLink)
+		if err := service.SendEmailV2(fmt.Sprintf("You've been added to %s", team.Name), "", body, user.Email); err != nil {
+			return err
+		}
+	} else if service.InfoLog != nil {
+		service.InfoLog.Printf("no email configured -- added %s to team %d (%s): %s", user.Email, team.ID, team.Name, teamLink)
+	}
+
+	cs := &CommonService{DB: service.DB}
+	return cs.InsertAuditLog(actorEmail, time.Now(), "added existing account "+user.Email+" to team: "+team.Name)
 }
 
 // CancelInvite revokes an outstanding invite so its signup link no longer

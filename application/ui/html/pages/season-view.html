@@ -35,8 +35,8 @@
         {{range .Data.Matches}}
         <tr>
             <td><a href="/match/{{.Match.ID}}">{{humanDate .Match.MatchDate}}</a></td>
-            <td><a href="/match/{{.Match.ID}}">{{.HomeTeamName}}</a></td>
-            <td><a href="/match/{{.Match.ID}}">{{.AwayTeamName}}</a></td>
+            <td><a href="/match/{{.Match.ID}}">{{.HomeTeamName}}</a> <span class="text-xs text-gray-500">({{.HomeIn}} in / {{.HomeOut}} out)</span></td>
+            <td><a href="/match/{{.Match.ID}}">{{.AwayTeamName}}</a> <span class="text-xs text-gray-500">({{.AwayIn}} in / {{.AwayOut}} out)</span></td>
             <td>
                 <a href="/match/{{.Match.ID}}">
                 {{if and .Match.HomeScore.Valid .Match.AwayScore.Valid}}

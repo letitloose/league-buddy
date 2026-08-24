@@ -29,11 +29,34 @@
     </div>
     {{end}}
 
+    {{if .Data.CanRSVP}}
+    {{$hasResponse := or (eq .Form.Status "yes") (eq .Form.Status "no")}}
+    {{$hasErrors := or .Form.FieldErrors.status .Form.FieldErrors.message .Form.NonFieldErrors}}
+    <div class="bg-white shadow-md rounded px-6 py-4 mb-6 w-full sm:w-96">
+        <h4 class="pt-0 text-center">Your RSVP</h4>
+        {{if and $hasResponse (not $hasErrors)}}
+        <details>
+            <summary class="cursor-pointer list-none flex items-center justify-center gap-3 flex-wrap">
+                <span>
+                    {{if eq .Form.Status "yes"}}<span class="text-green-600 font-semibold">You're in</span>{{else}}<span class="text-red-600 font-semibold">You're out</span>{{end}}
+                    {{with .Form.Message}} &mdash; <span class="text-gray-500 text-sm">&ldquo;{{.}}&rdquo;</span>{{end}}
+                </span>
+                <span class="btn-secondary text-sm m-0">Update RSVP</span>
+            </summary>
+            <div class="mt-3">{{template "rsvp-form" .}}</div>
+        </details>
+        {{else}}
+        {{range .Form.NonFieldErrors}}<p class="error-message-big">{{.}}</p>{{end}}
+        {{template "rsvp-form" .}}
+        {{end}}
+    </div>
+    {{end}}
+
     <div class="grid gap-4 sm:grid-cols-2 w-full md:w-2/3 mb-6">
         <div class="bg-white shadow-md rounded px-4 py-4">
             <h4 class="pt-0 text-center"><a href="/team/{{.Data.HomeTeam.ID}}">{{.Data.HomeTeam.Name}}</a></h4>
             {{if .Data.HomeStats}}
-            <table class="text-left w-full text-sm">
+            <table class="text-left w-full text-sm mb-4">
                 <tr><th>Player</th><th>G</th><th>A</th><th>YC</th><th>RC</th></tr>
                 {{range .Data.HomeStats}}
                 <tr>
@@ -46,13 +69,29 @@
                 {{end}}
             </table>
             {{else}}
-            <p class="text-center text-sm text-gray-500">No stats recorded.</p>
+            <p class="text-center text-sm text-gray-500 mb-4">No stats recorded.</p>
+            {{end}}
+            {{if .Data.HomeRSVPsIn}}
+            <p class="text-sm font-semibold text-gray-600 mb-1">Confirmed ({{len .Data.HomeRSVPsIn}})</p>
+            <ul class="text-sm mb-1">
+                {{range .Data.HomeRSVPsIn}}
+                <li>{{.PlayerName}}{{with .Message}} <span class="text-gray-500">&mdash; &ldquo;{{.}}&rdquo;</span>{{end}}</li>
+                {{end}}
+            </ul>
+            {{end}}
+            {{if and (not .Data.IsPast) .Data.HomeRSVPsOut}}
+            <p class="text-sm font-semibold text-gray-600 mb-1 mt-2">Not Attending ({{len .Data.HomeRSVPsOut}})</p>
+            <ul class="text-sm mb-1">
+                {{range .Data.HomeRSVPsOut}}
+                <li>{{.PlayerName}}{{with .Message}} <span class="text-gray-500">&mdash; &ldquo;{{.}}&rdquo;</span>{{end}}</li>
+                {{end}}
+            </ul>
             {{end}}
         </div>
         <div class="bg-white shadow-md rounded px-4 py-4">
             <h4 class="pt-0 text-center"><a href="/team/{{.Data.AwayTeam.ID}}">{{.Data.AwayTeam.Name}}</a></h4>
             {{if .Data.AwayStats}}
-            <table class="text-left w-full text-sm">
+            <table class="text-left w-full text-sm mb-4">
                 <tr><th>Player</th><th>G</th><th>A</th><th>YC</th><th>RC</th></tr>
                 {{range .Data.AwayStats}}
                 <tr>
@@ -65,9 +104,41 @@
                 {{end}}
             </table>
             {{else}}
-            <p class="text-center text-sm text-gray-500">No stats recorded.</p>
+            <p class="text-center text-sm text-gray-500 mb-4">No stats recorded.</p>
+            {{end}}
+            {{if .Data.AwayRSVPsIn}}
+            <p class="text-sm font-semibold text-gray-600 mb-1">Confirmed ({{len .Data.AwayRSVPsIn}})</p>
+            <ul class="text-sm mb-1">
+                {{range .Data.AwayRSVPsIn}}
+                <li>{{.PlayerName}}{{with .Message}} <span class="text-gray-500">&mdash; &ldquo;{{.}}&rdquo;</span>{{end}}</li>
+                {{end}}
+            </ul>
+            {{end}}
+            {{if and (not .Data.IsPast) .Data.AwayRSVPsOut}}
+            <p class="text-sm font-semibold text-gray-600 mb-1 mt-2">Not Attending ({{len .Data.AwayRSVPsOut}})</p>
+            <ul class="text-sm mb-1">
+                {{range .Data.AwayRSVPsOut}}
+                <li>{{.PlayerName}}{{with .Message}} <span class="text-gray-500">&mdash; &ldquo;{{.}}&rdquo;</span>{{end}}</li>
+                {{end}}
+            </ul>
             {{end}}
         </div>
     </div>
 </div>
+{{end}}
+
+{{define "rsvp-form"}}
+<form action="/match/{{.Data.Match.ID}}/rsvp" method="POST">
+    <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+    <div class="flex justify-center gap-6 mb-3">
+        <label class="flex items-center gap-1"><input type="radio" name="status" value="yes" {{if eq .Form.Status "yes"}}checked{{end}}> Yes, I'm in</label>
+        <label class="flex items-center gap-1"><input type="radio" name="status" value="no" {{if eq .Form.Status "no"}}checked{{end}}> No, I'm out</label>
+    </div>
+    {{with .Form.FieldErrors.status}}<p class='error-message text-center'>{{.}}</p>{{end}}
+    <textarea class="form-field" name="message" rows="2" placeholder="Optional message (e.g. running late)">{{.Form.Message}}</textarea>
+    {{with .Form.FieldErrors.message}}<p class='error-message'>{{.}}</p>{{end}}
+    <div class="text-center mt-3">
+        <input class="btn m-0" type="submit" value="Save RSVP">
+    </div>
+</form>
 {{end}}

@@ -292,6 +292,14 @@ func (app *application) userSearch(w http.ResponseWriter, r *http.Request) {
 	form.Email = params.Get("email")
 	form.Sort = params.Get("sort")
 	form.Order = params.Get("order")
+	if form.Sort == "" {
+		// Same default UserModel.buildUserSearchStatement falls back to —
+		// made explicit here too so the template can render the Last Login
+		// column as the active sort (and compute the right toggle
+		// direction) on a plain, param-less page load.
+		form.Sort = "lastlogin"
+		form.Order = "DESC"
+	}
 
 	offset := params.Get("offset")
 	if len(offset) > 0 {

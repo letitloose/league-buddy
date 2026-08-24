@@ -3,6 +3,7 @@ package models
 import (
 	"database/sql"
 	"testing"
+	"time"
 )
 
 func TestInsertUser(t *testing.T) {
@@ -41,6 +42,90 @@ func TestInsertUserDuplicateEmail(t *testing.T) {
 	_, err := um.Insert("dup@example.com", "validpassword123")
 	if err != ErrDuplicateEmail {
 		t.Fatalf("expected ErrDuplicateEmail, got %v", err)
+	}
+}
+
+// Deleting a user who created an invite, was recorded as having used
+// someone else's invite, or reviewed a join request must not fail with an
+// FK violation — createdByUserID is cleaned up (the invite is deleted
+// outright, since that column is NOT NULL), while usedByUserID and
+// teamJoinRequests.respondedByUserID are just orphaned to NULL, since those
+// rows still carry real meaning after the actor's own login is gone.
+func TestDeleteUserCleansUpDependentInvitesAndJoinRequests(t *testing.T) {
+	db := NewTestDB(t)
+
+	um := UserModel{DB: db}
+	im := InviteModel{DB: db}
+	jrm := JoinRequestModel{DB: db}
+	pm := PlayerModel{DB: db}
+
+	deletedUserID, err := um.Insert("about-to-be-deleted@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherUserID, err := um.Insert("other-user@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An invite the deleted user sent -- createdByUserID is NOT NULL, so
+	// this row can't survive; it must be deleted, not just orphaned.
+	sentInviteID, err := im.Insert(&Invite{Token: "sent-token", TeamID: 1, Email: "invitee@example.com", CreatedByUserID: deletedUserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An invite someone ELSE sent, that the deleted user was recorded as
+	// having used -- usedByUserID is nullable, so this row should survive
+	// with usedByUserID cleared.
+	usedInviteID, err := im.Insert(&Invite{Token: "used-token", TeamID: 1, Email: "about-to-be-deleted@example.com", CreatedByUserID: otherUserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := im.MarkUsed(usedInviteID, deletedUserID); err != nil {
+		t.Fatal(err)
+	}
+
+	// A join request the deleted user reviewed -- respondedByUserID is
+	// nullable, so this row should survive with it cleared.
+	requesterID, err := pm.Insert(&Player{FirstName: "Wants", LastName: "ToJoin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joinRequestID, err := jrm.Insert(&TeamJoinRequest{PlayerID: requesterID, TeamID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := jrm.UpdateStatus(joinRequestID, "APPROVED", deletedUserID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := um.Delete(deletedUserID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := um.GetUser(deletedUserID); err != ErrNoRecord {
+		t.Fatalf("expected the user to be gone, got %v", err)
+	}
+
+	if _, err := im.Get(sentInviteID); err != ErrNoRecord {
+		t.Fatalf("expected the invite the deleted user created to be gone, got %v", err)
+	}
+
+	usedInvite, err := im.Get(usedInviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usedInvite.UsedByUserID.Valid {
+		t.Fatalf("expected usedByUserID to be cleared, got %+v", usedInvite.UsedByUserID)
+	}
+
+	joinRequest, err := jrm.Get(joinRequestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joinRequest.RespondedByUserID.Valid {
+		t.Fatalf("expected respondedByUserID to be cleared, got %+v", joinRequest.RespondedByUserID)
 	}
 }
 
@@ -301,5 +386,69 @@ func TestUserHasRole(t *testing.T) {
 	}
 	if !hasRole {
 		t.Fatal("expected user to have ADMIN role after insert")
+	}
+}
+
+// With no sort specified, the user list defaults to most-recent-login
+// first — the admin's usual "who's been active" view.
+func TestSearchUsersDefaultSortsByLastLoginDescending(t *testing.T) {
+	db := NewTestDB(t)
+	um := UserModel{DB: db}
+
+	olderID, err := um.Insert("older-login@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newerID, err := um.Insert("newer-login@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE users SET lastlogin = ? WHERE id = ?", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), olderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE users SET lastlogin = ? WHERE id = ?", time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), newerID); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := um.Search(&UserSearchCriteria{Email: "-login@example.com", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].UserID != newerID || results[1].UserID != olderID {
+		t.Fatalf("expected the more recent login first by default, got %+v then %+v", results[0], results[1])
+	}
+}
+
+// An explicit sort/order pair overrides the lastlogin-descending default.
+func TestSearchUsersSortByColumnAndOrder(t *testing.T) {
+	db := NewTestDB(t)
+	um := UserModel{DB: db}
+
+	aID, err := um.Insert("aaa-sort-test@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zID, err := um.Insert("zzz-sort-test@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	asc, err := um.Search(&UserSearchCriteria{Email: "-sort-test@example.com", Sort: "email", Order: "ASC", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(asc) != 2 || asc[0].UserID != aID || asc[1].UserID != zID {
+		t.Fatalf("expected aaa then zzz ascending, got %+v", asc)
+	}
+
+	desc, err := um.Search(&UserSearchCriteria{Email: "-sort-test@example.com", Sort: "email", Order: "DESC", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(desc) != 2 || desc[0].UserID != zID || desc[1].UserID != aID {
+		t.Fatalf("expected zzz then aaa descending, got %+v", desc)
 	}
 }

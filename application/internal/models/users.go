@@ -74,20 +74,30 @@ func (m *UserModel) Insert(email, password string) (int, error) {
 	return int(id), nil
 }
 
+// Delete removes userID's account. fk_invites_createdby is NOT NULL, so an
+// invite this user sent can't be orphaned like the others below — it's
+// deleted outright rather than blocking the whole account deletion on it.
+// usedByUserID and teamJoinRequests.respondedByUserID are nullable, so
+// those are orphaned instead: an invite someone else sent (that this user
+// happened to accept) and a join request someone else submitted (that this
+// user happened to review) still have real meaning after the actor's login
+// is gone.
 func (m *UserModel) Delete(userID int) error {
-
-	statement := "delete from userRole where userID = ?"
-
-	_, err := m.DB.Exec(statement, userID)
-	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
+	if _, err := m.DB.Exec("delete from userRole where userID = ?", userID); err != nil {
+		return err
 	}
 
-	statement = "delete from users where id = ?"
+	if _, err := m.DB.Exec("delete from invites where createdByUserID = ?", userID); err != nil {
+		return err
+	}
+	if _, err := m.DB.Exec("update invites set usedByUserID = NULL where usedByUserID = ?", userID); err != nil {
+		return err
+	}
+	if _, err := m.DB.Exec("update teamJoinRequests set respondedByUserID = NULL where respondedByUserID = ?", userID); err != nil {
+		return err
+	}
 
-	_, err = m.DB.Exec(statement, userID)
+	_, err := m.DB.Exec("delete from users where id = ?", userID)
 
 	return err
 }
@@ -513,7 +523,7 @@ func buildUserSearchStatement(criteria *UserSearchCriteria) (string, []any) {
 		queryParams = append(queryParams, strings.ToUpper(criteria.Email))
 	}
 
-	orderBy := "ORDER BY u.email ASC"
+	orderBy := "ORDER BY u.lastlogin DESC"
 	if sortCol, ok := allowedSorts[criteria.Sort]; ok {
 		order := "ASC"
 		if criteria.Order == "DESC" {

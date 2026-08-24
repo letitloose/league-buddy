@@ -1826,3 +1826,33 @@ func TestRosterAccountIndicatorVisibleOnlyToManagers(t *testing.T) {
 		}
 	})
 }
+
+// The admin user list defaults to most-recent-login-first, with the Last
+// Login column header marked as the active sort and linking to toggle the
+// direction; picking a different column via query params re-sorts and
+// updates which header shows as active.
+func TestUserListDefaultSortAndToggle(t *testing.T) {
+	app := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testAdminEmail, testAdminPass)
+
+	t.Run("a plain page load defaults to Last Login descending", func(t *testing.T) {
+		code, _, body := ts.get(t, "/user/search")
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "sort=lastlogin&order=ASC") {
+			t.Error("expected the active Last Login header to link to toggle into ASC")
+		}
+	})
+
+	t.Run("sorting by email ascending shows email as the active column", func(t *testing.T) {
+		code, _, body := ts.get(t, "/user/search?sort=email&order=ASC")
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "sort=email&order=DESC") {
+			t.Error("expected the active Email header to link to toggle into DESC")
+		}
+	})
+}

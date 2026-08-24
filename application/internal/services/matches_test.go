@@ -118,12 +118,13 @@ func TestCreateMatchOneSidedScoreFails(t *testing.T) {
 	}
 }
 
-func TestUpdateMatchSavesPlayerStats(t *testing.T) {
+func TestUpdateMatchSavesGoalsAndCards(t *testing.T) {
 	db := models.NewTestDB(t)
 
 	seasons := &models.SeasonModel{DB: db}
 	teams := &models.TeamModel{DB: db}
 	players := &models.PlayerModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
 	matches := &models.MatchModel{DB: db}
 	pmsm := &models.PlayerMatchStatModel{DB: db}
 	matchService := MatchService{MatchModel: matches, DB: db}
@@ -140,6 +141,9 @@ func TestUpdateMatchSavesPlayerStats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := tmm.AddMembership(playerID, 1); err != nil {
+		t.Fatal(err)
+	}
 
 	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05"}
 	id, err := matchService.CreateMatch(form, "admin@example.com")
@@ -147,10 +151,18 @@ func TestUpdateMatchSavesPlayerStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Two goals (the second also assisted by the same player, purely to
+	// exercise both tallies at once) and one yellow card, all for playerID.
 	updateForm := &MatchForm{
 		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
 		HomeScore: "2", AwayScore: "0",
-		Stats: []PlayerStatInput{{PlayerID: playerID, TeamID: 1, Goals: 2, Assists: 1}},
+		Goals: []GoalInput{
+			{TeamID: 1, ScorerPlayerID: playerID},
+			{TeamID: 1, ScorerPlayerID: playerID, AssisterPlayerID: playerID},
+		},
+		Cards: []CardInput{
+			{TeamID: 1, PlayerID: playerID, CardType: "yellow"},
+		},
 	}
 	if err := matchService.UpdateMatch(updateForm, "admin@example.com"); err != nil {
 		t.Fatal(err)
@@ -160,14 +172,136 @@ func TestUpdateMatchSavesPlayerStats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stats) != 1 || stats[0].Goals != 2 || stats[0].Assists != 1 {
-		t.Fatalf("expected saved stat line goals=2 assists=1, got %+v", stats)
+	if len(stats) != 1 || stats[0].Goals != 2 || stats[0].Assists != 1 || stats[0].YellowCards != 1 {
+		t.Fatalf("expected saved stat line goals=2 assists=1 yellowCards=1, got %+v", stats)
+	}
+
+	mgm := &models.MatchGoalModel{DB: db}
+	goals, err := mgm.ListByMatch(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(goals) != 2 {
+		t.Fatalf("expected 2 goal rows saved, got %d", len(goals))
 	}
 }
 
-// A team's player goals can fall short of its recorded score (an own goal
-// has no scorer to credit) but must never exceed it.
-func TestUpdateMatchPlayerGoalsExceedingScoreFails(t *testing.T) {
+// Resubmitting a match's stats replaces the previous set rather than
+// accumulating on top of it — the recomputed playerMatchStats cache must
+// reflect only the latest save.
+func TestUpdateMatchResubmitReplacesStats(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	seasons := &models.SeasonModel{DB: db}
+	teams := &models.TeamModel{DB: db}
+	players := &models.PlayerModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+	matches := &models.MatchModel{DB: db}
+	pmsm := &models.PlayerMatchStatModel{DB: db}
+	matchService := MatchService{MatchModel: matches, DB: db}
+
+	seasonID, err := seasons.Insert(&models.Season{LeagueID: 1, Name: "Spring 2024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := teams.Insert(&models.Team{LeagueID: 1, Name: "Rival FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playerID, err := players.Insert(&models.Player{FirstName: "Sam", LastName: "Striker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05"}
+	id, err := matchService.CreateMatch(form, "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := &MatchForm{
+		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
+		HomeScore: "2", AwayScore: "0",
+		Goals: []GoalInput{{TeamID: 1, ScorerPlayerID: playerID}, {TeamID: 1, ScorerPlayerID: playerID}},
+	}
+	if err := matchService.UpdateMatch(first, "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	second := &MatchForm{
+		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
+		HomeScore: "1", AwayScore: "0",
+		Goals: []GoalInput{{TeamID: 1, ScorerPlayerID: playerID}},
+	}
+	if err := matchService.UpdateMatch(second, "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := pmsm.ListByMatch(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 1 || stats[0].Goals != 1 {
+		t.Fatalf("expected the resubmit to replace, leaving goals=1, got %+v", stats)
+	}
+}
+
+// A team's goal rows can fall short of its recorded score (an own goal has
+// no scorer to credit) but must never exceed it.
+func TestUpdateMatchGoalRowsExceedingScoreFails(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	seasons := &models.SeasonModel{DB: db}
+	teams := &models.TeamModel{DB: db}
+	players := &models.PlayerModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+	matches := &models.MatchModel{DB: db}
+	matchService := MatchService{MatchModel: matches, DB: db}
+
+	seasonID, err := seasons.Insert(&models.Season{LeagueID: 1, Name: "Spring 2024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := teams.Insert(&models.Team{LeagueID: 1, Name: "Rival FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scorer1, err := players.Insert(&models.Player{FirstName: "Sam", LastName: "Striker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(scorer1, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05"}
+	id, err := matchService.CreateMatch(form, "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Home team recorded a 2-0 win, but 3 goal rows are recorded for them.
+	updateForm := &MatchForm{
+		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
+		HomeScore: "2", AwayScore: "0",
+		Goals: []GoalInput{
+			{TeamID: 1, ScorerPlayerID: scorer1},
+			{TeamID: 1, ScorerPlayerID: scorer1},
+			{TeamID: 1},
+		},
+	}
+	err = matchService.UpdateMatch(updateForm, "admin@example.com")
+	if err != models.ErrBadData {
+		t.Fatalf("expected ErrBadData, got %v", err)
+	}
+}
+
+// A scorer/assister/carded player must actually belong to that row's
+// team's roster.
+func TestUpdateMatchRejectsPlayerNotOnRowsTeam(t *testing.T) {
 	db := models.NewTestDB(t)
 
 	seasons := &models.SeasonModel{DB: db}
@@ -184,11 +318,8 @@ func TestUpdateMatchPlayerGoalsExceedingScoreFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scorer1, err := players.Insert(&models.Player{FirstName: "Sam", LastName: "Striker"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	scorer2, err := players.Insert(&models.Player{FirstName: "Ana", LastName: "Winger"})
+	// Not added to any roster.
+	outsiderID, err := players.Insert(&models.Player{FirstName: "Not", LastName: "OnRoster"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,15 +330,9 @@ func TestUpdateMatchPlayerGoalsExceedingScoreFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Home team recorded a 2-0 win, but two players are each credited with
-	// 2 goals — 4 total, more than the team actually scored.
 	updateForm := &MatchForm{
 		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
-		HomeScore: "2", AwayScore: "0",
-		Stats: []PlayerStatInput{
-			{PlayerID: scorer1, TeamID: 1, Goals: 2},
-			{PlayerID: scorer2, TeamID: 1, Goals: 2},
-		},
+		Goals: []GoalInput{{TeamID: 1, ScorerPlayerID: outsiderID}},
 	}
 	err = matchService.UpdateMatch(updateForm, "admin@example.com")
 	if err != models.ErrBadData {

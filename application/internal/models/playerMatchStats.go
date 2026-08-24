@@ -1,7 +1,6 @@
 package models
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 
@@ -45,7 +44,7 @@ type LeagueLeaderLine struct {
 }
 
 type PlayerMatchStatModel struct {
-	DB *sql.DB
+	DB DBTX
 }
 
 // Upsert inserts stat, or updates the existing (matchID, playerID) row if
@@ -64,6 +63,14 @@ func (m *PlayerMatchStatModel) Upsert(stat *PlayerMatchStat) error {
 		return err
 	}
 	return nil
+}
+
+// DeleteByMatch removes every stat line recorded for matchID — used to wipe
+// the cache clean before recomputing it from matchID's current
+// matchGoals/matchCards rows (see MatchService.saveMatchEvents).
+func (m *PlayerMatchStatModel) DeleteByMatch(matchID int) error {
+	_, err := m.DB.Exec("DELETE FROM playerMatchStats WHERE matchID = ?", matchID)
+	return err
 }
 
 // ListByMatch returns every stat line recorded for matchID.

@@ -41,6 +41,11 @@ type homeData struct {
 	Leagues          []*homeLeagueCard
 	Teams            []*homeTeamCard
 	HasUpcomingMatch bool
+	// UpcomingMatchTeamCount is how many of Teams actually have a
+	// NextMatch — the Upcoming Matches table only shows which of the
+	// player's teams a row belongs to when this is more than 1, since a
+	// single-team player never needs that disambiguation.
+	UpcomingMatchTeamCount int
 }
 
 func (app *application) home(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +68,7 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 			hd.Teams = append(hd.Teams, card)
 			if card.NextMatch != nil {
 				hd.HasUpcomingMatch = true
+				hd.UpcomingMatchTeamCount++
 			}
 		}
 

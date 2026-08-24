@@ -43,11 +43,14 @@
     @apply px-4 py-3;
   }
 
-  /* Tighter cell padding on small screens so score/stat columns fit without
-     horizontal scrolling — back to the normal spacing at sm and up. */
+  /* Tighter cell padding on small screens, and no in-cell text wrapping —
+     the table is meant to overflow its .overflow-x-auto wrapper and scroll
+     horizontally instead of every column cramming/wrapping to fit the
+     viewport. Back to the normal spacing at sm and up (wrapping stays off
+     at every width). */
   .table-compact th,
   .table-compact td {
-    @apply px-2 py-2 sm:px-4 sm:py-3;
+    @apply px-2 py-2 sm:px-4 sm:py-3 whitespace-nowrap;
   }
 
   table tr {

@@ -61,6 +61,51 @@ func humanDate(t time.Time) string {
 	return t.Format("01/02/2006")
 }
 
+// humanDateShort drops the year humanDate includes — for tables already
+// scoped to a single season (a team's schedule, a season's match list),
+// where the season name already conveys the year and repeating it in every
+// row just crowds out room mobile screens need for the columns that
+// actually vary (opponent, score).
+func humanDateShort(t time.Time) string {
+	return t.Format("01/02")
+}
+
+// easternLocation is loaded once at startup; falling back to UTC (rather
+// than failing to start) if the container's tzdata is ever missing, since
+// both this session's dev and production images already install it.
+var easternLocation = func() *time.Location {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}()
+
+// humanDateTime formats t (stored as UTC, e.g. via UTC_TIMESTAMP()) in US
+// Eastern time with both date and time-of-day, plus the zone abbreviation
+// (EST/EDT) so it stays unambiguous across the daylight-saving switch —
+// used where the exact moment matters (Last Login), unlike humanDate's
+// date-only formatting for everything else.
+func humanDateTime(t time.Time) string {
+	return t.In(easternLocation).Format("01/02/2006 3:04 PM MST")
+}
+
+// templateRowWrapper bundles the root template data alongside one row for
+// match-update.html's goal-row/card-row sub-templates — Go's {{template}}
+// action only takes one pipeline argument, so goalRowData/cardRowData pack
+// both into a single value. Row is `any` (not *goalFormRow/*cardFormRow
+// directly) so the same wrapper works for both, and so the blank
+// <template> row can pass literal `nil` — a nil pointer is falsy to
+// {{if .Row}}, distinguishing "no row" from "a real row whose fields all
+// happen to be zero" (an unattributed goal/card).
+type templateRowWrapper struct {
+	Root any
+	Row  any
+}
+
+func goalRowData(root, row any) templateRowWrapper { return templateRowWrapper{Root: root, Row: row} }
+func cardRowData(root, row any) templateRowWrapper { return templateRowWrapper{Root: root, Row: row} }
+
 // mapsURL builds a Google Maps search link for an address — no API key
 // needed, just the documented search-by-query URL scheme.
 func mapsURL(a *models.Address) string {
@@ -92,9 +137,13 @@ func mapsURL(a *models.Address) string {
 }
 
 var functions = template.FuncMap{
-	"pickerDate": pickerDate,
-	"humanDate":  humanDate,
-	"mapsURL":    mapsURL,
+	"pickerDate":     pickerDate,
+	"humanDate":      humanDate,
+	"humanDateShort": humanDateShort,
+	"humanDateTime":  humanDateTime,
+	"mapsURL":        mapsURL,
+	"goalRowData":    goalRowData,
+	"cardRowData":    cardRowData,
 }
 
 func newTemplateCache() (map[string]*template.Template, error) {

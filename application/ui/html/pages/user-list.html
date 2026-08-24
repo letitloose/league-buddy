@@ -55,7 +55,7 @@
                 </td>
                 <td><a href="/user/view/{{.UserID}}">{{.Email}}</a></td>
                 <td>{{humanDate .Created}}</td>
-                <td>{{if .LastLogin.Valid}}{{humanDate .LastLogin.Time}}{{end}}</td>
+                <td>{{if .LastLogin.Valid}}{{humanDateTime .LastLogin.Time}}{{end}}</td>
                 <td class="text-center">
                     <input type="checkbox" value="{{.Active}}" data-toggle-url="/user/toggleActive" data-user-id="{{.UserID}}">
                 </td>

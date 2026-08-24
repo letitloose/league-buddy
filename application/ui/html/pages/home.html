@@ -9,24 +9,20 @@
                 {{if .Data.HasUpcomingMatch}}
                 <h3 class="px-0">Upcoming Matches</h3>
                 <div class="overflow-x-auto mb-8">
-                <table class="text-left w-full">
+                <table class="table-compact text-left w-full">
                     <tr>
                         <th>Date</th>
-                        <th>Home</th>
-                        <th>Away</th>
+                        <th>Opponent</th>
                         <th>Location</th>
                     </tr>
                     {{range .Data.Teams}}
                         {{if .NextMatch}}
                         <tr>
-                            <td><a href="/match/{{.NextMatch.ID}}">{{humanDate .NextMatch.MatchDate}}</a></td>
-                            {{if .NextMatchIsHome}}
-                            <td><a href="/team/{{.Team.ID}}">{{.Team.Name}}</a></td>
-                            <td><a href="/team/{{.NextMatchOpponentID}}">{{.NextMatchOpponent}}</a></td>
-                            {{else}}
-                            <td><a href="/team/{{.NextMatchOpponentID}}">{{.NextMatchOpponent}}</a></td>
-                            <td><a href="/team/{{.Team.ID}}">{{.Team.Name}}</a></td>
-                            {{end}}
+                            <td><a href="/match/{{.NextMatch.ID}}">{{humanDateShort .NextMatch.MatchDate}}</a></td>
+                            <td>
+                                <a href="/team/{{.NextMatchOpponentID}}">{{if not .NextMatchIsHome}}@ {{end}}{{.NextMatchOpponent}}</a>
+                                {{if gt $.Data.UpcomingMatchTeamCount 1}}<span class="text-xs text-gray-500">({{.Team.Name}})</span>{{end}}
+                            </td>
                             <td>{{if .NextMatchLocation}}<a href="{{mapsURL .NextMatchLocationAddress}}" target="_blank" rel="noopener noreferrer">{{.NextMatchLocation.Name}}</a>{{end}}</td>
                         </tr>
                         {{end}}

@@ -615,11 +615,15 @@ td {
   padding-bottom: 0.75rem;
 }
 
-/* Tighter cell padding on small screens so score/stat columns fit without
-     horizontal scrolling — back to the normal spacing at sm and up. */
+/* Tighter cell padding on small screens, and no in-cell text wrapping —
+     the table is meant to overflow its .overflow-x-auto wrapper and scroll
+     horizontally instead of every column cramming/wrapping to fit the
+     viewport. Back to the normal spacing at sm and up (wrapping stays off
+     at every width). */
 
 .table-compact th,
   .table-compact td {
+  white-space: nowrap;
   padding-left: 0.5rem;
   padding-right: 0.5rem;
   padding-top: 0.5rem;
@@ -1030,10 +1034,6 @@ table tr:nth-child(even) {
   width: 33.333333%;
 }
 
-.w-14 {
-  width: 3.5rem;
-}
-
 .w-full {
   width: 100%;
 }
@@ -1241,6 +1241,11 @@ table tr:nth-child(even) {
   padding-bottom: 0.5rem;
 }
 
+.py-20 {
+  padding-top: 5rem;
+  padding-bottom: 5rem;
+}
+
 .py-3 {
   padding-top: 0.75rem;
   padding-bottom: 0.75rem;
@@ -1307,6 +1312,11 @@ table tr:nth-child(even) {
 .text-3xl {
   font-size: 1.875rem;
   line-height: 2.25rem;
+}
+
+.text-6xl {
+  font-size: 3.75rem;
+  line-height: 1;
 }
 
 .text-lg {
@@ -1396,6 +1406,11 @@ table tr:nth-child(even) {
 .text-orange-400 {
   --tw-text-opacity: 1;
   color: rgb(251 146 60 / var(--tw-text-opacity));
+}
+
+.text-orange-500 {
+  --tw-text-opacity: 1;
+  color: rgb(249 115 22 / var(--tw-text-opacity));
 }
 
 .text-red-600 {

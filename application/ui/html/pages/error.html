@@ -1,0 +1,10 @@
+{{define "title"}}{{.Data.Headline}}{{end}}
+
+{{define "main"}}
+<div class="flex flex-col items-center justify-center text-center py-20 px-4">
+    <p class="text-6xl font-bold text-orange-500 mb-2">{{.Data.StatusCode}}</p>
+    <h2 class="mt-0">{{.Data.Headline}}</h2>
+    <p class="text-gray-600 mb-8 max-w-md">{{.Data.Message}}</p>
+    <a class="btn" href="/">Back to Home</a>
+</div>
+{{end}}

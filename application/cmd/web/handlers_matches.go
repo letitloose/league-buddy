@@ -139,13 +139,40 @@ func (app *application) matchCreate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/season/%d", seasonID), http.StatusSeeOther)
 }
 
-// matchRosterEntry is one row of the per-player stat grid on
-// match-update.html — a roster player alongside their existing stat line
-// for this match, if any (all zero for a player who hasn't been recorded
-// yet).
-type matchRosterEntry struct {
-	Player *models.Player
-	Stat   *models.PlayerMatchStat
+// goalFormRow/cardFormRow are match-update.html's template-friendly view of
+// a saved goal/card: plain ints (0 = unattributed) rather than
+// sql.NullInt32, since Go templates can't {{eq}} an int32 against an int
+// without a helper function, and the form's dropdowns just need "is this
+// the selected option" comparisons against plain ints.
+type goalFormRow struct {
+	TeamID           int
+	ScorerPlayerID   int
+	AssisterPlayerID int
+}
+
+type cardFormRow struct {
+	TeamID   int
+	PlayerID int
+	CardType string
+}
+
+func newGoalFormRow(g *models.MatchGoal) *goalFormRow {
+	row := &goalFormRow{TeamID: g.TeamID}
+	if g.ScorerPlayerID.Valid {
+		row.ScorerPlayerID = int(g.ScorerPlayerID.Int32)
+	}
+	if g.AssisterPlayerID.Valid {
+		row.AssisterPlayerID = int(g.AssisterPlayerID.Int32)
+	}
+	return row
+}
+
+func newCardFormRow(c *models.MatchCard) *cardFormRow {
+	row := &cardFormRow{TeamID: c.TeamID, CardType: c.CardType}
+	if c.PlayerID.Valid {
+		row.PlayerID = int(c.PlayerID.Int32)
+	}
+	return row
 }
 
 type matchUpdateData struct {
@@ -155,20 +182,10 @@ type matchUpdateData struct {
 	HomeTeam   *models.Team
 	AwayTeam   *models.Team
 	Locations  []*models.Location
-	HomeRoster []*matchRosterEntry
-	AwayRoster []*matchRosterEntry
-}
-
-func buildMatchRoster(roster []*models.Player, teamID int, statsByPlayer map[int]*models.PlayerMatchStat) []*matchRosterEntry {
-	entries := make([]*matchRosterEntry, 0, len(roster))
-	for _, player := range roster {
-		stat := statsByPlayer[player.ID]
-		if stat == nil {
-			stat = &models.PlayerMatchStat{PlayerID: player.ID, TeamID: teamID}
-		}
-		entries = append(entries, &matchRosterEntry{Player: player, Stat: stat})
-	}
-	return entries
+	HomeRoster []*models.Player
+	AwayRoster []*models.Player
+	Goals      []*goalFormRow
+	Cards      []*cardFormRow
 }
 
 func (app *application) renderMatchUpdateForm(w http.ResponseWriter, r *http.Request, form *services.MatchForm, match *models.Match, status int) {
@@ -214,15 +231,25 @@ func (app *application) renderMatchUpdateForm(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	pmsm := &models.PlayerMatchStatModel{DB: app.playerService.DB}
-	existingStats, err := pmsm.ListByMatch(match.ID)
+	mgm := &models.MatchGoalModel{DB: app.playerService.DB}
+	savedGoals, err := mgm.ListByMatch(match.ID)
 	if err != nil {
 		app.serverError(w, err)
 		return
 	}
-	statsByPlayer := make(map[int]*models.PlayerMatchStat, len(existingStats))
-	for _, stat := range existingStats {
-		statsByPlayer[stat.PlayerID] = stat
+	mcm := &models.MatchCardModel{DB: app.playerService.DB}
+	savedCards, err := mcm.ListByMatch(match.ID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	goals := make([]*goalFormRow, len(savedGoals))
+	for i, g := range savedGoals {
+		goals[i] = newGoalFormRow(g)
+	}
+	cards := make([]*cardFormRow, len(savedCards))
+	for i, c := range savedCards {
+		cards[i] = newCardFormRow(c)
 	}
 
 	data := app.newTemplateData(r)
@@ -234,8 +261,10 @@ func (app *application) renderMatchUpdateForm(w http.ResponseWriter, r *http.Req
 		HomeTeam:   homeTeam,
 		AwayTeam:   awayTeam,
 		Locations:  locations,
-		HomeRoster: buildMatchRoster(homeRosterPlayers, match.HomeTeamID, statsByPlayer),
-		AwayRoster: buildMatchRoster(awayRosterPlayers, match.AwayTeamID, statsByPlayer),
+		HomeRoster: homeRosterPlayers,
+		AwayRoster: awayRosterPlayers,
+		Goals:      goals,
+		Cards:      cards,
 	}
 	data.Breadcrumbs = []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},
@@ -629,27 +658,49 @@ func (app *application) matchUpdate(w http.ResponseWriter, r *http.Request) {
 	app.renderMatchUpdateForm(w, r, form, match, http.StatusOK)
 }
 
-// parseMatchStats reads the per-player stat grid match-update.html submits:
-// one hidden "statPlayerIDs" value per roster row, paired with
-// teamID_<id>/goals_<id>/assists_<id>/yellow_<id>/red_<id> fields.
-func parseMatchStats(r *http.Request) []services.PlayerStatInput {
-	ids := r.PostForm["statPlayerIDs"]
-	stats := make([]services.PlayerStatInput, 0, len(ids))
-	for _, idStr := range ids {
-		playerID, err := strconv.Atoi(idStr)
+// parseGoalsAndCards reads the dynamic goal/card row builder
+// match-update.html submits: one set of same-named fields per row (Go's
+// r.PostForm collects repeated field names into an ordered slice, so the
+// i-th value of each name belongs to the same row). A blank select (the
+// "unattributed" option) submits as "", which parses to 0.
+func parseGoalsAndCards(r *http.Request) ([]services.GoalInput, []services.CardInput) {
+	goalTeamIDs := r.PostForm["goalTeamID"]
+	goalScorerIDs := r.PostForm["goalScorerID"]
+	goalAssisterIDs := r.PostForm["goalAssisterID"]
+	goals := make([]services.GoalInput, 0, len(goalTeamIDs))
+	for i, teamIDStr := range goalTeamIDs {
+		teamID, err := strconv.Atoi(teamIDStr)
 		if err != nil {
 			continue
 		}
-		teamID, _ := strconv.Atoi(r.PostForm.Get("teamID_" + idStr))
-		goals, _ := strconv.Atoi(r.PostForm.Get("goals_" + idStr))
-		assists, _ := strconv.Atoi(r.PostForm.Get("assists_" + idStr))
-		yellow, _ := strconv.Atoi(r.PostForm.Get("yellow_" + idStr))
-		red, _ := strconv.Atoi(r.PostForm.Get("red_" + idStr))
-		stats = append(stats, services.PlayerStatInput{
-			PlayerID: playerID, TeamID: teamID, Goals: goals, Assists: assists, YellowCards: yellow, RedCards: red,
-		})
+		scorerID, _ := strconv.Atoi(valueAt(goalScorerIDs, i))
+		assisterID, _ := strconv.Atoi(valueAt(goalAssisterIDs, i))
+		goals = append(goals, services.GoalInput{TeamID: teamID, ScorerPlayerID: scorerID, AssisterPlayerID: assisterID})
 	}
-	return stats
+
+	cardTeamIDs := r.PostForm["cardTeamID"]
+	cardPlayerIDs := r.PostForm["cardPlayerID"]
+	cardTypes := r.PostForm["cardType"]
+	cards := make([]services.CardInput, 0, len(cardTeamIDs))
+	for i, teamIDStr := range cardTeamIDs {
+		teamID, err := strconv.Atoi(teamIDStr)
+		if err != nil {
+			continue
+		}
+		playerID, _ := strconv.Atoi(valueAt(cardPlayerIDs, i))
+		cards = append(cards, services.CardInput{TeamID: teamID, PlayerID: playerID, CardType: valueAt(cardTypes, i)})
+	}
+
+	return goals, cards
+}
+
+// valueAt returns values[i], or "" if i is out of range — guards against a
+// malformed submission where the parallel slices' lengths don't line up.
+func valueAt(values []string, i int) string {
+	if i < 0 || i >= len(values) {
+		return ""
+	}
+	return values[i]
 }
 
 func (app *application) matchUpdatePost(w http.ResponseWriter, r *http.Request) {
@@ -691,6 +742,7 @@ func (app *application) matchUpdatePost(w http.ResponseWriter, r *http.Request) 
 	// Home/away teams are fixed once a match exists (see match-team-fields'
 	// doc comment) — reuse the existing values rather than trusting the
 	// (nonexistent) form fields.
+	goals, cards := parseGoalsAndCards(r)
 	form := &services.MatchForm{
 		ID:         id,
 		SeasonID:   existing.SeasonID,
@@ -701,7 +753,8 @@ func (app *application) matchUpdatePost(w http.ResponseWriter, r *http.Request) 
 		HomeScore:  r.PostForm.Get("homescore"),
 		AwayScore:  r.PostForm.Get("awayscore"),
 		Notes:      r.PostForm.Get("notes"),
-		Stats:      parseMatchStats(r),
+		Goals:      goals,
+		Cards:      cards,
 	}
 
 	err = app.matchService.UpdateMatch(form, app.getUserName(r))
@@ -715,7 +768,7 @@ func (app *application) matchUpdatePost(w http.ResponseWriter, r *http.Request) 
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", "Match updated.")
-	http.Redirect(w, r, fmt.Sprintf("/season/%d", existing.SeasonID), http.StatusSeeOther)
+	http.Redirect(w, r, fmt.Sprintf("/match/%d", existing.ID), http.StatusSeeOther)
 }
 
 func (app *application) matchDelete(w http.ResponseWriter, r *http.Request) {

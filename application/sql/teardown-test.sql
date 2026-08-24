@@ -3,6 +3,8 @@
 -- recreate them from scratch at the start of a test run.
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS rsvps;
+DROP TABLE IF EXISTS matchGoals;
+DROP TABLE IF EXISTS matchCards;
 DROP TABLE IF EXISTS playerMatchStats;
 DROP TABLE IF EXISTS matches;
 DROP TABLE IF EXISTS seasons;

@@ -13,52 +13,141 @@
             {{template "match-details-fields" .}}
         </div>
 
-        <div class="grid gap-4 sm:grid-cols-2 mb-4">
-            <div class="bg-white shadow-md rounded px-4 pt-4 pb-4">
-                <h4 class="text-center pt-0">{{.Data.HomeTeam.Name}}</h4>
-                {{template "match-roster-stats" .Data.HomeRoster}}
+        <div class="bg-white shadow-md rounded px-4 pt-4 pb-4 mb-4">
+            <h4 class="text-center pt-0">Goals</h4>
+            <div class="overflow-x-auto">
+            <table class="text-left w-full text-sm">
+                <tr>
+                    <th>Team</th>
+                    <th>Scorer</th>
+                    <th>Assister</th>
+                    <th></th>
+                </tr>
+                <tbody id="goals-tbody">
+                {{range .Data.Goals}}
+                    {{template "goal-row" (goalRowData $ .)}}
+                {{end}}
+                </tbody>
+            </table>
             </div>
-            <div class="bg-white shadow-md rounded px-4 pt-4 pb-4">
-                <h4 class="text-center pt-0">{{.Data.AwayTeam.Name}}</h4>
-                {{template "match-roster-stats" .Data.AwayRoster}}
+            <div class="text-center mt-3">
+                <button type="button" class="btn-secondary m-0" id="add-goal-btn">+ Add Goal</button>
+            </div>
+        </div>
+
+        <div class="bg-white shadow-md rounded px-4 pt-4 pb-4 mb-4">
+            <h4 class="text-center pt-0">Cards</h4>
+            <div class="overflow-x-auto">
+            <table class="text-left w-full text-sm">
+                <tr>
+                    <th>Team</th>
+                    <th>Player</th>
+                    <th>Type</th>
+                    <th></th>
+                </tr>
+                <tbody id="cards-tbody">
+                {{range .Data.Cards}}
+                    {{template "card-row" (cardRowData $ .)}}
+                {{end}}
+                </tbody>
+            </table>
+            </div>
+            <div class="text-center mt-3">
+                <button type="button" class="btn-secondary m-0" id="add-card-btn">+ Add Card</button>
             </div>
         </div>
 
         <div class="flex justify-center gap-2 mb-6">
             <input class="btn m-0" type='submit' value='Save'>
-            <a class="btn-secondary m-0" href="/season/{{.Data.Season.ID}}">Cancel</a>
+            <a class="btn-secondary m-0" href="/match/{{.Data.Match.ID}}">Cancel</a>
         </div>
     </form>
 </div>
+
+<!-- Blank-row templates main.js clones for "+ Add Goal"/"+ Add Card". -->
+<template id="goal-row-template">
+    {{template "goal-row" (goalRowData . nil)}}
+</template>
+<template id="card-row-template">
+    {{template "card-row" (cardRowData . nil)}}
+</template>
 {{end}}
 
-{{define "match-roster-stats"}}
-    {{if .}}
-    <div class="overflow-x-auto">
-    <table class="text-left w-full text-sm">
-        <tr>
-            <th>Player</th>
-            <th>G</th>
-            <th>A</th>
-            <th>YC</th>
-            <th>RC</th>
-        </tr>
-        {{range .}}
-        <tr>
-            <td>
-                {{.Player.FirstName}} {{.Player.LastName}}
-                <input type='hidden' name='statPlayerIDs' value='{{.Player.ID}}'>
-                <input type='hidden' name='teamID_{{.Player.ID}}' value='{{.Stat.TeamID}}'>
-            </td>
-            <td><input class="form-field w-14" type='number' min='0' name='goals_{{.Player.ID}}' value='{{.Stat.Goals}}'></td>
-            <td><input class="form-field w-14" type='number' min='0' name='assists_{{.Player.ID}}' value='{{.Stat.Assists}}'></td>
-            <td><input class="form-field w-14" type='number' min='0' name='yellow_{{.Player.ID}}' value='{{.Stat.YellowCards}}'></td>
-            <td><input class="form-field w-14" type='number' min='0' name='red_{{.Player.ID}}' value='{{.Stat.RedCards}}'></td>
-        </tr>
-        {{end}}
-    </table>
-    </div>
-    {{else}}
-    <p class="text-center text-sm text-gray-500">No players on this roster.</p>
-    {{end}}
+{{/* goal-row/card-row are shared by the prefilled rows above and the blank
+     <template> the "+ Add" buttons clone — row is nil for the blank
+     version. .Root carries HomeTeam/AwayTeam/HomeRoster/AwayRoster, needed
+     regardless of whether a saved row is being rendered. */}}
+{{define "goal-row"}}
+<tr class="event-row">
+    <td>
+        <select class="form-field" name="goalTeamID">
+            <option value="{{.Root.Data.HomeTeam.ID}}" {{if and .Row (eq .Row.TeamID .Root.Data.HomeTeam.ID)}}selected{{end}}>{{.Root.Data.HomeTeam.Name}}</option>
+            <option value="{{.Root.Data.AwayTeam.ID}}" {{if and .Row (eq .Row.TeamID .Root.Data.AwayTeam.ID)}}selected{{end}}>{{.Root.Data.AwayTeam.Name}}</option>
+        </select>
+    </td>
+    <td>
+        <select class="form-field" name="goalScorerID">
+            <option value="">&mdash; Unknown &mdash;</option>
+            <optgroup label="{{.Root.Data.HomeTeam.Name}}">
+                {{range .Root.Data.HomeRoster}}
+                <option value="{{.ID}}" {{if and $.Row (eq $.Row.ScorerPlayerID .ID)}}selected{{end}}>{{.FirstName}} {{.LastName}}</option>
+                {{end}}
+            </optgroup>
+            <optgroup label="{{.Root.Data.AwayTeam.Name}}">
+                {{range .Root.Data.AwayRoster}}
+                <option value="{{.ID}}" {{if and $.Row (eq $.Row.ScorerPlayerID .ID)}}selected{{end}}>{{.FirstName}} {{.LastName}}</option>
+                {{end}}
+            </optgroup>
+        </select>
+    </td>
+    <td>
+        <select class="form-field" name="goalAssisterID">
+            <option value="">&mdash; None &mdash;</option>
+            <optgroup label="{{.Root.Data.HomeTeam.Name}}">
+                {{range .Root.Data.HomeRoster}}
+                <option value="{{.ID}}" {{if and $.Row (eq $.Row.AssisterPlayerID .ID)}}selected{{end}}>{{.FirstName}} {{.LastName}}</option>
+                {{end}}
+            </optgroup>
+            <optgroup label="{{.Root.Data.AwayTeam.Name}}">
+                {{range .Root.Data.AwayRoster}}
+                <option value="{{.ID}}" {{if and $.Row (eq $.Row.AssisterPlayerID .ID)}}selected{{end}}>{{.FirstName}} {{.LastName}}</option>
+                {{end}}
+            </optgroup>
+        </select>
+    </td>
+    <td><button type="button" class="text-red-600 remove-row-btn">Remove</button></td>
+</tr>
+{{end}}
+
+{{define "card-row"}}
+<tr class="event-row">
+    <td>
+        <select class="form-field" name="cardTeamID">
+            <option value="{{.Root.Data.HomeTeam.ID}}" {{if and .Row (eq .Row.TeamID .Root.Data.HomeTeam.ID)}}selected{{end}}>{{.Root.Data.HomeTeam.Name}}</option>
+            <option value="{{.Root.Data.AwayTeam.ID}}" {{if and .Row (eq .Row.TeamID .Root.Data.AwayTeam.ID)}}selected{{end}}>{{.Root.Data.AwayTeam.Name}}</option>
+        </select>
+    </td>
+    <td>
+        <select class="form-field" name="cardPlayerID">
+            <option value="">&mdash; Unknown &mdash;</option>
+            <optgroup label="{{.Root.Data.HomeTeam.Name}}">
+                {{range .Root.Data.HomeRoster}}
+                <option value="{{.ID}}" {{if and $.Row (eq $.Row.PlayerID .ID)}}selected{{end}}>{{.FirstName}} {{.LastName}}</option>
+                {{end}}
+            </optgroup>
+            <optgroup label="{{.Root.Data.AwayTeam.Name}}">
+                {{range .Root.Data.AwayRoster}}
+                <option value="{{.ID}}" {{if and $.Row (eq $.Row.PlayerID .ID)}}selected{{end}}>{{.FirstName}} {{.LastName}}</option>
+                {{end}}
+            </optgroup>
+        </select>
+    </td>
+    <td>
+        <select class="form-field" name="cardType">
+            <option value="yellow" {{if and .Row (eq .Row.CardType "yellow")}}selected{{end}}>Yellow</option>
+            <option value="red" {{if and .Row (eq .Row.CardType "red")}}selected{{end}}>Red</option>
+        </select>
+    </td>
+    <td><button type="button" class="text-red-600 remove-row-btn">Remove</button></td>
+</tr>
 {{end}}

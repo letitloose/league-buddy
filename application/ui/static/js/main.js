@@ -48,6 +48,22 @@ function showAlertDialog(message) {
     });
 }
 
+// setupAddRow wires an "+ Add ..." button (match-update.html's "+ Add
+// Goal"/"+ Add Card") to clone a blank <template> row and append it to the
+// given <tbody> — used for both, since there's no known upper bound on how
+// many goals/cards a match might have.
+function setupAddRow(addBtnId, templateId, tbodyId) {
+    var addBtn = document.getElementById(addBtnId);
+    var template = document.getElementById(templateId);
+    var tbody = document.getElementById(tbodyId);
+    if (!addBtn || !template || !tbody) {
+        return;
+    }
+    addBtn.addEventListener('click', function () {
+        tbody.appendChild(template.content.cloneNode(true));
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     var csrfMeta = document.querySelector('meta[name="csrf-token"]');
     var csrfToken = csrfMeta ? csrfMeta.content : '';
@@ -99,6 +115,17 @@ document.addEventListener('DOMContentLoaded', function () {
                 console.error('toggle error:', error);
             });
         });
+    });
+
+    setupAddRow('add-goal-btn', 'goal-row-template', 'goals-tbody');
+    setupAddRow('add-card-btn', 'card-row-template', 'cards-tbody');
+
+    // Delegated so it covers both rows present at page load (a saved
+    // match's existing goals/cards) and rows added later by setupAddRow.
+    document.addEventListener('click', function (event) {
+        if (event.target.matches('.remove-row-btn')) {
+            event.target.closest('tr').remove();
+        }
     });
 
     var navToggle = document.getElementById('nav-toggle');

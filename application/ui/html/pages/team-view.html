@@ -42,21 +42,21 @@
         <table class="table-compact text-left w-full mb-4">
             <tr>
                 <th>Date</th>
-                <th>Home</th>
-                <th>Away</th>
+                <th>Opponent</th>
                 <th>Score</th>
                 <th>Location</th>
             </tr>
             {{range .Data.Schedule}}
             <tr>
-                <td><a href="/match/{{.Match.ID}}">{{humanDate .Match.MatchDate}}</a></td>
+                <td><a href="/match/{{.Match.ID}}">{{humanDateShort .Match.MatchDate}}</a></td>
                 <td>
-                    <a href="/match/{{.Match.ID}}">{{.HomeTeamName}}</a>
-                    {{if eq .Match.HomeTeamID $.Data.Team.ID}}<span class="text-xs text-gray-500">({{.HomeIn}} in / {{.HomeOut}} out)</span>{{end}}
-                </td>
-                <td>
+                    {{if eq .Match.HomeTeamID $.Data.Team.ID}}
                     <a href="/match/{{.Match.ID}}">{{.AwayTeamName}}</a>
-                    {{if eq .Match.AwayTeamID $.Data.Team.ID}}<span class="text-xs text-gray-500">({{.AwayIn}} in / {{.AwayOut}} out)</span>{{end}}
+                    <span class="text-xs text-gray-500">({{.HomeIn}} in / {{.HomeOut}} out)</span>
+                    {{else}}
+                    <a href="/match/{{.Match.ID}}">@ {{.HomeTeamName}}</a>
+                    <span class="text-xs text-gray-500">({{.AwayIn}} in / {{.AwayOut}} out)</span>
+                    {{end}}
                 </td>
                 <td>
                     <a href="/match/{{.Match.ID}}">

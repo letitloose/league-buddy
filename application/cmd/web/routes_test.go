@@ -37,6 +37,27 @@ func TestPublicRoutes(t *testing.T) {
 	}
 }
 
+// 404s render the branded error page (nav, footer, "Back to Home" link)
+// rather than Go's bare-text http.Error response.
+func TestNotFoundRendersStyledErrorPage(t *testing.T) {
+	app := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+
+	code, _, body := ts.get(t, "/this-route-does-not-exist")
+	if code != http.StatusNotFound {
+		t.Fatalf("want %d; got %d", http.StatusNotFound, code)
+	}
+	if !strings.Contains(body, "Page not found") {
+		t.Error("expected the friendly 404 headline")
+	}
+	if !strings.Contains(body, "Back to Home") {
+		t.Error("expected a Back to Home link")
+	}
+	if !strings.Contains(body, "Blame the Ball") {
+		t.Error("expected the normal site nav/branding to still render on a 404")
+	}
+}
+
 // Unauthenticated requests to active and admin routes are redirected to /.
 func TestUnauthenticatedAccessRedirects(t *testing.T) {
 	app := newTestApplication(t)
@@ -1388,8 +1409,8 @@ func TestMatchViewAndCaptainEditAccess(t *testing.T) {
 		if postCode != http.StatusSeeOther {
 			t.Fatalf("want %d; got %d", http.StatusSeeOther, postCode)
 		}
-		if loc := headers.Get("Location"); loc != fmt.Sprintf("/season/%d", seasonID) {
-			t.Fatalf("want Location %q; got %q", fmt.Sprintf("/season/%d", seasonID), loc)
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", matchID) {
+			t.Fatalf("want Location %q; got %q", fmt.Sprintf("/match/%d", matchID), loc)
 		}
 
 		match, err := mm.Get(matchID)
@@ -1437,6 +1458,168 @@ func TestMatchViewAndCaptainEditAccess(t *testing.T) {
 		}
 		if !strings.Contains(body, "Match View Away FC") {
 			t.Error("expected the opponent's name in the schedule")
+		}
+	})
+
+	t.Run("away team's schedule prefixes the opponent with @", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testActiveEmail, testActivePass)
+
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d", awayTeamID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "@ Match View Home FC") {
+			t.Error("expected the away team's schedule to show '@ <home team>' rather than separate Home/Away columns")
+		}
+	})
+}
+
+// Submitting the match-edit form's goal/card rows saves them as discrete
+// events (queryable via MatchGoalModel/MatchCardModel exactly as
+// submitted), recomputes the playerMatchStats cache the leaderboards read
+// from, and a second submission with a different set of rows replaces
+// rather than accumulates.
+func TestMatchUpdateSavesGoalsAndCards(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Match Update Events League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Events Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Events Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Events Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now(),
+		HomeScore: sql.NullInt32{Int32: 2, Valid: true}, AwayScore: sql.NullInt32{Int32: 0, Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scorerID := setupTeamCaptain(t, homeTeamID, "events-scorer-captain@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testAdminEmail, testAdminPass)
+
+	postGoalsAndCards := func(t *testing.T, form url.Values) (int, http.Header) {
+		t.Helper()
+		_, _, formBody := ts.get(t, fmt.Sprintf("/admin/match/update/%d", matchID))
+		form.Set("csrf_token", extractCSRFToken(t, formBody))
+		form.Set("match-id", fmt.Sprintf("%d", matchID))
+		code, headers, _ := ts.postForm(t, "/admin/match/update", form)
+		return code, headers
+	}
+
+	t.Run("saves a scored goal, an unattributed goal, and a card", func(t *testing.T) {
+		form := url.Values{
+			"matchdate":  {"2024-05-05"},
+			"homescore":  {"2"},
+			"awayscore":  {"1"},
+			"goalTeamID": {fmt.Sprintf("%d", homeTeamID), fmt.Sprintf("%d", awayTeamID)},
+			// First goal: scored and assisted by the same test player (not
+			// realistic, but exercises both tallies incrementing). Second
+			// goal (away team) intentionally has no scorer/assister.
+			"goalScorerID":   {fmt.Sprintf("%d", scorerID), ""},
+			"goalAssisterID": {fmt.Sprintf("%d", scorerID), ""},
+			"cardTeamID":     {fmt.Sprintf("%d", homeTeamID)},
+			"cardPlayerID":   {fmt.Sprintf("%d", scorerID)},
+			"cardType":       {"yellow"},
+		}
+		code, headers := postGoalsAndCards(t, form)
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", matchID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/match/%d", matchID), loc)
+		}
+
+		mgm := &models.MatchGoalModel{DB: testDB}
+		goals, err := mgm.ListByMatch(matchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(goals) != 2 {
+			t.Fatalf("expected 2 goal rows, got %d", len(goals))
+		}
+		if goals[0].TeamID != homeTeamID || !goals[0].ScorerPlayerID.Valid || int(goals[0].ScorerPlayerID.Int32) != scorerID {
+			t.Fatalf("expected the first goal attributed to the scorer, got %+v", goals[0])
+		}
+		if goals[1].TeamID != awayTeamID || goals[1].ScorerPlayerID.Valid {
+			t.Fatalf("expected the second goal unattributed for the away team, got %+v", goals[1])
+		}
+
+		mcm := &models.MatchCardModel{DB: testDB}
+		cards, err := mcm.ListByMatch(matchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cards) != 1 || cards[0].CardType != "yellow" {
+			t.Fatalf("expected 1 yellow card, got %+v", cards)
+		}
+
+		pmsm := &models.PlayerMatchStatModel{DB: testDB}
+		stats, err := pmsm.ListByMatch(matchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(stats) != 1 || stats[0].Goals != 1 || stats[0].Assists != 1 || stats[0].YellowCards != 1 {
+			t.Fatalf("expected the recomputed cache to show goals=1 assists=1 yellowCards=1, got %+v", stats)
+		}
+	})
+
+	t.Run("resubmitting with fewer rows replaces rather than accumulates", func(t *testing.T) {
+		form := url.Values{
+			"matchdate":    {"2024-05-05"},
+			"homescore":    {"2"},
+			"awayscore":    {"0"},
+			"goalTeamID":   {fmt.Sprintf("%d", homeTeamID)},
+			"goalScorerID": {fmt.Sprintf("%d", scorerID)},
+		}
+		code, _ := postGoalsAndCards(t, form)
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+
+		mgm := &models.MatchGoalModel{DB: testDB}
+		goals, err := mgm.ListByMatch(matchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(goals) != 1 {
+			t.Fatalf("expected the resubmit to replace, leaving 1 goal, got %d", len(goals))
+		}
+
+		mcm := &models.MatchCardModel{DB: testDB}
+		cards, err := mcm.ListByMatch(matchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cards) != 0 {
+			t.Fatalf("expected the card to have been dropped by the resubmit, got %d", len(cards))
+		}
+
+		pmsm := &models.PlayerMatchStatModel{DB: testDB}
+		stats, err := pmsm.ListByMatch(matchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(stats) != 1 || stats[0].Goals != 1 || stats[0].Assists != 0 || stats[0].YellowCards != 0 {
+			t.Fatalf("expected the recomputed cache to show only goals=1, got %+v", stats)
 		}
 	})
 }
@@ -1853,6 +2036,111 @@ func TestUserListDefaultSortAndToggle(t *testing.T) {
 		}
 		if !strings.Contains(body, "sort=email&order=DESC") {
 			t.Error("expected the active Email header to link to toggle into DESC")
+		}
+	})
+}
+
+// The home page's Upcoming Matches table only shows which of the player's
+// teams a row belongs to when they're on more than one team with an
+// upcoming match — a single-team player just sees Date/Opponent/Location,
+// no redundant team name.
+func TestHomeUpcomingMatchesTeamDisambiguation(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	pm := &models.PlayerModel{DB: testDB}
+	um := &models.UserModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	sm := &models.SeasonModel{DB: testDB}
+	mm := &models.MatchModel{DB: testDB}
+
+	leagueA, err := (&models.LeagueModel{DB: testDB}).Insert(&models.League{Name: "Home Upcoming League A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leagueB, err := (&models.LeagueModel{DB: testDB}).Insert(&models.League{Name: "Home Upcoming League B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamA, err := tm.Insert(&models.Team{LeagueID: leagueA, Name: "Home Upcoming Team A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamB, err := tm.Insert(&models.Team{LeagueID: leagueB, Name: "Home Upcoming Team B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentA, err := tm.Insert(&models.Team{LeagueID: leagueA, Name: "Home Upcoming Opponent A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentB, err := tm.Insert(&models.Team{LeagueID: leagueB, Name: "Home Upcoming Opponent B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seasonA, err := sm.Insert(&models.Season{LeagueID: leagueA, Name: "Home Upcoming Season A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seasonB, err := sm.Insert(&models.Season{LeagueID: leagueB, Name: "Home Upcoming Season B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	future := time.Now().AddDate(0, 0, 7)
+	if _, err := mm.Insert(&models.Match{SeasonID: seasonA, HomeTeamID: teamA, AwayTeamID: opponentA, MatchDate: future}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mm.Insert(&models.Match{SeasonID: seasonB, HomeTeamID: teamB, AwayTeamID: opponentB, MatchDate: future}); err != nil {
+		t.Fatal(err)
+	}
+
+	playerID, err := pm.Insert(&models.Player{FirstName: "Multi", LastName: "Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, err := um.Insert("multi-team-home@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.Activate(userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetPlayerID(userID, playerID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, teamA); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "multi-team-home@test.com", "validpassword123")
+
+	t.Run("single team shows no team disambiguation", func(t *testing.T) {
+		code, _, body := ts.get(t, "/")
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "Home Upcoming Opponent A") {
+			t.Error("expected the opponent's name in the Upcoming Matches table")
+		}
+		if strings.Contains(body, "(Home Upcoming Team A)") {
+			t.Error("expected no team-name disambiguation for a single-team player")
+		}
+	})
+
+	t.Run("two teams with upcoming matches each show their own team name", func(t *testing.T) {
+		if err := tmm.AddMembership(playerID, teamB); err != nil {
+			t.Fatal(err)
+		}
+
+		code, _, body := ts.get(t, "/")
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "(Home Upcoming Team A)") || !strings.Contains(body, "(Home Upcoming Team B)") {
+			t.Error("expected both teams' names to disambiguate their rows once the player has two upcoming matches")
 		}
 	})
 }

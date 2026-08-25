@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -280,6 +281,41 @@ func setupLeagueAdmin(t *testing.T, leagueID int, email, password string) int {
 		t.Fatal(err)
 	}
 	if err := lam.AddAdmin(playerID, leagueID); err != nil {
+		t.Fatal(err)
+	}
+
+	return playerID
+}
+
+// setupRosterMember creates and activates a user, links them to a new
+// player, and adds that player to teamID's roster — a plain member, not a
+// captain or scorekeeper. Returns the player ID.
+func setupRosterMember(t *testing.T, teamID int, email, password string) int {
+	t.Helper()
+
+	um := &models.UserModel{DB: testDB}
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+
+	userID, err := um.Insert(email, password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.Activate(userID); err != nil {
+		t.Fatal(err)
+	}
+
+	playerID, err := pm.Insert(&models.Player{
+		FirstName: "Roster",
+		LastName:  "Member",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, teamID); err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetPlayerID(userID, playerID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1533,9 +1569,11 @@ func TestMatchUpdateSavesGoalsAndCards(t *testing.T) {
 			"goalTeamID": {fmt.Sprintf("%d", homeTeamID), fmt.Sprintf("%d", awayTeamID)},
 			// First goal: scored and assisted by the same test player (not
 			// realistic, but exercises both tallies incrementing). Second
-			// goal (away team) intentionally has no scorer/assister.
+			// goal (away team) intentionally has no scorer/assister. Minutes
+			// chosen so chronological order matches submission order.
 			"goalScorerID":   {fmt.Sprintf("%d", scorerID), ""},
 			"goalAssisterID": {fmt.Sprintf("%d", scorerID), ""},
+			"goalMinute":     {"10", "50"},
 			"cardTeamID":     {fmt.Sprintf("%d", homeTeamID)},
 			"cardPlayerID":   {fmt.Sprintf("%d", scorerID)},
 			"cardType":       {"yellow"},
@@ -1556,11 +1594,19 @@ func TestMatchUpdateSavesGoalsAndCards(t *testing.T) {
 		if len(goals) != 2 {
 			t.Fatalf("expected 2 goal rows, got %d", len(goals))
 		}
-		if goals[0].TeamID != homeTeamID || !goals[0].ScorerPlayerID.Valid || int(goals[0].ScorerPlayerID.Int32) != scorerID {
-			t.Fatalf("expected the first goal attributed to the scorer, got %+v", goals[0])
+		if goals[0].TeamID != homeTeamID || !goals[0].ScorerPlayerID.Valid || int(goals[0].ScorerPlayerID.Int32) != scorerID || goals[0].Minute.Int32 != 10 {
+			t.Fatalf("expected the first goal attributed to the scorer at minute 10, got %+v", goals[0])
 		}
-		if goals[1].TeamID != awayTeamID || goals[1].ScorerPlayerID.Valid {
-			t.Fatalf("expected the second goal unattributed for the away team, got %+v", goals[1])
+		if goals[1].TeamID != awayTeamID || goals[1].ScorerPlayerID.Valid || goals[1].Minute.Int32 != 50 {
+			t.Fatalf("expected the second goal unattributed for the away team at minute 50, got %+v", goals[1])
+		}
+
+		_, _, viewBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if !strings.Contains(viewBody, "10") || !strings.Contains(viewBody, "50") {
+			t.Error("expected both goal minutes to appear on the match view box score")
+		}
+		if !strings.Contains(viewBody, "Unattributed goal") {
+			t.Error("expected the unattributed away goal to show as such on the match view")
 		}
 
 		mcm := &models.MatchCardModel{DB: testDB}
@@ -2141,6 +2187,402 @@ func TestHomeUpcomingMatchesTeamDisambiguation(t *testing.T) {
 		}
 		if !strings.Contains(body, "(Home Upcoming Team A)") || !strings.Contains(body, "(Home Upcoming Team B)") {
 			t.Error("expected both teams' names to disambiguate their rows once the player has two upcoming matches")
+		}
+	})
+}
+
+// The team page's roster table defaults to goals descending once there's a
+// leaderboard to sort by, and its column headers toggle sort/order via
+// query params, same pattern as the admin user list.
+func TestTeamRosterDefaultSortAndToggle(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Roster Sort League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Roster Sort Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Roster Sort Opponent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Roster Sort Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: teamID, AwayTeamID: opponentID, MatchDate: time.Now(),
+		HomeScore: sql.NullInt32{Int32: 3, Valid: true}, AwayScore: sql.NullInt32{Int32: 0, Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	pmsm := &models.PlayerMatchStatModel{DB: testDB}
+
+	lowScorerID, err := pm.Insert(&models.Player{FirstName: "Aaron", LastName: "Low"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(lowScorerID, teamID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pmsm.Upsert(&models.PlayerMatchStat{MatchID: matchID, PlayerID: lowScorerID, TeamID: teamID, Goals: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	highScorerID, err := pm.Insert(&models.Player{FirstName: "Zack", LastName: "High"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(highScorerID, teamID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pmsm.Upsert(&models.PlayerMatchStat{MatchID: matchID, PlayerID: highScorerID, TeamID: teamID, Goals: 2}); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	t.Run("defaults to goals descending", func(t *testing.T) {
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d", teamID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		highIdx := strings.Index(body, "Zack High")
+		lowIdx := strings.Index(body, "Aaron Low")
+		if highIdx == -1 || lowIdx == -1 || highIdx > lowIdx {
+			t.Errorf("expected the 2-goal scorer to appear before the 1-goal scorer by default, got indices %d, %d", highIdx, lowIdx)
+		}
+		if !strings.Contains(body, "sort=goals&order=ASC") {
+			t.Error("expected the active Goals header to link to toggle into ASC")
+		}
+	})
+
+	t.Run("sorting by name ascending shows name as the active column", func(t *testing.T) {
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d?sort=name&order=ASC", teamID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		// Sorted by lastname then firstname: "High" sorts before "Low".
+		highIdx := strings.Index(body, "Zack High")
+		lowIdx := strings.Index(body, "Aaron Low")
+		if highIdx == -1 || lowIdx == -1 || highIdx > lowIdx {
+			t.Errorf("expected alphabetical-by-lastname order (High before Low) when sorted by name, got indices %d, %d", highIdx, lowIdx)
+		}
+		if !strings.Contains(body, "sort=name&order=DESC") {
+			t.Error("expected the active Name header to link to toggle into DESC")
+		}
+	})
+}
+
+// A captain can designate a roster member as a scorekeeper, which grants
+// that player match-editing rights (score/goals/cards) for the team's
+// matches without granting the wider team-management rights (roster,
+// invites) a captain has. Removing the designation revokes match access
+// again.
+func TestScorekeeperTier(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Scorekeeper Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Scorekeeper Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Scorekeeper Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Scorekeeper Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, homeTeamID, "scorekeeper-captain@test.com", "validpassword123")
+	candidateID := setupRosterMember(t, homeTeamID, "scorekeeper-candidate@test.com", "validpassword123")
+	setupRosterMember(t, homeTeamID, "scorekeeper-bystander@test.com", "validpassword123")
+
+	captainTS := newTestServer(t, app.routes())
+	captainTS.login(t, "scorekeeper-captain@test.com", "validpassword123")
+
+	t.Run("captain can designate a roster member as scorekeeper", func(t *testing.T) {
+		_, _, formBody := captainTS.get(t, fmt.Sprintf("/team/%d", homeTeamID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := captainTS.postForm(t, "/admin/team/scorekeepers/add", url.Values{
+			"teamID":     {fmt.Sprintf("%d", homeTeamID)},
+			"playerID":   {fmt.Sprintf("%d", candidateID)},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d", homeTeamID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d", homeTeamID), loc)
+		}
+
+		tsm := &models.TeamScorekeeperModel{DB: testDB}
+		isScorekeeper, err := tsm.IsScorekeeper(candidateID, homeTeamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !isScorekeeper {
+			t.Fatal("expected candidate to be a scorekeeper of the home team")
+		}
+
+		_, _, body := captainTS.get(t, fmt.Sprintf("/team/%d", homeTeamID))
+		if !strings.Contains(body, "Remove Scorekeeper") {
+			t.Error("expected the roster row's action to flip to Remove Scorekeeper")
+		}
+	})
+
+	t.Run("scorekeeper can edit the team's match but not manage the team", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "scorekeeper-candidate@test.com", "validpassword123")
+
+		code, _, formBody := ts.get(t, fmt.Sprintf("/admin/match/update/%d", matchID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		csrfToken := extractCSRFToken(t, formBody)
+
+		postCode, _, _ := ts.postForm(t, "/admin/match/update", url.Values{
+			"match-id":   {fmt.Sprintf("%d", matchID)},
+			"matchdate":  {"2024-05-05"},
+			"homescore":  {"1"},
+			"awayscore":  {"0"},
+			"csrf_token": {csrfToken},
+		})
+		if postCode != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, postCode)
+		}
+
+		inviteCode, headers, _ := ts.get(t, fmt.Sprintf("/team/%d/invite", homeTeamID))
+		if inviteCode != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, inviteCode)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+	})
+
+	t.Run("a plain roster member who isn't a scorekeeper cannot edit the match", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "scorekeeper-bystander@test.com", "validpassword123")
+
+		code, headers, _ := ts.get(t, fmt.Sprintf("/admin/match/update/%d", matchID))
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+	})
+
+	t.Run("captain can revoke scorekeeper status", func(t *testing.T) {
+		_, _, formBody := captainTS.get(t, fmt.Sprintf("/team/%d", homeTeamID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := captainTS.postForm(t, "/admin/team/scorekeepers/remove", url.Values{
+			"teamID":     {fmt.Sprintf("%d", homeTeamID)},
+			"playerID":   {fmt.Sprintf("%d", candidateID)},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d", homeTeamID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d", homeTeamID), loc)
+		}
+
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "scorekeeper-candidate@test.com", "validpassword123")
+
+		matchCode, matchHeaders, _ := ts.get(t, fmt.Sprintf("/admin/match/update/%d", matchID))
+		if matchCode != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, matchCode)
+		}
+		if loc := matchHeaders.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+	})
+}
+
+// Each team's own captain (or a scorekeeper they've designated) can set
+// that team's Player of the Match and captain's notes — but only for their
+// own side. Unlike score/goals/cards (either team's manager can edit the
+// shared record), a manager of one team cannot touch the other team's
+// notes.
+func TestMatchTeamNotes(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Match Notes Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Notes Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Notes Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Notes Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	homeCaptainID := setupTeamCaptain(t, homeTeamID, "notes-home-captain@test.com", "validpassword123")
+	awayCaptainID := setupTeamCaptain(t, awayTeamID, "notes-away-captain@test.com", "validpassword123")
+	scorekeeperID := setupRosterMember(t, homeTeamID, "notes-home-scorekeeper@test.com", "validpassword123")
+	tsm := &models.TeamScorekeeperModel{DB: testDB}
+	if err := tsm.AddScorekeeper(scorekeeperID, homeTeamID); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("home captain sets the home team's Player of the Match and notes", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "notes-home-captain@test.com", "validpassword123")
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/notes", matchID), url.Values{
+			"teamID":          {fmt.Sprintf("%d", homeTeamID)},
+			"playerOfMatchID": {fmt.Sprintf("%d", homeCaptainID)},
+			"notes":           {"Great effort from everyone"},
+			"csrf_token":      {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", matchID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/match/%d", matchID), loc)
+		}
+
+		_, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if !strings.Contains(body, "Great effort from everyone") {
+			t.Error("expected the saved notes to appear on the match view")
+		}
+		if !strings.Contains(body, "Cap Tain") {
+			t.Error("expected the Player of the Match's name to appear on the match view")
+		}
+	})
+
+	t.Run("home captain cannot set the away team's notes", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "notes-home-captain@test.com", "validpassword123")
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/notes", matchID), url.Values{
+			"teamID":     {fmt.Sprintf("%d", awayTeamID)},
+			"notes":      {"trying to edit the other side"},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+
+		mtnm := &models.MatchTeamNoteModel{DB: testDB}
+		if _, err := mtnm.GetByMatchAndTeam(matchID, awayTeamID); !errors.Is(err, models.ErrNoRecord) {
+			t.Fatalf("expected the away team's note to remain unset, got %v", err)
+		}
+	})
+
+	t.Run("a designated scorekeeper can also edit the home team's notes", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "notes-home-scorekeeper@test.com", "validpassword123")
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, _, _ := ts.postForm(t, fmt.Sprintf("/match/%d/notes", matchID), url.Values{
+			"teamID":     {fmt.Sprintf("%d", homeTeamID)},
+			"notes":      {"updated by the scorekeeper"},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+
+		_, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if !strings.Contains(body, "updated by the scorekeeper") {
+			t.Error("expected the scorekeeper's update to be saved and displayed")
+		}
+	})
+
+	t.Run("picking a Player of the Match not on the roster fails validation without losing the saved note", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "notes-home-captain@test.com", "validpassword123")
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		// awayCaptainID belongs to the away team's roster, not the home team's.
+		mtnm := &models.MatchTeamNoteModel{DB: testDB}
+		beforeNote, err := mtnm.GetByMatchAndTeam(matchID, homeTeamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		code, _, body := ts.postForm(t, fmt.Sprintf("/match/%d/notes", matchID), url.Values{
+			"teamID":          {fmt.Sprintf("%d", homeTeamID)},
+			"playerOfMatchID": {fmt.Sprintf("%d", awayCaptainID)},
+			"notes":           {"this should not save"},
+			"csrf_token":      {csrfToken},
+		})
+		if code != http.StatusUnprocessableEntity {
+			t.Fatalf("want %d; got %d", http.StatusUnprocessableEntity, code)
+		}
+		if !strings.Contains(body, "roster") {
+			t.Error("expected a field error mentioning the roster requirement")
+		}
+
+		afterNote, err := mtnm.GetByMatchAndTeam(matchID, homeTeamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if afterNote.Notes.String != beforeNote.Notes.String {
+			t.Errorf("expected the previously saved note to remain untouched, got %q", afterNote.Notes.String)
 		}
 	})
 }

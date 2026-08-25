@@ -90,11 +90,11 @@
             {{if .Form.FieldErrors.homescore }}
                 {{$errorClass = "error-border"}}
             {{end}}
-            <input class="form-field {{$errorClass}}" type='number' min='0' name='homescore' value='{{.Form.HomeScore}}'>
+            <input class="form-field {{$errorClass}}" type='number' min='0' name='homescore' id='homescore-input' value='{{.Form.HomeScore}}'>
         </div>
         <div class="flex-1">
             <label class="field-label">Away Score</label>
-            <input class="form-field" type='number' min='0' name='awayscore' value='{{.Form.AwayScore}}'>
+            <input class="form-field" type='number' min='0' name='awayscore' id='awayscore-input' value='{{.Form.AwayScore}}'>
         </div>
     </div>
     {{with .Form.FieldErrors.homescore}}

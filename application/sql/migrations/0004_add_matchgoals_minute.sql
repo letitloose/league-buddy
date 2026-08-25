@@ -1,0 +1,1 @@
+ALTER TABLE matchGoals ADD COLUMN minute INTEGER NULL;

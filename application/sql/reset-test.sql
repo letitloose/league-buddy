@@ -3,6 +3,7 @@
 -- test, in testHelpers.go).
 SET FOREIGN_KEY_CHECKS = 0;
 TRUNCATE TABLE rsvps;
+TRUNCATE TABLE matchTeamNotes;
 TRUNCATE TABLE matchGoals;
 TRUNCATE TABLE matchCards;
 TRUNCATE TABLE playerMatchStats;
@@ -11,6 +12,7 @@ TRUNCATE TABLE seasons;
 TRUNCATE TABLE teamJoinRequests;
 TRUNCATE TABLE teamMembers;
 TRUNCATE TABLE leagueAdmins;
+TRUNCATE TABLE teamScorekeepers;
 TRUNCATE TABLE invites;
 TRUNCATE TABLE auditLog;
 TRUNCATE TABLE sessions;

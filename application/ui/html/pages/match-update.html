@@ -18,18 +18,20 @@
             <div class="overflow-x-auto">
             <table class="text-left w-full text-sm">
                 <tr>
+                    <th>Min</th>
                     <th>Team</th>
                     <th>Scorer</th>
                     <th>Assister</th>
                     <th></th>
                 </tr>
-                <tbody id="goals-tbody">
+                <tbody id="goals-tbody" data-home-team-id="{{.Data.HomeTeam.ID}}" data-away-team-id="{{.Data.AwayTeam.ID}}">
                 {{range .Data.Goals}}
                     {{template "goal-row" (goalRowData $ .)}}
                 {{end}}
                 </tbody>
             </table>
             </div>
+            <p class="text-center text-xs text-gray-500 mt-2">Score above updates automatically as goals are added or removed — still yours to edit by hand if needed.</p>
             <div class="text-center mt-3">
                 <button type="button" class="btn-secondary m-0" id="add-goal-btn">+ Add Goal</button>
             </div>
@@ -79,6 +81,7 @@
      regardless of whether a saved row is being rendered. */}}
 {{define "goal-row"}}
 <tr class="event-row">
+    <td><input class="form-field w-16" type="number" min="0" max="200" name="goalMinute" value="{{if .Row}}{{if gt .Row.Minute 0}}{{.Row.Minute}}{{end}}{{end}}" placeholder="min"></td>
     <td>
         <select class="form-field" name="goalTeamID">
             <option value="{{.Root.Data.HomeTeam.ID}}" {{if and .Row (eq .Row.TeamID .Root.Data.HomeTeam.ID)}}selected{{end}}>{{.Root.Data.HomeTeam.Name}}</option>

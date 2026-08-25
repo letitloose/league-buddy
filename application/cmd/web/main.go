@@ -19,22 +19,23 @@ import (
 )
 
 type application struct {
-	errorLog           *log.Logger
-	infoLog            *log.Logger
-	playerService      *services.PlayerService
-	userService        *services.UserService
-	leagueService      *services.LeagueService
-	teamService        *services.TeamService
-	locationService    *services.LocationService
-	seasonService      *services.SeasonService
-	matchService       *services.MatchService
-	rsvpService        *services.RSVPService
-	inviteService      *services.InviteService
-	joinRequestService *services.JoinRequestService
-	emailService       *services.Email
-	templateCache      map[string]*template.Template
-	sessionManager     *scs.SessionManager
-	useTemplateCache   bool
+	errorLog             *log.Logger
+	infoLog              *log.Logger
+	playerService        *services.PlayerService
+	userService          *services.UserService
+	leagueService        *services.LeagueService
+	teamService          *services.TeamService
+	locationService      *services.LocationService
+	seasonService        *services.SeasonService
+	matchService         *services.MatchService
+	rsvpService          *services.RSVPService
+	matchTeamNoteService *services.MatchTeamNoteService
+	inviteService        *services.InviteService
+	joinRequestService   *services.JoinRequestService
+	emailService         *services.Email
+	templateCache        map[string]*template.Template
+	sessionManager       *scs.SessionManager
+	useTemplateCache     bool
 }
 
 func main() {
@@ -94,6 +95,8 @@ func main() {
 	matchService := &services.MatchService{MatchModel: matches, DB: db}
 	rsvps := &models.RSVPModel{DB: db}
 	rsvpService := &services.RSVPService{RSVPModel: rsvps}
+	matchTeamNotes := &models.MatchTeamNoteModel{DB: db}
+	matchTeamNoteService := &services.MatchTeamNoteService{MatchTeamNoteModel: matchTeamNotes, DB: db}
 	invites := &models.InviteModel{DB: db}
 	inviteService := &services.InviteService{InviteModel: invites, DB: db, Email: email, InfoLog: infoLog}
 	joinRequests := &models.JoinRequestModel{DB: db}
@@ -104,22 +107,23 @@ func main() {
 	sessionManager.Lifetime = 12 * time.Hour
 
 	app := &application{
-		errorLog:           errorLog,
-		infoLog:            infoLog,
-		playerService:      playerService,
-		userService:        userService,
-		leagueService:      leagueService,
-		teamService:        teamService,
-		locationService:    locationService,
-		seasonService:      seasonService,
-		matchService:       matchService,
-		rsvpService:        rsvpService,
-		inviteService:      inviteService,
-		joinRequestService: joinRequestService,
-		emailService:       email,
-		templateCache:      templateCache,
-		sessionManager:     sessionManager,
-		useTemplateCache:   *useTemplateCache,
+		errorLog:             errorLog,
+		infoLog:              infoLog,
+		playerService:        playerService,
+		userService:          userService,
+		leagueService:        leagueService,
+		teamService:          teamService,
+		locationService:      locationService,
+		seasonService:        seasonService,
+		matchService:         matchService,
+		rsvpService:          rsvpService,
+		matchTeamNoteService: matchTeamNoteService,
+		inviteService:        inviteService,
+		joinRequestService:   joinRequestService,
+		emailService:         email,
+		templateCache:        templateCache,
+		sessionManager:       sessionManager,
+		useTemplateCache:     *useTemplateCache,
 	}
 
 	reset := os.Getenv("RESETDB")

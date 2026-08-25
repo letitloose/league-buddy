@@ -51,8 +51,10 @@ function showAlertDialog(message) {
 // setupAddRow wires an "+ Add ..." button (match-update.html's "+ Add
 // Goal"/"+ Add Card") to clone a blank <template> row and append it to the
 // given <tbody> — used for both, since there's no known upper bound on how
-// many goals/cards a match might have.
-function setupAddRow(addBtnId, templateId, tbodyId) {
+// many goals/cards a match might have. onAdded (optional) runs after the
+// row is inserted — match-update.html uses it on the goals table to
+// recalculate the score.
+function setupAddRow(addBtnId, templateId, tbodyId, onAdded) {
     var addBtn = document.getElementById(addBtnId);
     var template = document.getElementById(templateId);
     var tbody = document.getElementById(tbodyId);
@@ -61,7 +63,42 @@ function setupAddRow(addBtnId, templateId, tbodyId) {
     }
     addBtn.addEventListener('click', function () {
         tbody.appendChild(template.content.cloneNode(true));
+        if (onAdded) {
+            onAdded();
+        }
     });
+}
+
+// recalcMatchScore keeps match-update.html's Home/Away Score inputs in sync
+// with the goal rows as they're added, removed, or reassigned to a
+// different team — it's easy to add a goal and forget the score field
+// wasn't derived from it (score and goal rows are otherwise independent, so
+// historical matches with a final score but no goal-by-goal detail still
+// work). Only runs in response to actually touching the goals table, never
+// on page load, so an existing score-only match's stored value is left
+// alone until someone starts using the goal builder on it. The score
+// inputs stay regular, editable fields — this just sets a sensible
+// default that a manual edit afterward can still override.
+function recalcMatchScore() {
+    var tbody = document.getElementById('goals-tbody');
+    var homeScoreInput = document.getElementById('homescore-input');
+    var awayScoreInput = document.getElementById('awayscore-input');
+    if (!tbody || !homeScoreInput || !awayScoreInput) {
+        return;
+    }
+    var homeTeamId = tbody.dataset.homeTeamId;
+    var awayTeamId = tbody.dataset.awayTeamId;
+    var homeGoals = 0;
+    var awayGoals = 0;
+    tbody.querySelectorAll('select[name="goalTeamID"]').forEach(function (select) {
+        if (select.value === homeTeamId) {
+            homeGoals++;
+        } else if (select.value === awayTeamId) {
+            awayGoals++;
+        }
+    });
+    homeScoreInput.value = homeGoals;
+    awayScoreInput.value = awayGoals;
 }
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -117,7 +154,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    setupAddRow('add-goal-btn', 'goal-row-template', 'goals-tbody');
+    setupAddRow('add-goal-btn', 'goal-row-template', 'goals-tbody', recalcMatchScore);
     setupAddRow('add-card-btn', 'card-row-template', 'cards-tbody');
 
     // Delegated so it covers both rows present at page load (a saved
@@ -125,6 +162,14 @@ document.addEventListener('DOMContentLoaded', function () {
     document.addEventListener('click', function (event) {
         if (event.target.matches('.remove-row-btn')) {
             event.target.closest('tr').remove();
+            recalcMatchScore();
+        }
+    });
+
+    // Delegated: a goal row's Team select can change after it's added.
+    document.addEventListener('change', function (event) {
+        if (event.target.matches('#goals-tbody select[name="goalTeamID"]')) {
+            recalcMatchScore();
         }
     });
 

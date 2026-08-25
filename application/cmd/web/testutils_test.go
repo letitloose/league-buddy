@@ -135,27 +135,30 @@ func newTestApplication(t *testing.T) *application {
 	matchService := &services.MatchService{MatchModel: matches, DB: testDB}
 	rsvps := &models.RSVPModel{DB: testDB}
 	rsvpService := &services.RSVPService{RSVPModel: rsvps}
+	matchTeamNotes := &models.MatchTeamNoteModel{DB: testDB}
+	matchTeamNoteService := &services.MatchTeamNoteService{MatchTeamNoteModel: matchTeamNotes, DB: testDB}
 	invites := &models.InviteModel{DB: testDB}
 	inviteService := &services.InviteService{InviteModel: invites, DB: testDB}
 	joinRequests := &models.JoinRequestModel{DB: testDB}
 	joinRequestService := &services.JoinRequestService{JoinRequestModel: joinRequests, DB: testDB}
 
 	return &application{
-		errorLog:           log.New(io.Discard, "", 0),
-		infoLog:            log.New(io.Discard, "", 0),
-		playerService:      playerService,
-		userService:        userService,
-		leagueService:      leagueService,
-		teamService:        teamService,
-		locationService:    locationService,
-		seasonService:      seasonService,
-		matchService:       matchService,
-		rsvpService:        rsvpService,
-		inviteService:      inviteService,
-		joinRequestService: joinRequestService,
-		templateCache:      templateCache,
-		sessionManager:     sessionManager,
-		useTemplateCache:   true,
+		errorLog:             log.New(io.Discard, "", 0),
+		infoLog:              log.New(io.Discard, "", 0),
+		playerService:        playerService,
+		userService:          userService,
+		leagueService:        leagueService,
+		teamService:          teamService,
+		locationService:      locationService,
+		seasonService:        seasonService,
+		matchService:         matchService,
+		rsvpService:          rsvpService,
+		matchTeamNoteService: matchTeamNoteService,
+		inviteService:        inviteService,
+		joinRequestService:   joinRequestService,
+		templateCache:        templateCache,
+		sessionManager:       sessionManager,
+		useTemplateCache:     true,
 	}
 }
 

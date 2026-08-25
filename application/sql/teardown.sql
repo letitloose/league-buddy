@@ -4,6 +4,7 @@
 -- container's MYSQL_DATABASE env var.
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS rsvps;
+DROP TABLE IF EXISTS matchTeamNotes;
 DROP TABLE IF EXISTS matchGoals;
 DROP TABLE IF EXISTS matchCards;
 DROP TABLE IF EXISTS playerMatchStats;
@@ -12,6 +13,7 @@ DROP TABLE IF EXISTS seasons;
 DROP TABLE IF EXISTS teamJoinRequests;
 DROP TABLE IF EXISTS teamMembers;
 DROP TABLE IF EXISTS leagueAdmins;
+DROP TABLE IF EXISTS teamScorekeepers;
 DROP TABLE IF EXISTS invites;
 DROP TABLE IF EXISTS auditLog;
 DROP TABLE IF EXISTS userRole;

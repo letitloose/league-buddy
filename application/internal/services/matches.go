@@ -19,6 +19,7 @@ type GoalInput struct {
 	TeamID           int
 	ScorerPlayerID   int
 	AssisterPlayerID int
+	Minute           int // 0 = not recorded
 }
 
 // CardInput is one card row on the match-edit form: always attributed to a
@@ -71,7 +72,7 @@ func validateMatchForm(form *MatchForm, db *sql.DB) (time.Time, sql.NullInt32, s
 	}
 
 	homeScore, awayScore, scoresOK := parseScorePair(form.HomeScore, form.AwayScore)
-	form.CheckField(scoresOK, "homescore", "Enter both scores or leave both blank.")
+	form.CheckField(scoresOK, "homescore", "Scores must be non-negative numbers.")
 
 	if !form.Valid() {
 		return matchDate, homeScore, awayScore
@@ -162,6 +163,9 @@ func validateMatchEvents(form *MatchForm, db *sql.DB) {
 		if g.AssisterPlayerID > 0 && !onRoster(g.AssisterPlayerID, g.TeamID) {
 			form.AddNonFieldError("A goal's assister must be on that team's roster.")
 		}
+		if g.Minute < 0 || g.Minute > 200 {
+			form.AddNonFieldError("A goal's minute must be a reasonable number (0-200).")
+		}
 	}
 
 	for _, c := range form.Cards {
@@ -178,9 +182,11 @@ func validateMatchEvents(form *MatchForm, db *sql.DB) {
 	}
 }
 
-// parseScorePair enforces "both entered or both blank" and returns them as
-// NullInt32s. ok is false if exactly one side was entered, or either side
-// doesn't parse as a non-negative integer.
+// parseScorePair parses home/away scores, defaulting a blank side to 0 when
+// the other side has a value — a team logging their own score without
+// knowing the opponent's exact number (or vice versa) shouldn't be blocked
+// from saving it. Both blank still means "not recorded yet". ok is false
+// only if a non-blank side doesn't parse as a non-negative integer.
 func parseScorePair(homeRaw, awayRaw string) (sql.NullInt32, sql.NullInt32, bool) {
 	homeRaw = strings.TrimSpace(homeRaw)
 	awayRaw = strings.TrimSpace(awayRaw)
@@ -188,17 +194,22 @@ func parseScorePair(homeRaw, awayRaw string) (sql.NullInt32, sql.NullInt32, bool
 	if homeRaw == "" && awayRaw == "" {
 		return sql.NullInt32{}, sql.NullInt32{}, true
 	}
-	if homeRaw == "" || awayRaw == "" {
-		return sql.NullInt32{}, sql.NullInt32{}, false
-	}
 
-	home, err := strconv.Atoi(homeRaw)
-	if err != nil || home < 0 {
-		return sql.NullInt32{}, sql.NullInt32{}, false
+	home := 0
+	if homeRaw != "" {
+		v, err := strconv.Atoi(homeRaw)
+		if err != nil || v < 0 {
+			return sql.NullInt32{}, sql.NullInt32{}, false
+		}
+		home = v
 	}
-	away, err := strconv.Atoi(awayRaw)
-	if err != nil || away < 0 {
-		return sql.NullInt32{}, sql.NullInt32{}, false
+	away := 0
+	if awayRaw != "" {
+		v, err := strconv.Atoi(awayRaw)
+		if err != nil || v < 0 {
+			return sql.NullInt32{}, sql.NullInt32{}, false
+		}
+		away = v
 	}
 
 	return sql.NullInt32{Int32: int32(home), Valid: true}, sql.NullInt32{Int32: int32(away), Valid: true}, true
@@ -289,6 +300,7 @@ func saveMatchEvents(db *sql.DB, matchID int, goals []GoalInput, cards []CardInp
 			TeamID:           g.TeamID,
 			ScorerPlayerID:   nullPlayerID(g.ScorerPlayerID),
 			AssisterPlayerID: nullPlayerID(g.AssisterPlayerID),
+			Minute:           nullMinute(g.Minute),
 		}
 	}
 	if err := mgm.ReplaceForMatch(matchID, goalRows); err != nil {
@@ -354,6 +366,17 @@ func nullPlayerID(playerID int) sql.NullInt32 {
 		return sql.NullInt32{}
 	}
 	return sql.NullInt32{Int32: int32(playerID), Valid: true}
+}
+
+// nullMinute converts the form's "0 = not recorded" convention to a
+// NullInt32 for storage. A goal in the literal first minute of play is rare
+// enough that treating minute 0 as "unset" (same sentinel idiom as the
+// player-ID fields above) isn't worth a separate representation.
+func nullMinute(minute int) sql.NullInt32 {
+	if minute <= 0 {
+		return sql.NullInt32{}
+	}
+	return sql.NullInt32{Int32: int32(minute), Valid: true}
 }
 
 func (service *MatchService) DeleteMatch(id int, actorEmail string) error {

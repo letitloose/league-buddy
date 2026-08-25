@@ -54,6 +54,46 @@ func TestReplaceAndListMatchGoals(t *testing.T) {
 	}
 }
 
+// ListByMatch orders by minute — a box score's natural order — with
+// no-minute-recorded goals sorted last rather than first or dropped.
+func TestListMatchGoalsOrdersByMinute(t *testing.T) {
+	db := NewTestDB(t)
+
+	seasonID := newTestSeason(t, db, 1)
+	opponentID := newTestOpponentTeam(t, db, 1, "Rival FC")
+	mm := MatchModel{DB: db}
+	mgm := MatchGoalModel{DB: db}
+
+	matchID, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Inserted out of chronological order, plus one with no minute at all.
+	goals := []MatchGoal{
+		{TeamID: 1, Minute: sql.NullInt32{Int32: 55, Valid: true}},
+		{TeamID: opponentID}, // no minute recorded
+		{TeamID: 1, Minute: sql.NullInt32{Int32: 12, Valid: true}},
+	}
+	if err := mgm.ReplaceForMatch(matchID, goals); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := mgm.ListByMatch(matchID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 goals, got %d", len(got))
+	}
+	if got[0].Minute.Int32 != 12 || got[1].Minute.Int32 != 55 {
+		t.Fatalf("expected minute-ascending order (12, 55, unset), got %+v", got)
+	}
+	if got[2].Minute.Valid {
+		t.Fatalf("expected the no-minute goal to sort last, got %+v", got[2])
+	}
+}
+
 func TestReplaceForMatchWipesPreviousGoals(t *testing.T) {
 	db := NewTestDB(t)
 

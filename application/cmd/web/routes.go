@@ -51,6 +51,7 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodGet, "/team/:teamID/season/:seasonID", active.ThenFunc(app.teamSeasonView))
 	router.Handler(http.MethodGet, "/match/:id", active.ThenFunc(app.matchView))
 	router.Handler(http.MethodPost, "/match/:id/rsvp", active.ThenFunc(app.matchRSVPSubmit))
+	router.Handler(http.MethodPost, "/match/:id/notes", active.ThenFunc(app.matchTeamNoteSubmit))
 
 	// team-manager routes (logged in + active + (admin OR captain OR league
 	// admin of :teamID))
@@ -85,6 +86,8 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodPost, "/admin/team/create", active.ThenFunc(app.teamCreate))
 	router.Handler(http.MethodPost, "/admin/team/update", active.ThenFunc(app.teamUpdatePost))
 	router.Handler(http.MethodPost, "/admin/team/setCaptain", active.ThenFunc(app.teamSetCaptain))
+	router.Handler(http.MethodPost, "/admin/team/scorekeepers/add", active.ThenFunc(app.teamAddScorekeeper))
+	router.Handler(http.MethodPost, "/admin/team/scorekeepers/remove", active.ThenFunc(app.teamRemoveScorekeeper))
 	// Season/match administration is scoped to "anyone who can administer the
 	// league" (canManageLeague — admin or league admin, captains excluded).
 	// All on the active tier with an in-handler check, same rationale as the

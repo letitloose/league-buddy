@@ -197,6 +197,10 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 			ctx = context.WithValue(r.Context(), captainTeamIDsContextKey, ac.CaptainTeamIDs)
 			r = r.WithContext(ctx)
 		}
+		if len(ac.ScorekeeperTeamIDs) > 0 {
+			ctx = context.WithValue(r.Context(), scorekeeperTeamIDsContextKey, ac.ScorekeeperTeamIDs)
+			r = r.WithContext(ctx)
+		}
 		if len(ac.LeagueAdminLeagueIDs) > 0 {
 			ctx = context.WithValue(r.Context(), leagueAdminLeagueIDsContextKey, ac.LeagueAdminLeagueIDs)
 			r = r.WithContext(ctx)

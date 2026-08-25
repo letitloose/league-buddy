@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/letitloose/league-buddy/internal/models"
@@ -166,4 +167,49 @@ func (service *TeamService) SetCaptain(teamID, playerID int, actorEmail string) 
 
 	cs := &CommonService{DB: service.DB}
 	return cs.InsertAuditLog(actorEmail, time.Now(), "team captain set: "+player.FirstName+" "+player.LastName)
+}
+
+// AddScorekeeper designates playerID a scorekeeper of teamID — grants
+// match-editing rights only (see canManageMatch), not full team management.
+// The target player must already be a member of that team.
+func (service *TeamService) AddScorekeeper(teamID, playerID int, actorEmail string) error {
+	pm := &models.PlayerModel{DB: service.DB}
+	player, err := pm.Get(playerID)
+	if err != nil {
+		return err
+	}
+
+	tmm := &models.TeamMemberModel{DB: service.DB}
+	isMember, err := tmm.IsMember(playerID, teamID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
+		return models.ErrBadData
+	}
+
+	tsm := &models.TeamScorekeeperModel{DB: service.DB}
+	if err := tsm.AddScorekeeper(playerID, teamID); err != nil {
+		return err
+	}
+
+	cs := &CommonService{DB: service.DB}
+	return cs.InsertAuditLog(actorEmail, time.Now(), fmt.Sprintf("scorekeeper added: %s %s (team %d)", player.FirstName, player.LastName, teamID))
+}
+
+// RemoveScorekeeper revokes playerID's scorekeeper rights over teamID.
+func (service *TeamService) RemoveScorekeeper(teamID, playerID int, actorEmail string) error {
+	pm := &models.PlayerModel{DB: service.DB}
+	player, err := pm.Get(playerID)
+	if err != nil {
+		return err
+	}
+
+	tsm := &models.TeamScorekeeperModel{DB: service.DB}
+	if err := tsm.RemoveScorekeeper(playerID, teamID); err != nil {
+		return err
+	}
+
+	cs := &CommonService{DB: service.DB}
+	return cs.InsertAuditLog(actorEmail, time.Now(), fmt.Sprintf("scorekeeper removed: %s %s (team %d)", player.FirstName, player.LastName, teamID))
 }

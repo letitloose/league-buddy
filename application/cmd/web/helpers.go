@@ -237,6 +237,23 @@ func (app *application) isCaptainOfTeam(r *http.Request, teamID int) bool {
 	return false
 }
 
+// isScorekeeperOfTeam reports whether the current request's user has been
+// designated a scorekeeper of teamID — a narrower grant than captaincy,
+// checked only by canManageMatch (score/goals/cards), never by
+// canManageTeam (roster, invites, team info).
+func (app *application) isScorekeeperOfTeam(r *http.Request, teamID int) bool {
+	scorekeeperTeamIDs, ok := r.Context().Value(scorekeeperTeamIDsContextKey).([]int)
+	if !ok {
+		return false
+	}
+	for _, id := range scorekeeperTeamIDs {
+		if id == teamID {
+			return true
+		}
+	}
+	return false
+}
+
 func (app *application) getLeagueAdminLeagueIDs(r *http.Request) []int {
 	leagueIDs, ok := r.Context().Value(leagueAdminLeagueIDsContextKey).([]int)
 	if !ok {
@@ -273,6 +290,16 @@ func (app *application) isLeagueAdminOfTeam(r *http.Request, teamID int) bool {
 // captain, or a league admin of the team's league.
 func (app *application) canManageTeam(r *http.Request, teamID int) bool {
 	return app.isAdmin(r) || app.isCaptainOfTeam(r, teamID) || app.isLeagueAdminOfTeam(r, teamID)
+}
+
+// canManageMatchSide reports whether the current request's user may edit
+// teamID's own Player of the Match / captain's notes — the same tier
+// canManageTeam already grants, plus a scorekeeper the captain has
+// designated. Unlike canManageMatch (either team's manager can edit the
+// shared score/goals/cards), this is scoped to one side only, since these
+// fields are each team's own designation.
+func (app *application) canManageMatchSide(r *http.Request, teamID int) bool {
+	return app.canManageTeam(r, teamID) || app.isScorekeeperOfTeam(r, teamID)
 }
 
 // canDeleteTeam reports whether the current request's user may delete

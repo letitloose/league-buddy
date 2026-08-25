@@ -105,6 +105,9 @@ type templateRowWrapper struct {
 
 func goalRowData(root, row any) templateRowWrapper { return templateRowWrapper{Root: root, Row: row} }
 func cardRowData(root, row any) templateRowWrapper { return templateRowWrapper{Root: root, Row: row} }
+func teamNoteSideData(root, row any) templateRowWrapper {
+	return templateRowWrapper{Root: root, Row: row}
+}
 
 // mapsURL builds a Google Maps search link for an address — no API key
 // needed, just the documented search-by-query URL scheme.
@@ -137,13 +140,14 @@ func mapsURL(a *models.Address) string {
 }
 
 var functions = template.FuncMap{
-	"pickerDate":     pickerDate,
-	"humanDate":      humanDate,
-	"humanDateShort": humanDateShort,
-	"humanDateTime":  humanDateTime,
-	"mapsURL":        mapsURL,
-	"goalRowData":    goalRowData,
-	"cardRowData":    cardRowData,
+	"pickerDate":       pickerDate,
+	"humanDate":        humanDate,
+	"humanDateShort":   humanDateShort,
+	"humanDateTime":    humanDateTime,
+	"mapsURL":          mapsURL,
+	"goalRowData":      goalRowData,
+	"cardRowData":      cardRowData,
+	"teamNoteSideData": teamNoteSideData,
 }
 
 func newTemplateCache() (map[string]*template.Template, error) {

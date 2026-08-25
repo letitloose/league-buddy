@@ -239,6 +239,13 @@ func (service *PlayerService) DeletePlayer(id int, actorEmail string) error {
 		return err
 	}
 
+	// fk_teamscorekeepers_player would otherwise block deleting a player
+	// designated as a scorekeeper for one or more teams.
+	tsm := &models.TeamScorekeeperModel{DB: service.DB}
+	if err := tsm.DeleteAllForPlayer(id); err != nil {
+		return err
+	}
+
 	// fk_tjr_player would otherwise block deleting a player who ever
 	// submitted a join request, approved/rejected/still-pending or not.
 	jrm := &models.JoinRequestModel{DB: service.DB}
@@ -293,6 +300,13 @@ func (service *PlayerService) RemoveFromRoster(playerID, teamID int, actorEmail 
 
 	tmm := &models.TeamMemberModel{DB: service.DB}
 	if err := tmm.RemoveMembership(playerID, teamID); err != nil {
+		return err
+	}
+
+	// A scorekeeper who leaves the roster shouldn't keep match-editing
+	// rights for a team they're no longer on.
+	tsm := &models.TeamScorekeeperModel{DB: service.DB}
+	if err := tsm.RemoveScorekeeper(playerID, teamID); err != nil {
 		return err
 	}
 

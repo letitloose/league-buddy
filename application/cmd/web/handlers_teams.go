@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -54,6 +55,54 @@ type teamViewData struct {
 	LeadingAssister         *models.StatLine
 	Schedule                []*seasonMatchRow
 	HasAccount              map[int]bool
+	RosterSort              string
+	RosterOrder             string
+	IsScorekeeper           map[int]bool
+}
+
+// allowedRosterSorts are the roster table's sortable columns.
+var allowedRosterSorts = map[string]bool{
+	"name": true, "goals": true, "assists": true, "yellowcards": true, "redcards": true,
+}
+
+// sortRoster reorders roster in place by sortKey/order (one of
+// allowedRosterSorts' keys, "ASC" or "DESC") — a player with no leaderboard
+// line sorts as zero for any stat column, matching the "0" the template
+// already shows for them.
+func sortRoster(roster []*models.Player, leadersByPlayer map[int]*models.StatLine, sortKey, order string) {
+	statValue := func(player *models.Player) int {
+		line := leadersByPlayer[player.ID]
+		if line == nil {
+			return 0
+		}
+		switch sortKey {
+		case "goals":
+			return line.Goals
+		case "assists":
+			return line.Assists
+		case "yellowcards":
+			return line.YellowCards
+		case "redcards":
+			return line.RedCards
+		}
+		return 0
+	}
+
+	ascLess := func(i, j int) bool {
+		if sortKey == "name" {
+			nameI := roster[i].LastName + " " + roster[i].FirstName
+			nameJ := roster[j].LastName + " " + roster[j].FirstName
+			return nameI < nameJ
+		}
+		return statValue(roster[i]) < statValue(roster[j])
+	}
+
+	sort.SliceStable(roster, func(i, j int) bool {
+		if order == "DESC" {
+			return ascLess(j, i)
+		}
+		return ascLess(i, j)
+	})
 }
 
 // teamFormSupportData is the SupportData shape for team-create.html and
@@ -230,6 +279,39 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Default to goals-descending when there's a leaderboard to sort by,
+	// else alphabetical — sorting by a stat column means nothing on a
+	// fresh league with no results yet, when those columns aren't even
+	// shown.
+	rosterSort, rosterOrder := r.URL.Query().Get("sort"), r.URL.Query().Get("order")
+	if !allowedRosterSorts[rosterSort] {
+		if leadersSeason != nil {
+			rosterSort, rosterOrder = "goals", "DESC"
+		} else {
+			rosterSort, rosterOrder = "name", "ASC"
+		}
+	}
+	if rosterOrder != "ASC" && rosterOrder != "DESC" {
+		rosterOrder = "DESC"
+	}
+	sortRoster(roster, leadersByPlayer, rosterSort, rosterOrder)
+
+	// Who's a scorekeeper is only shown (and queried) for managers, same
+	// convention as hasAccount above — it drives the roster row's
+	// Make/Remove Scorekeeper action.
+	isScorekeeper := map[int]bool{}
+	if canManage {
+		tsm := &models.TeamScorekeeperModel{DB: app.playerService.DB}
+		scorekeepers, err := tsm.ListForTeam(team.ID)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		for _, p := range scorekeepers {
+			isScorekeeper[p.ID] = true
+		}
+	}
+
 	data := app.newTemplateData(r)
 	data.Data = &teamViewData{
 		Team:                    team,
@@ -251,6 +333,9 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		LeadingAssister:         leadingAssister,
 		Schedule:                schedule,
 		HasAccount:              hasAccount,
+		RosterSort:              rosterSort,
+		RosterOrder:             rosterOrder,
+		IsScorekeeper:           isScorekeeper,
 	}
 	data.Breadcrumbs = app.teamBreadcrumbs(team, league, true)
 
@@ -659,6 +744,85 @@ func (app *application) teamSetCaptain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", "Team captain updated.")
+	http.Redirect(w, r, fmt.Sprintf("/team/%d", teamID), http.StatusSeeOther)
+}
+
+// teamAddScorekeeper and teamRemoveScorekeeper are plain form POSTs
+// (teamID plus playerID), mirroring teamSetCaptain — same reason they live
+// under /admin/team/... rather than nested under /team/:teamID/... (see the
+// httprouter wildcard-conflict note in routes.go).
+func (app *application) teamAddScorekeeper(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseForm()
+	if err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	teamID, err := strconv.Atoi(r.PostForm.Get("teamID"))
+	if err != nil || teamID < 1 {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	if !app.canManageTeam(r, teamID) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	playerID, err := strconv.Atoi(r.PostForm.Get("playerID"))
+	if err != nil || playerID < 1 {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	err = app.teamService.AddScorekeeper(teamID, playerID, app.getUserName(r))
+	if err != nil {
+		if errors.Is(err, models.ErrBadData) {
+			app.sessionManager.Put(r.Context(), "flash", "That player isn't on this team's roster.")
+		} else if errors.Is(err, models.ErrDuplicateScorekeeper) {
+			app.sessionManager.Put(r.Context(), "flash", "That player is already a scorekeeper for this team.")
+		} else {
+			app.serverError(w, err)
+			return
+		}
+		http.Redirect(w, r, fmt.Sprintf("/team/%d", teamID), http.StatusSeeOther)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", "Scorekeeper added.")
+	http.Redirect(w, r, fmt.Sprintf("/team/%d", teamID), http.StatusSeeOther)
+}
+
+func (app *application) teamRemoveScorekeeper(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseForm()
+	if err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	teamID, err := strconv.Atoi(r.PostForm.Get("teamID"))
+	if err != nil || teamID < 1 {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	if !app.canManageTeam(r, teamID) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	playerID, err := strconv.Atoi(r.PostForm.Get("playerID"))
+	if err != nil || playerID < 1 {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	if err := app.teamService.RemoveScorekeeper(teamID, playerID, app.getUserName(r)); err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", "Scorekeeper removed.")
 	http.Redirect(w, r, fmt.Sprintf("/team/%d", teamID), http.StatusSeeOther)
 }
 

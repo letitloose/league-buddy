@@ -22,8 +22,10 @@
             {{end}}
             {{template "main" .}}
         </main>
-        <footer class="flex h-10 bg-neutral-800 text-neutral-300 justify-center items-center shrink-0">
-            Release Date: {{.LastUpdate}}
+        <footer class="flex h-10 bg-neutral-800 text-neutral-300 justify-center items-center gap-2 shrink-0 text-sm">
+            <span>&copy; {{.CurrentYear}} Blame the Ball</span>
+            <span aria-hidden="true">&middot;</span>
+            <span>Updated {{.LastUpdate}}</span>
         </footer>
         <!-- Shared confirm/alert dialogs, used by main.js in place of the
              browser's native confirm()/alert() for delete actions. -->

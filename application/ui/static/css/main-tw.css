@@ -1034,6 +1034,10 @@ table tr:nth-child(even) {
   width: 33.333333%;
 }
 
+.w-16 {
+  width: 4rem;
+}
+
 .w-full {
   width: 100%;
 }
@@ -1363,6 +1367,16 @@ table tr:nth-child(even) {
   letter-spacing: 0.025em;
 }
 
+.text-amber-600 {
+  --tw-text-opacity: 1;
+  color: rgb(217 119 6 / var(--tw-text-opacity));
+}
+
+.text-blue-600 {
+  --tw-text-opacity: 1;
+  color: rgb(37 99 235 / var(--tw-text-opacity));
+}
+
 .text-gray-400 {
   --tw-text-opacity: 1;
   color: rgb(156 163 175 / var(--tw-text-opacity));
@@ -1421,6 +1435,11 @@ table tr:nth-child(even) {
 .text-slate-800 {
   --tw-text-opacity: 1;
   color: rgb(30 41 59 / var(--tw-text-opacity));
+}
+
+.text-yellow-600 {
+  --tw-text-opacity: 1;
+  color: rgb(202 138 4 / var(--tw-text-opacity));
 }
 
 .no-underline {
@@ -1501,6 +1520,10 @@ table tr:nth-child(even) {
 
   .sm\:justify-center {
     justify-content: center;
+  }
+
+  .sm\:gap-2 {
+    gap: 0.5rem;
   }
 
   .sm\:px-0 {

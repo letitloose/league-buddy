@@ -36,6 +36,7 @@ type AuthContext struct {
 	PlayerID             sql.NullInt32
 	TeamIDs              []int  // every team this player is a member of
 	CaptainTeamIDs       []int  // subset of TeamIDs this player captains
+	ScorekeeperTeamIDs   []int  // teams this player is a designated scorekeeper of (may include teams outside TeamIDs)
 	LeagueAdminLeagueIDs []int  // leagues this player administers
 	LeagueAdminTeamIDs   []int  // every team belonging to one of those leagues
 	UserName             string // always non-empty: player name or email
@@ -343,6 +344,24 @@ func (m *UserModel) GetAuthContext(id int) (*AuthContext, error) {
 		ac.LeagueAdminTeamIDs = append(ac.LeagueAdminTeamIDs, teamID)
 	}
 	if err := leagueTeamRows.Err(); err != nil {
+		return nil, err
+	}
+
+	scorekeeperStmt := `SELECT teamID FROM teamScorekeepers WHERE playerID = ?`
+	scorekeeperRows, err := m.DB.Query(scorekeeperStmt, ac.PlayerID.Int32)
+	if err != nil {
+		return nil, err
+	}
+	defer scorekeeperRows.Close()
+
+	for scorekeeperRows.Next() {
+		var teamID int
+		if err := scorekeeperRows.Scan(&teamID); err != nil {
+			return nil, err
+		}
+		ac.ScorekeeperTeamIDs = append(ac.ScorekeeperTeamIDs, teamID)
+	}
+	if err := scorekeeperRows.Err(); err != nil {
 		return nil, err
 	}
 

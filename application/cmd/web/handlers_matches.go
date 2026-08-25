@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -148,6 +149,7 @@ type goalFormRow struct {
 	TeamID           int
 	ScorerPlayerID   int
 	AssisterPlayerID int
+	Minute           int
 }
 
 type cardFormRow struct {
@@ -163,6 +165,9 @@ func newGoalFormRow(g *models.MatchGoal) *goalFormRow {
 	}
 	if g.AssisterPlayerID.Valid {
 		row.AssisterPlayerID = int(g.AssisterPlayerID.Int32)
+	}
+	if g.Minute.Valid {
+		row.Minute = int(g.Minute.Int32)
 	}
 	return row
 }
@@ -300,11 +305,13 @@ func (app *application) getRouteMatch(w http.ResponseWriter, r *http.Request) (*
 }
 
 // canManageMatch reports whether the current request's user may edit
-// match's score/stats: an admin, a league admin of the match's league, or
-// the captain of either team that played in it — captains weren't
-// previously involved in match administration, but they're the ones
-// actually at the games, so they get the same edit access here that
-// canManageTeam already gives them over their own team's roster.
+// match's score/stats: an admin, a league admin of the match's league, the
+// captain of either team that played in it, or a scorekeeper either
+// captain has designated for their team — captains weren't previously
+// involved in match administration, but they (and whoever they delegate
+// to) are the ones actually at the games, so they get the same edit access
+// here that canManageTeam already gives captains over their own team's
+// roster. Scorekeepers get only this, not canManageTeam's wider rights.
 func (app *application) canManageMatch(r *http.Request, match *models.Match) (bool, error) {
 	canDelete, err := app.canDeleteMatch(r, match)
 	if err != nil {
@@ -313,7 +320,10 @@ func (app *application) canManageMatch(r *http.Request, match *models.Match) (bo
 	if canDelete {
 		return true, nil
 	}
-	return app.isCaptainOfTeam(r, match.HomeTeamID) || app.isCaptainOfTeam(r, match.AwayTeamID), nil
+	if app.isCaptainOfTeam(r, match.HomeTeamID) || app.isCaptainOfTeam(r, match.AwayTeamID) {
+		return true, nil
+	}
+	return app.isScorekeeperOfTeam(r, match.HomeTeamID) || app.isScorekeeperOfTeam(r, match.AwayTeamID), nil
 }
 
 // canDeleteMatch reports whether the current request's user may delete
@@ -329,16 +339,21 @@ func (app *application) canDeleteMatch(r *http.Request, match *models.Match) (bo
 	return app.canManageLeague(r, season.LeagueID), nil
 }
 
-// matchStatDisplayRow is one player's recorded stat line on the read-only
-// match view — zero-stat roster rows (a player who didn't record anything)
-// are omitted, unlike the edit grid, which shows every roster player so
-// stats can be entered for the first time.
-type matchStatDisplayRow struct {
-	PlayerName  string
-	Goals       int
-	Assists     int
-	YellowCards int
-	RedCards    int
+// goalBoxScoreRow is one goal on the read-only match view — a real box
+// score entry, not an aggregated count. Rows arrive from
+// MatchGoalModel.ListByMatch already in chronological (minute, then
+// insertion) order. ScorerName/AssisterName are blank when unattributed.
+type goalBoxScoreRow struct {
+	Minute       int // 0 = not recorded
+	ScorerName   string
+	AssisterName string
+}
+
+// cardBoxScoreRow is one card on the read-only match view. PlayerName is
+// blank when unattributed.
+type cardBoxScoreRow struct {
+	PlayerName string
+	CardType   string // "yellow" or "red"
 }
 
 // rsvpDisplayRow is one roster player who RSVP'd with a given status
@@ -349,6 +364,18 @@ type rsvpDisplayRow struct {
 	Message    string
 }
 
+// matchTeamNoteView is one team's Player of the Match pick and captain's
+// notes, template-facing — Form carries the sticky (possibly invalid) value
+// on a failed submission, or the currently saved value otherwise.
+type matchTeamNoteView struct {
+	TeamID            int
+	Roster            []*models.Player
+	PlayerOfMatchName string
+	Notes             string
+	CanManage         bool
+	Form              *services.MatchTeamNoteForm
+}
+
 type matchViewData struct {
 	Match           *models.Match
 	Season          *models.Season
@@ -357,8 +384,10 @@ type matchViewData struct {
 	AwayTeam        *models.Team
 	Location        *models.Location
 	LocationAddress *models.Address
-	HomeStats       []*matchStatDisplayRow
-	AwayStats       []*matchStatDisplayRow
+	HomeGoals       []*goalBoxScoreRow
+	AwayGoals       []*goalBoxScoreRow
+	HomeCards       []*cardBoxScoreRow
+	AwayCards       []*cardBoxScoreRow
 	CanManage       bool
 	CanRSVP         bool
 	IsPast          bool
@@ -366,6 +395,8 @@ type matchViewData struct {
 	AwayRSVPsIn     []*rsvpDisplayRow
 	HomeRSVPsOut    []*rsvpDisplayRow
 	AwayRSVPsOut    []*rsvpDisplayRow
+	HomeNote        *matchTeamNoteView
+	AwayNote        *matchTeamNoteView
 }
 
 // buildRSVPRows returns a row for every roster player who RSVP'd status
@@ -439,35 +470,6 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 		}
 	}
 
-	pmsm := &models.PlayerMatchStatModel{DB: app.playerService.DB}
-	stats, err := pmsm.ListByMatch(match.ID)
-	if err != nil {
-		return nil, err
-	}
-	pm := &models.PlayerModel{DB: app.playerService.DB}
-	var homeStats, awayStats []*matchStatDisplayRow
-	for _, stat := range stats {
-		if stat.Goals == 0 && stat.Assists == 0 && stat.YellowCards == 0 && stat.RedCards == 0 {
-			continue
-		}
-		player, err := pm.Get(stat.PlayerID)
-		if err != nil {
-			return nil, err
-		}
-		row := &matchStatDisplayRow{
-			PlayerName:  player.FirstName + " " + player.LastName,
-			Goals:       stat.Goals,
-			Assists:     stat.Assists,
-			YellowCards: stat.YellowCards,
-			RedCards:    stat.RedCards,
-		}
-		if stat.TeamID == match.HomeTeamID {
-			homeStats = append(homeStats, row)
-		} else {
-			awayStats = append(awayStats, row)
-		}
-	}
-
 	homeRoster, err := app.playerService.GetByTeam(match.HomeTeamID)
 	if err != nil {
 		return nil, err
@@ -475,6 +477,76 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 	awayRoster, err := app.playerService.GetByTeam(match.AwayTeamID)
 	if err != nil {
 		return nil, err
+	}
+	playerName := make(map[int]string, len(homeRoster)+len(awayRoster))
+	for _, player := range homeRoster {
+		playerName[player.ID] = player.FirstName + " " + player.LastName
+	}
+	for _, player := range awayRoster {
+		playerName[player.ID] = player.FirstName + " " + player.LastName
+	}
+	// nameFor falls back to a direct lookup for a player who scored/was
+	// carded but has since left the roster shown above — rare, but a
+	// roster removal shouldn't make historical box-score rows blank.
+	pm := &models.PlayerModel{DB: app.playerService.DB}
+	nameFor := func(playerID sql.NullInt32) (string, error) {
+		if !playerID.Valid {
+			return "", nil
+		}
+		id := int(playerID.Int32)
+		if name, ok := playerName[id]; ok {
+			return name, nil
+		}
+		player, err := pm.Get(id)
+		if err != nil {
+			return "", err
+		}
+		return player.FirstName + " " + player.LastName, nil
+	}
+
+	mgm := &models.MatchGoalModel{DB: app.playerService.DB}
+	goals, err := mgm.ListByMatch(match.ID)
+	if err != nil {
+		return nil, err
+	}
+	var homeGoals, awayGoals []*goalBoxScoreRow
+	for _, g := range goals {
+		scorerName, err := nameFor(g.ScorerPlayerID)
+		if err != nil {
+			return nil, err
+		}
+		assisterName, err := nameFor(g.AssisterPlayerID)
+		if err != nil {
+			return nil, err
+		}
+		row := &goalBoxScoreRow{ScorerName: scorerName, AssisterName: assisterName}
+		if g.Minute.Valid {
+			row.Minute = int(g.Minute.Int32)
+		}
+		if g.TeamID == match.HomeTeamID {
+			homeGoals = append(homeGoals, row)
+		} else {
+			awayGoals = append(awayGoals, row)
+		}
+	}
+
+	mcm := &models.MatchCardModel{DB: app.playerService.DB}
+	cards, err := mcm.ListByMatch(match.ID)
+	if err != nil {
+		return nil, err
+	}
+	var homeCards, awayCards []*cardBoxScoreRow
+	for _, c := range cards {
+		name, err := nameFor(c.PlayerID)
+		if err != nil {
+			return nil, err
+		}
+		row := &cardBoxScoreRow{PlayerName: name, CardType: c.CardType}
+		if c.TeamID == match.HomeTeamID {
+			homeCards = append(homeCards, row)
+		} else {
+			awayCards = append(awayCards, row)
+		}
 	}
 	rm := &models.RSVPModel{DB: app.playerService.DB}
 	rsvps, err := rm.ListByMatch(match.ID)
@@ -495,6 +567,36 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 	isPast := matchIsPast(match)
 	canRSVP := playerID > 0 && !isPast && (app.isMemberOfTeam(r, match.HomeTeamID) || app.isMemberOfTeam(r, match.AwayTeamID))
 
+	mtnm := &models.MatchTeamNoteModel{DB: app.playerService.DB}
+	buildNoteView := func(teamID int, roster []*models.Player, canManageSide bool) (*matchTeamNoteView, error) {
+		note, err := mtnm.GetByMatchAndTeam(match.ID, teamID)
+		if err != nil && !errors.Is(err, models.ErrNoRecord) {
+			return nil, err
+		}
+		view := &matchTeamNoteView{TeamID: teamID, Roster: roster, CanManage: canManageSide, Form: &services.MatchTeamNoteForm{}}
+		if note != nil {
+			if note.PlayerOfMatchID.Valid {
+				view.Form.PlayerOfMatchID = int(note.PlayerOfMatchID.Int32)
+			}
+			view.Form.Notes = note.Notes.String
+			view.Notes = note.Notes.String
+			name, err := nameFor(note.PlayerOfMatchID)
+			if err != nil {
+				return nil, err
+			}
+			view.PlayerOfMatchName = name
+		}
+		return view, nil
+	}
+	homeNote, err := buildNoteView(match.HomeTeamID, homeRoster, app.canManageMatchSide(r, match.HomeTeamID))
+	if err != nil {
+		return nil, err
+	}
+	awayNote, err := buildNoteView(match.AwayTeamID, awayRoster, app.canManageMatchSide(r, match.AwayTeamID))
+	if err != nil {
+		return nil, err
+	}
+
 	return &matchViewData{
 		Match:           match,
 		Season:          season,
@@ -503,8 +605,10 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 		AwayTeam:        awayTeam,
 		Location:        location,
 		LocationAddress: locationAddress,
-		HomeStats:       homeStats,
-		AwayStats:       awayStats,
+		HomeGoals:       homeGoals,
+		AwayGoals:       awayGoals,
+		HomeCards:       homeCards,
+		AwayCards:       awayCards,
 		CanManage:       canManage,
 		CanRSVP:         canRSVP,
 		IsPast:          isPast,
@@ -512,6 +616,8 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 		AwayRSVPsIn:     buildRSVPRows(awayRoster, rsvpsByPlayer, "yes"),
 		HomeRSVPsOut:    buildRSVPRows(homeRoster, rsvpsByPlayer, "no"),
 		AwayRSVPsOut:    buildRSVPRows(awayRoster, rsvpsByPlayer, "no"),
+		HomeNote:        homeNote,
+		AwayNote:        awayNote,
 	}, nil
 }
 
@@ -623,6 +729,64 @@ func (app *application) matchRSVPSubmit(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
 }
 
+// matchTeamNoteSubmit saves one team's own Player of the Match pick and
+// captain's notes for a match. Unlike matchUpdatePost (either team's
+// manager may edit the shared score/goals/cards), this is scoped to the
+// team named in the submitted teamID field — canManageMatchSide only knows
+// how to check "does this user manage this team" in isolation, so teamID is
+// verified against the match's own home/away teams first, before that check
+// even runs.
+func (app *application) matchTeamNoteSubmit(w http.ResponseWriter, r *http.Request) {
+	match, ok := app.getRouteMatch(w, r)
+	if !ok {
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	teamID, err := strconv.Atoi(r.PostForm.Get("teamID"))
+	if err != nil || (teamID != match.HomeTeamID && teamID != match.AwayTeamID) {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+	if !app.canManageMatchSide(r, teamID) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	playerOfMatchID, _ := strconv.Atoi(r.PostForm.Get("playerOfMatchID"))
+	form := &services.MatchTeamNoteForm{
+		PlayerOfMatchID: playerOfMatchID,
+		Notes:           r.PostForm.Get("notes"),
+	}
+
+	err = app.matchTeamNoteService.SaveNote(match.ID, teamID, form)
+	if err != nil {
+		if errors.Is(err, models.ErrBadData) {
+			viewData, buildErr := app.buildMatchViewData(r, match)
+			if buildErr != nil {
+				app.serverError(w, buildErr)
+				return
+			}
+			if teamID == match.HomeTeamID {
+				viewData.HomeNote.Form = form
+			} else {
+				viewData.AwayNote.Form = form
+			}
+			app.renderMatchView(w, r, viewData, &services.RSVPForm{}, http.StatusUnprocessableEntity)
+			return
+		}
+		app.serverError(w, err)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", "Notes saved.")
+	http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
+}
+
 func (app *application) matchUpdate(w http.ResponseWriter, r *http.Request) {
 	match, ok := app.getRouteMatch(w, r)
 	if !ok {
@@ -667,6 +831,7 @@ func parseGoalsAndCards(r *http.Request) ([]services.GoalInput, []services.CardI
 	goalTeamIDs := r.PostForm["goalTeamID"]
 	goalScorerIDs := r.PostForm["goalScorerID"]
 	goalAssisterIDs := r.PostForm["goalAssisterID"]
+	goalMinutes := r.PostForm["goalMinute"]
 	goals := make([]services.GoalInput, 0, len(goalTeamIDs))
 	for i, teamIDStr := range goalTeamIDs {
 		teamID, err := strconv.Atoi(teamIDStr)
@@ -675,7 +840,8 @@ func parseGoalsAndCards(r *http.Request) ([]services.GoalInput, []services.CardI
 		}
 		scorerID, _ := strconv.Atoi(valueAt(goalScorerIDs, i))
 		assisterID, _ := strconv.Atoi(valueAt(goalAssisterIDs, i))
-		goals = append(goals, services.GoalInput{TeamID: teamID, ScorerPlayerID: scorerID, AssisterPlayerID: assisterID})
+		minute, _ := strconv.Atoi(valueAt(goalMinutes, i))
+		goals = append(goals, services.GoalInput{TeamID: teamID, ScorerPlayerID: scorerID, AssisterPlayerID: assisterID, Minute: minute})
 	}
 
 	cardTeamIDs := r.PostForm["cardTeamID"]

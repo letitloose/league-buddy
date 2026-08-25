@@ -5,13 +5,15 @@ import "database/sql"
 // MatchGoal is one goal scored in a match. ScorerPlayerID/AssisterPlayerID
 // are nullable — a goal is always attributed to a team (always observable
 // from the sideline), but who exactly scored or assisted may not be known,
-// especially for the opposing team.
+// especially for the opposing team. Minute is nullable too — historical
+// matches (and anyone not tracking it live) never have one.
 type MatchGoal struct {
 	ID               int
 	MatchID          int
 	TeamID           int
 	ScorerPlayerID   sql.NullInt32
 	AssisterPlayerID sql.NullInt32
+	Minute           sql.NullInt32
 }
 
 type MatchGoalModel struct {
@@ -27,19 +29,22 @@ func (m *MatchGoalModel) ReplaceForMatch(matchID int, goals []MatchGoal) error {
 		return err
 	}
 
-	statement := "INSERT INTO matchGoals (matchID, teamID, scorerPlayerID, assisterPlayerID) VALUES (?, ?, ?, ?)"
+	statement := "INSERT INTO matchGoals (matchID, teamID, scorerPlayerID, assisterPlayerID, minute) VALUES (?, ?, ?, ?, ?)"
 	for _, g := range goals {
-		if _, err := m.DB.Exec(statement, matchID, g.TeamID, g.ScorerPlayerID, g.AssisterPlayerID); err != nil {
+		if _, err := m.DB.Exec(statement, matchID, g.TeamID, g.ScorerPlayerID, g.AssisterPlayerID, g.Minute); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// ListByMatch returns every goal recorded for matchID, in the order they
-// were saved — used to prefill the match-edit form's existing rows.
+// ListByMatch returns every goal recorded for matchID, ordered by minute
+// (earliest first, with no-minute-recorded goals last) — a box score's
+// natural order — falling back to insertion order for goals tied on
+// minute (or all lacking one).
 func (m *MatchGoalModel) ListByMatch(matchID int) ([]*MatchGoal, error) {
-	stmt := "SELECT id, matchID, teamID, scorerPlayerID, assisterPlayerID FROM matchGoals WHERE matchID = ? ORDER BY id"
+	stmt := `SELECT id, matchID, teamID, scorerPlayerID, assisterPlayerID, minute FROM matchGoals
+		WHERE matchID = ? ORDER BY (minute IS NULL), minute, id`
 
 	rows, err := m.DB.Query(stmt, matchID)
 	if err != nil {
@@ -50,7 +55,7 @@ func (m *MatchGoalModel) ListByMatch(matchID int) ([]*MatchGoal, error) {
 	goals := []*MatchGoal{}
 	for rows.Next() {
 		g := &MatchGoal{}
-		if err := rows.Scan(&g.ID, &g.MatchID, &g.TeamID, &g.ScorerPlayerID, &g.AssisterPlayerID); err != nil {
+		if err := rows.Scan(&g.ID, &g.MatchID, &g.TeamID, &g.ScorerPlayerID, &g.AssisterPlayerID, &g.Minute); err != nil {
 			return nil, err
 		}
 		goals = append(goals, g)

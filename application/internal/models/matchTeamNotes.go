@@ -8,16 +8,20 @@ import (
 	"github.com/go-sql-driver/mysql"
 )
 
-// MatchTeamNote is one team's own Player of the Match designation and
-// free-text captain's notes for one match — distinct from Match.Notes (a
-// single shared note on the match record itself). Each team manages only
-// its own row (see canManageMatchSide in cmd/web).
+// MatchTeamNote is one team's own Player of the Match designation,
+// free-text captain's notes, and captain's-message for one match —
+// distinct from Match.Notes (a single shared note on the match record
+// itself). CaptainMessage is shown to the team in RSVP reminder emails
+// (see MatchReminderService), separate from Notes (a postgame-style
+// reflection). Each team manages only its own row (see canManageMatchSide
+// in cmd/web).
 type MatchTeamNote struct {
 	ID              int
 	MatchID         int
 	TeamID          int
 	PlayerOfMatchID sql.NullInt32
 	Notes           sql.NullString
+	CaptainMessage  sql.NullString
 	UpdatedAt       time.Time
 }
 
@@ -26,16 +30,17 @@ type MatchTeamNoteModel struct {
 }
 
 // Upsert inserts note, or updates the existing (matchID, teamID) row if one
-// already exists — a captain/scorekeeper can revise their pick or notes.
+// already exists — a captain/scorekeeper can revise their pick, notes, or
+// message.
 func (m *MatchTeamNoteModel) Upsert(note *MatchTeamNote) error {
-	statement := `INSERT INTO matchTeamNotes (matchID, teamID, playerOfMatchID, notes, updatedAt) VALUES (?, ?, ?, ?, ?)`
+	statement := `INSERT INTO matchTeamNotes (matchID, teamID, playerOfMatchID, notes, captainMessage, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`
 
-	_, err := m.DB.Exec(statement, note.MatchID, note.TeamID, note.PlayerOfMatchID, note.Notes, note.UpdatedAt)
+	_, err := m.DB.Exec(statement, note.MatchID, note.TeamID, note.PlayerOfMatchID, note.Notes, note.CaptainMessage, note.UpdatedAt)
 	if err != nil {
 		var mySQLError *mysql.MySQLError
 		if errors.As(err, &mySQLError) && mySQLError.Number == 1062 {
-			update := `UPDATE matchTeamNotes SET playerOfMatchID = ?, notes = ?, updatedAt = ? WHERE matchID = ? AND teamID = ?`
-			_, err = m.DB.Exec(update, note.PlayerOfMatchID, note.Notes, note.UpdatedAt, note.MatchID, note.TeamID)
+			update := `UPDATE matchTeamNotes SET playerOfMatchID = ?, notes = ?, captainMessage = ?, updatedAt = ? WHERE matchID = ? AND teamID = ?`
+			_, err = m.DB.Exec(update, note.PlayerOfMatchID, note.Notes, note.CaptainMessage, note.UpdatedAt, note.MatchID, note.TeamID)
 			return err
 		}
 		return err
@@ -44,12 +49,12 @@ func (m *MatchTeamNoteModel) Upsert(note *MatchTeamNote) error {
 }
 
 // GetByMatchAndTeam returns teamID's note row for matchID, or ErrNoRecord if
-// neither a Player of the Match nor notes has been set yet.
+// nothing has been set yet.
 func (m *MatchTeamNoteModel) GetByMatchAndTeam(matchID, teamID int) (*MatchTeamNote, error) {
-	stmt := `SELECT id, matchID, teamID, playerOfMatchID, notes, updatedAt FROM matchTeamNotes WHERE matchID = ? AND teamID = ?`
+	stmt := `SELECT id, matchID, teamID, playerOfMatchID, notes, captainMessage, updatedAt FROM matchTeamNotes WHERE matchID = ? AND teamID = ?`
 
 	note := &MatchTeamNote{}
-	err := m.DB.QueryRow(stmt, matchID, teamID).Scan(&note.ID, &note.MatchID, &note.TeamID, &note.PlayerOfMatchID, &note.Notes, &note.UpdatedAt)
+	err := m.DB.QueryRow(stmt, matchID, teamID).Scan(&note.ID, &note.MatchID, &note.TeamID, &note.PlayerOfMatchID, &note.Notes, &note.CaptainMessage, &note.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord

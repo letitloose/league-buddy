@@ -12,6 +12,7 @@ import (
 type MatchTeamNoteForm struct {
 	PlayerOfMatchID int // 0 = none
 	Notes           string
+	CaptainMessage  string
 	validator.Validator
 }
 
@@ -26,6 +27,7 @@ type MatchTeamNoteService struct {
 // division of labor as RSVPService.SubmitRSVP.
 func (service *MatchTeamNoteService) SaveNote(matchID, teamID int, form *MatchTeamNoteForm) error {
 	form.CheckField(validator.MaxChars(form.Notes, 2000), "notes", "Notes must be at most 2000 characters.")
+	form.CheckField(validator.MaxChars(form.CaptainMessage, 2000), "captainMessage", "Message must be at most 2000 characters.")
 
 	if form.PlayerOfMatchID > 0 {
 		tmm := &models.TeamMemberModel{DB: service.DB}
@@ -50,12 +52,17 @@ func (service *MatchTeamNoteService) SaveNote(matchID, teamID int, form *MatchTe
 	if trimmed := strings.TrimSpace(form.Notes); trimmed != "" {
 		notes = sql.NullString{String: trimmed, Valid: true}
 	}
+	var captainMessage sql.NullString
+	if trimmed := strings.TrimSpace(form.CaptainMessage); trimmed != "" {
+		captainMessage = sql.NullString{String: trimmed, Valid: true}
+	}
 
 	return service.Upsert(&models.MatchTeamNote{
 		MatchID:         matchID,
 		TeamID:          teamID,
 		PlayerOfMatchID: playerOfMatchID,
 		Notes:           notes,
+		CaptainMessage:  captainMessage,
 		UpdatedAt:       time.Now(),
 	})
 }

@@ -5,6 +5,8 @@
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS rsvps;
 DROP TABLE IF EXISTS matchTeamNotes;
+DROP TABLE IF EXISTS matchRSVPReminders;
+DROP TABLE IF EXISTS matchCaptainMessageReminders;
 DROP TABLE IF EXISTS matchGoals;
 DROP TABLE IF EXISTS matchCards;
 DROP TABLE IF EXISTS playerMatchStats;

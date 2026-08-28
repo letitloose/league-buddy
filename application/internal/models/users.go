@@ -622,6 +622,43 @@ func (m *UserModel) ListPlayerIDsWithAccounts(playerIDs []int) (map[int]bool, er
 	return result, nil
 }
 
+// GetActivatedEmailsForPlayers returns the login email for every playerID
+// that has an activated (active = 1) user account — playerIDs with no
+// account, or an account that hasn't been activated yet, are simply absent
+// from the map. Powers the match test-reminder tool's "send to a teammate"
+// picker (cmd/web/handlers_matches.go), where only a working, verified
+// login email is useful. Callers pass an empty slice safely.
+func (m *UserModel) GetActivatedEmailsForPlayers(playerIDs []int) (map[int]string, error) {
+	result := make(map[int]string, len(playerIDs))
+	if len(playerIDs) == 0 {
+		return result, nil
+	}
+
+	placeholders := make([]string, len(playerIDs))
+	args := make([]any, len(playerIDs))
+	for i, id := range playerIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	stmt := fmt.Sprintf(`SELECT playerID, email FROM users WHERE active = 1 AND playerID IN (%s)`, strings.Join(placeholders, ","))
+
+	rows, err := m.DB.Query(stmt, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var playerID int
+		var email string
+		if err := rows.Scan(&playerID, &email); err != nil {
+			return nil, err
+		}
+		result[playerID] = email
+	}
+	return result, nil
+}
+
 func (m *UserModel) ToggleActive(userID int) error {
 	statement := "update users set active = !active where id = ?;"
 

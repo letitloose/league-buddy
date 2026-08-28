@@ -78,6 +78,23 @@ func (service *UserService) ForgotPassword(uf *UserForm) error {
 }
 
 func (service *UserService) InsertUser(uf *UserForm) error {
+	return service.insertUser(uf, true)
+}
+
+// InsertSeedUser creates a login exactly like InsertUser, but never sends
+// the activation email — for the dev RESETDB bootstrap seed only
+// (cmd/web/main.go's reset/seedRoleUser), which force-activates every
+// account it creates immediately afterward via ActivateUser regardless of
+// whether any link is ever clicked. Sending a real "activate your account"
+// email in that path is always pointless — and since RESETDB reseeds on
+// every dev-server restart (and Air restarts the process on every file
+// save), a configured Email sender turned that into a real inbox getting
+// spammed dozens of times in a single session.
+func (service *UserService) InsertSeedUser(uf *UserForm) error {
+	return service.insertUser(uf, false)
+}
+
+func (service *UserService) insertUser(uf *UserForm, sendEmail bool) error {
 
 	// Validate the form contents using our helper functions.
 	uf.CheckField(validator.NotBlank(uf.Email), "email", "This field cannot be blank")
@@ -111,26 +128,28 @@ func (service *UserService) InsertUser(uf *UserForm) error {
 	}
 
 	//user created successfully, send (or log, in dev) the activation link
-	verificationHash, err := service.GetVerificationHashByEmail(uf.Email)
-	if err != nil {
-		return err
-	}
-	activationLink := fmt.Sprintf("https://%s/user/activate?hash=%s", os.Getenv("PUBLIC_HOST"), verificationHash)
-
-	if service.Email != nil {
-		body := fmt.Sprintf(
-			`<html>
-				<body>
-					<h1>Hello!</h1>
-					<p>Please <a href="%s">click here</a> to validate your email and activate your account.<p>
-				</body>
-			</html>`, activationLink)
-		err = service.SendEmailV2("Activate your Blame the Ball account", "", body, uf.Email)
+	if sendEmail {
+		verificationHash, err := service.GetVerificationHashByEmail(uf.Email)
 		if err != nil {
 			return err
 		}
-	} else if service.InfoLog != nil {
-		service.InfoLog.Printf("no email configured -- activation link for %s: %s", uf.Email, activationLink)
+		activationLink := fmt.Sprintf("https://%s/user/activate?hash=%s", os.Getenv("PUBLIC_HOST"), verificationHash)
+
+		if service.Email != nil {
+			body := fmt.Sprintf(
+				`<html>
+					<body>
+						<h1>Hello!</h1>
+						<p>Please <a href="%s">click here</a> to validate your email and activate your account.<p>
+					</body>
+				</html>`, activationLink)
+			err = service.SendEmailV2("Activate your Blame the Ball account", "", body, uf.Email)
+			if err != nil {
+				return err
+			}
+		} else if service.InfoLog != nil {
+			service.InfoLog.Printf("no email configured -- activation link for %s: %s", uf.Email, activationLink)
+		}
 	}
 
 	cs := &CommonService{DB: service.DB}

@@ -4,6 +4,8 @@
 SET FOREIGN_KEY_CHECKS = 0;
 TRUNCATE TABLE rsvps;
 TRUNCATE TABLE matchTeamNotes;
+TRUNCATE TABLE matchRSVPReminders;
+TRUNCATE TABLE matchCaptainMessageReminders;
 TRUNCATE TABLE matchGoals;
 TRUNCATE TABLE matchCards;
 TRUNCATE TABLE playerMatchStats;

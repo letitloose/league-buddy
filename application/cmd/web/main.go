@@ -30,6 +30,7 @@ type application struct {
 	matchService         *services.MatchService
 	rsvpService          *services.RSVPService
 	matchTeamNoteService *services.MatchTeamNoteService
+	matchReminderService *services.MatchReminderService
 	inviteService        *services.InviteService
 	joinRequestService   *services.JoinRequestService
 	emailService         *services.Email
@@ -97,6 +98,7 @@ func main() {
 	rsvpService := &services.RSVPService{RSVPModel: rsvps}
 	matchTeamNotes := &models.MatchTeamNoteModel{DB: db}
 	matchTeamNoteService := &services.MatchTeamNoteService{MatchTeamNoteModel: matchTeamNotes, DB: db}
+	matchReminderService := &services.MatchReminderService{DB: db, Email: email, InfoLog: infoLog}
 	invites := &models.InviteModel{DB: db}
 	inviteService := &services.InviteService{InviteModel: invites, DB: db, Email: email, InfoLog: infoLog}
 	joinRequests := &models.JoinRequestModel{DB: db}
@@ -118,6 +120,7 @@ func main() {
 		matchService:         matchService,
 		rsvpService:          rsvpService,
 		matchTeamNoteService: matchTeamNoteService,
+		matchReminderService: matchReminderService,
 		inviteService:        inviteService,
 		joinRequestService:   joinRequestService,
 		emailService:         email,
@@ -139,6 +142,8 @@ func main() {
 			errorLog.Println(err)
 		}
 	}
+
+	go app.runDailyReminderScheduler()
 
 	siteHost := os.Getenv("SITE_HOST")
 	sitePort := os.Getenv("SITE_PORT")
@@ -258,7 +263,7 @@ func (app *application) reset() error {
 	}
 
 	uf := &services.UserForm{Email: leagueBuddyUser, Password: leagueBuddyPassword, ConfirmPassword: leagueBuddyPassword}
-	err = app.userService.InsertUser(uf)
+	err = app.userService.InsertSeedUser(uf)
 	if err != nil {
 		app.errorLog.Println(err)
 	}
@@ -353,7 +358,7 @@ func (app *application) seedRoleUser(firstName, lastName, email, password string
 	}
 
 	uf := &services.UserForm{Email: email, Password: password, ConfirmPassword: password}
-	if err := app.userService.InsertUser(uf); err != nil {
+	if err := app.userService.InsertSeedUser(uf); err != nil {
 		return err
 	}
 

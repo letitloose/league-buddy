@@ -27,6 +27,30 @@ func TestInsertUser(t *testing.T) {
 	}
 }
 
+// InsertSeedUser is InsertUser minus the activation email — used only by
+// the dev RESETDB bootstrap seed (cmd/web/main.go), which force-activates
+// every account it creates immediately afterward regardless of any link
+// being clicked.
+func TestInsertSeedUser(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	users := &models.UserModel{DB: db}
+	userService := UserService{UserModel: users}
+
+	form := &UserForm{Email: "seed-user@example.com", Password: "validpassword123", ConfirmPassword: "validpassword123"}
+	if err := userService.InsertSeedUser(form); err != nil {
+		t.Fatal(err)
+	}
+
+	user, err := users.GetUserByEmail("seed-user@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Active {
+		t.Fatal("expected new user to be inactive (reset() activates it separately)")
+	}
+}
+
 func TestInsertUserBadData(t *testing.T) {
 	db := models.NewTestDB(t)
 

@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/letitloose/league-buddy/internal/models"
 	"github.com/letitloose/league-buddy/internal/services"
+	"github.com/letitloose/league-buddy/internal/validator"
 )
 
 // matchFormData is the shape match-create.html needs: the season it belongs
@@ -368,12 +371,27 @@ type rsvpDisplayRow struct {
 // notes, template-facing — Form carries the sticky (possibly invalid) value
 // on a failed submission, or the currently saved value otherwise.
 type matchTeamNoteView struct {
-	TeamID            int
-	Roster            []*models.Player
-	PlayerOfMatchName string
-	Notes             string
-	CanManage         bool
-	Form              *services.MatchTeamNoteForm
+	TeamID              int
+	Roster              []*models.Player
+	PlayerOfMatchName   string
+	Notes               string
+	CaptainMessage      string
+	CanManage           bool
+	Form                *services.MatchTeamNoteForm
+	CanSendTestReminder bool
+	ActivatedTeammates  []*teammateOption
+}
+
+// teammateOption is one roster player with an activated account — the
+// "select from a list of teammates" picker on the match test-reminder tool
+// (cmd/web/handlers_matches.go's matchTestReminderSubmit), mirroring the
+// invite screen's roster-picker pattern (RosterWithoutAccount in
+// handlers_teams.go) but for the opposite case: players who *do* already
+// have a working login to send a test reminder to.
+type teammateOption struct {
+	PlayerID int
+	Name     string
+	Email    string
 }
 
 type matchViewData struct {
@@ -568,18 +586,36 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 	canRSVP := playerID > 0 && !isPast && (app.isMemberOfTeam(r, match.HomeTeamID) || app.isMemberOfTeam(r, match.AwayTeamID))
 
 	mtnm := &models.MatchTeamNoteModel{DB: app.playerService.DB}
-	buildNoteView := func(teamID int, roster []*models.Player, canManageSide bool) (*matchTeamNoteView, error) {
+	um := &models.UserModel{DB: app.playerService.DB}
+	buildNoteView := func(teamID int, roster []*models.Player, canManageSide, canSendTestReminder bool) (*matchTeamNoteView, error) {
 		note, err := mtnm.GetByMatchAndTeam(match.ID, teamID)
 		if err != nil && !errors.Is(err, models.ErrNoRecord) {
 			return nil, err
 		}
-		view := &matchTeamNoteView{TeamID: teamID, Roster: roster, CanManage: canManageSide, Form: &services.MatchTeamNoteForm{}}
+		view := &matchTeamNoteView{TeamID: teamID, Roster: roster, CanManage: canManageSide, Form: &services.MatchTeamNoteForm{}, CanSendTestReminder: canSendTestReminder}
+		if canSendTestReminder {
+			playerIDs := make([]int, len(roster))
+			for i, p := range roster {
+				playerIDs[i] = p.ID
+			}
+			activatedEmails, err := um.GetActivatedEmailsForPlayers(playerIDs)
+			if err != nil {
+				return nil, err
+			}
+			for _, p := range roster {
+				if email, ok := activatedEmails[p.ID]; ok {
+					view.ActivatedTeammates = append(view.ActivatedTeammates, &teammateOption{PlayerID: p.ID, Name: p.FirstName + " " + p.LastName, Email: email})
+				}
+			}
+		}
 		if note != nil {
 			if note.PlayerOfMatchID.Valid {
 				view.Form.PlayerOfMatchID = int(note.PlayerOfMatchID.Int32)
 			}
 			view.Form.Notes = note.Notes.String
 			view.Notes = note.Notes.String
+			view.Form.CaptainMessage = note.CaptainMessage.String
+			view.CaptainMessage = note.CaptainMessage.String
 			name, err := nameFor(note.PlayerOfMatchID)
 			if err != nil {
 				return nil, err
@@ -588,11 +624,27 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 		}
 		return view, nil
 	}
-	homeNote, err := buildNoteView(match.HomeTeamID, homeRoster, app.canManageMatchSide(r, match.HomeTeamID))
+	// A captain of one of this match's two teams sees edit controls for
+	// only their own side — even if they're also an admin/league admin
+	// (whose access would otherwise reach both sides), since being "the
+	// captain" here is a stronger, narrower identity than the broader
+	// manage-everything roles. Doesn't apply to a viewer who isn't captain
+	// of either side, or (rare) captains both — admin/league-admin/
+	// scorekeeper access then works exactly as it does everywhere else.
+	isCaptainOfHome := app.isCaptainOfTeam(r, match.HomeTeamID)
+	isCaptainOfAway := app.isCaptainOfTeam(r, match.AwayTeamID)
+	suppressHomeControls := isCaptainOfAway && !isCaptainOfHome
+	suppressAwayControls := isCaptainOfHome && !isCaptainOfAway
+
+	homeNote, err := buildNoteView(match.HomeTeamID, homeRoster,
+		app.canManageMatchSide(r, match.HomeTeamID) && !suppressHomeControls,
+		(app.isAdmin(r) || isCaptainOfHome) && !suppressHomeControls)
 	if err != nil {
 		return nil, err
 	}
-	awayNote, err := buildNoteView(match.AwayTeamID, awayRoster, app.canManageMatchSide(r, match.AwayTeamID))
+	awayNote, err := buildNoteView(match.AwayTeamID, awayRoster,
+		app.canManageMatchSide(r, match.AwayTeamID) && !suppressAwayControls,
+		(app.isAdmin(r) || isCaptainOfAway) && !suppressAwayControls)
 	if err != nil {
 		return nil, err
 	}
@@ -761,6 +813,7 @@ func (app *application) matchTeamNoteSubmit(w http.ResponseWriter, r *http.Reque
 	form := &services.MatchTeamNoteForm{
 		PlayerOfMatchID: playerOfMatchID,
 		Notes:           r.PostForm.Get("notes"),
+		CaptainMessage:  r.PostForm.Get("captainMessage"),
 	}
 
 	err = app.matchTeamNoteService.SaveNote(match.ID, teamID, form)
@@ -784,6 +837,85 @@ func (app *application) matchTeamNoteSubmit(w http.ResponseWriter, r *http.Reque
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", "Notes saved.")
+	http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
+}
+
+// matchTestReminderSubmit sends an on-demand preview of the RSVP reminder
+// email for one team's side of a match, to addresses the caller chooses —
+// either typed in directly or picked from that team's roster members who
+// already have an activated account (mirroring the invite screen's
+// "type an email, or pick from the roster" pattern — see team-invite.html
+// and teamInviteFromRoster). A temporary validation tool while the
+// reminder feature is new: visible only to that team's captain, or an
+// admin — deliberately narrower than canManageMatchSide (no scorekeepers)
+// since this bypasses the real send schedule and shouldn't be casually
+// spammable. Records nothing — see MatchReminderService.SendTestReminder.
+func (app *application) matchTestReminderSubmit(w http.ResponseWriter, r *http.Request) {
+	match, ok := app.getRouteMatch(w, r)
+	if !ok {
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	teamID, err := strconv.Atoi(r.PostForm.Get("teamID"))
+	if err != nil || (teamID != match.HomeTeamID && teamID != match.AwayTeamID) {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+	if !app.isAdmin(r) && !app.isCaptainOfTeam(r, teamID) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	seen := map[string]bool{}
+	var addresses []string
+	addAddress := func(addr string) {
+		addr = strings.TrimSpace(addr)
+		if addr == "" || seen[addr] || !validator.ValidEmail(addr) {
+			return
+		}
+		seen[addr] = true
+		addresses = append(addresses, addr)
+	}
+
+	for _, field := range strings.FieldsFunc(r.PostForm.Get("emails"), func(c rune) bool { return c == ',' || unicode.IsSpace(c) }) {
+		addAddress(field)
+	}
+
+	if playerIDStrs := r.PostForm["playerIDs"]; len(playerIDStrs) > 0 {
+		playerIDs := make([]int, 0, len(playerIDStrs))
+		for _, s := range playerIDStrs {
+			if id, err := strconv.Atoi(s); err == nil {
+				playerIDs = append(playerIDs, id)
+			}
+		}
+		um := &models.UserModel{DB: app.playerService.DB}
+		activatedEmails, err := um.GetActivatedEmailsForPlayers(playerIDs)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		for _, email := range activatedEmails {
+			addAddress(email)
+		}
+	}
+
+	if len(addresses) == 0 {
+		app.sessionManager.Put(r.Context(), "flash", "Enter at least one valid email address or select a teammate.")
+		http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
+		return
+	}
+
+	if err := app.matchReminderService.SendTestReminder(match.ID, teamID, addresses); err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", fmt.Sprintf("Test reminder sent to %d address(es).", len(addresses)))
 	http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
 }
 

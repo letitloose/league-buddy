@@ -56,6 +56,7 @@
         <div class="bg-white shadow-md rounded px-4 py-4">
             <h4 class="pt-0 text-center"><a href="/team/{{.Data.HomeTeam.ID}}">{{.Data.HomeTeam.Name}}</a></h4>
             {{template "team-note-panel" (teamNoteSideData $ .Data.HomeNote)}}
+            {{template "team-test-reminder" (teamNoteSideData $ .Data.HomeNote)}}
             {{if .Data.HomeGoals}}
             <ul class="text-sm mb-3">
                 {{range .Data.HomeGoals}}
@@ -99,6 +100,7 @@
         <div class="bg-white shadow-md rounded px-4 py-4">
             <h4 class="pt-0 text-center"><a href="/team/{{.Data.AwayTeam.ID}}">{{.Data.AwayTeam.Name}}</a></h4>
             {{template "team-note-panel" (teamNoteSideData $ .Data.AwayNote)}}
+            {{template "team-test-reminder" (teamNoteSideData $ .Data.AwayNote)}}
             {{if .Data.AwayGoals}}
             <ul class="text-sm mb-3">
                 {{range .Data.AwayGoals}}
@@ -165,15 +167,16 @@
      viewer who doesn't manage this side only ever sees the read-only
      lines. */}}
 {{define "team-note-panel"}}
-{{$hasNote := or .Row.PlayerOfMatchName .Row.Notes}}
-{{$hasErrors := or .Row.Form.FieldErrors.playerOfMatchID .Row.Form.FieldErrors.notes}}
+{{$hasNote := or .Row.PlayerOfMatchName .Row.Notes .Row.CaptainMessage}}
+{{$hasErrors := or .Row.Form.FieldErrors.playerOfMatchID .Row.Form.FieldErrors.notes .Row.Form.FieldErrors.captainMessage}}
 {{if .Row.CanManage}}
 <div class="mt-3 mb-4 text-sm text-center">
     {{if and $hasNote (not $hasErrors)}}
     <details>
         <summary class="cursor-pointer list-none">
-            {{with .Row.PlayerOfMatchName}}<span class="font-semibold">Player of the Match:</span> {{.}}<br>{{end}}
-            {{with .Row.Notes}}<span class="text-gray-600 italic">&ldquo;{{.}}&rdquo;</span><br>{{end}}
+            <span class="font-semibold">Player of the Match:</span> {{if .Row.PlayerOfMatchName}}{{.Row.PlayerOfMatchName}}{{else}}<span class="text-gray-400">(not set)</span>{{end}}<br>
+            <span class="font-semibold">Captain's Notes:</span> {{if .Row.Notes}}<span class="italic">&ldquo;{{.Row.Notes}}&rdquo;</span>{{else}}<span class="text-gray-400">(not set)</span>{{end}}<br>
+            <span class="font-semibold">Message for RSVP Reminders:</span> {{if .Row.CaptainMessage}}<span class="italic">&ldquo;{{.Row.CaptainMessage}}&rdquo;</span>{{else}}<span class="text-gray-400">(not set)</span>{{end}}<br>
             <span class="text-blue-600">Edit</span>
         </summary>
         <div class="mt-2">{{template "team-note-form" .}}</div>
@@ -187,6 +190,7 @@
 <div class="mt-3 mb-4 text-sm text-center">
     {{with .Row.PlayerOfMatchName}}<p><span class="font-semibold">Player of the Match:</span> {{.}}</p>{{end}}
     {{with .Row.Notes}}<p class="text-gray-600 italic">&ldquo;{{.}}&rdquo;</p>{{end}}
+    {{with .Row.CaptainMessage}}<p class="text-gray-600">Message: <span class="italic">&ldquo;{{.}}&rdquo;</span></p>{{end}}
 </div>
 {{end}}
 {{end}}
@@ -207,6 +211,48 @@
     <label class="field-label mt-2">Captain's Notes</label>
     <textarea class="form-field" name="notes" rows="3">{{.Row.Form.Notes}}</textarea>
     {{with .Row.Form.FieldErrors.notes}}<p class='error-message'>{{.}}</p>{{end}}
+    <label class="field-label mt-2">Message for RSVP Reminders</label>
+    <p class="text-xs text-gray-500 mb-1">Shown to your team in the RSVP reminder emails before the match.</p>
+    <textarea class="form-field" name="captainMessage" rows="3">{{.Row.Form.CaptainMessage}}</textarea>
+    {{with .Row.Form.FieldErrors.captainMessage}}<p class='error-message'>{{.}}</p>{{end}}
     <div class="mt-2"><input class="btn m-0" type="submit" value="Save"></div>
 </form>
+{{end}}
+
+{{/* team-test-reminder: a temporary validation tool (captain/admin only —
+     see CanSendTestReminder) for previewing the real RSVP reminder email's
+     content/delivery on demand, mirroring team-invite.html's "type an
+     email, or pick from the roster" pattern. Sends bypass the real
+     schedule and record nothing — see MatchReminderService.SendTestReminder. */}}
+{{define "team-test-reminder"}}
+{{if .Row.CanSendTestReminder}}
+<div class="mt-3 mb-4 text-sm text-center">
+    <details>
+        <summary class="cursor-pointer text-blue-600 list-none">Send Test Reminder</summary>
+        <div class="mt-3 text-left">
+            <form action="/match/{{.Root.Data.Match.ID}}/testReminder" method="POST" class="mb-4">
+                <input type='hidden' name='csrf_token' value='{{.Root.CSRFToken}}'>
+                <input type='hidden' name='teamID' value='{{.Row.TeamID}}'>
+                <label class="field-label">Email addresses (one per line, or comma-separated)</label>
+                <textarea class="form-field" name="emails" rows="3" placeholder="you@example.com"></textarea>
+                <div class="mt-2 text-center"><input class="btn-secondary m-0" type="submit" value="Send Test"></div>
+            </form>
+            {{if .Row.ActivatedTeammates}}
+            <form action="/match/{{.Root.Data.Match.ID}}/testReminder" method="POST">
+                <input type='hidden' name='csrf_token' value='{{.Root.CSRFToken}}'>
+                <input type='hidden' name='teamID' value='{{.Row.TeamID}}'>
+                <p class="field-label mb-1">Or select teammates with an account</p>
+                {{range .Row.ActivatedTeammates}}
+                <label class="flex items-center gap-2 mb-1">
+                    <input type="checkbox" name="playerIDs" value="{{.PlayerID}}">
+                    <span>{{.Name}} <span class="text-gray-500 text-xs">({{.Email}})</span></span>
+                </label>
+                {{end}}
+                <div class="mt-2 text-center"><input class="btn-secondary m-0" type="submit" value="Send Test to Selected"></div>
+            </form>
+            {{end}}
+        </div>
+    </details>
+</div>
+{{end}}
 {{end}}

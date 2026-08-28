@@ -60,16 +60,22 @@ func TestNotFoundRendersStyledErrorPage(t *testing.T) {
 }
 
 // Unauthenticated requests to active and admin routes are redirected to /.
+// A logged-out hit on an active-tier route (chained through requireActive)
+// now carries its own URL through login via `next` (see
+// TestLoginRedirectsToNextAfterAuth). Admin-tier routes (requireAdmin only,
+// no requireActive in the chain) are untouched by that change and still
+// just land on the homepage — not a target for email deep links anyway.
 func TestUnauthenticatedAccessRedirects(t *testing.T) {
 	app := newTestApplication(t)
 	ts := newTestServer(t, app.routes())
 
 	tests := []struct {
-		name string
-		path string
+		name         string
+		path         string
+		wantLocation string
 	}{
-		{"team player create", "/team/1/player/create"},
-		{"user search", "/user/search"},
+		{"team player create", "/team/1/player/create", "/user/login?next=" + url.QueryEscape("/team/1/player/create")},
+		{"user search", "/user/search", "/"},
 	}
 
 	for _, tt := range tests {
@@ -78,8 +84,8 @@ func TestUnauthenticatedAccessRedirects(t *testing.T) {
 			if code != http.StatusSeeOther {
 				t.Errorf("want %d; got %d", http.StatusSeeOther, code)
 			}
-			if loc := headers.Get("Location"); loc != "/" {
-				t.Errorf("want Location %q; got %q", "/", loc)
+			if loc := headers.Get("Location"); loc != tt.wantLocation {
+				t.Errorf("want Location %q; got %q", tt.wantLocation, loc)
 			}
 		})
 	}
@@ -2474,7 +2480,7 @@ func TestMatchTeamNotes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Run("home captain sets the home team's Player of the Match and notes", func(t *testing.T) {
+	t.Run("home captain sets the home team's Player of the Match, notes, and captain's message", func(t *testing.T) {
 		ts := newTestServer(t, app.routes())
 		ts.login(t, "notes-home-captain@test.com", "validpassword123")
 
@@ -2485,6 +2491,7 @@ func TestMatchTeamNotes(t *testing.T) {
 			"teamID":          {fmt.Sprintf("%d", homeTeamID)},
 			"playerOfMatchID": {fmt.Sprintf("%d", homeCaptainID)},
 			"notes":           {"Great effort from everyone"},
+			"captainMessage":  {"Meet at the field 30 minutes early"},
 			"csrf_token":      {csrfToken},
 		})
 		if code != http.StatusSeeOther {
@@ -2500,6 +2507,9 @@ func TestMatchTeamNotes(t *testing.T) {
 		}
 		if !strings.Contains(body, "Cap Tain") {
 			t.Error("expected the Player of the Match's name to appear on the match view")
+		}
+		if !strings.Contains(body, "Meet at the field 30 minutes early") {
+			t.Error("expected the saved captain's message to appear on the match view")
 		}
 	})
 
@@ -2583,6 +2593,317 @@ func TestMatchTeamNotes(t *testing.T) {
 		}
 		if afterNote.Notes.String != beforeNote.Notes.String {
 			t.Errorf("expected the previously saved note to remain untouched, got %q", afterNote.Notes.String)
+		}
+	})
+}
+
+// A logged-out hit on a protected page (the active tier — requireActive)
+// carries its own URL through login via a `next` param, so a deep link
+// (an email's "RSVP Now!" link, for instance) survives having to log in
+// first, rather than always landing on the homepage.
+func TestLoginRedirectsToNextAfterAuth(t *testing.T) {
+	app := newTestApplication(t)
+
+	t.Run("a logged-out hit on a protected page redirects to login with next set", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+
+		code, headers, _ := ts.get(t, "/league")
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		wantLocation := "/user/login?next=" + url.QueryEscape("/league")
+		if loc := headers.Get("Location"); loc != wantLocation {
+			t.Errorf("want Location %q; got %q", wantLocation, loc)
+		}
+	})
+
+	t.Run("logging in through that redirect lands back on the original page", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+
+		_, _, body := ts.get(t, "/user/login?next="+url.QueryEscape("/league"))
+		if !strings.Contains(body, "value='/league'") {
+			t.Error("expected the login form's hidden next field to carry /league through")
+		}
+		csrfToken := extractCSRFToken(t, body)
+
+		code, headers, _ := ts.postForm(t, "/user/login", url.Values{
+			"email":      {testActiveEmail},
+			"password":   {testActivePass},
+			"next":       {"/league"},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/league" {
+			t.Errorf("want Location %q; got %q", "/league", loc)
+		}
+	})
+
+	t.Run("an unsafe next falls back to the homepage instead of following it", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+
+		_, _, formBody := ts.get(t, "/user/login")
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := ts.postForm(t, "/user/login", url.Values{
+			"email":      {testActiveEmail},
+			"password":   {testActivePass},
+			"next":       {"//evil.example.com"},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q (unsafe next rejected); got %q", "/", loc)
+		}
+	})
+}
+
+// The per-match "Send Test Reminder" tool — a captain (or admin) previewing
+// the real RSVP reminder email's content/delivery on demand, either by
+// typing addresses directly or picking from teammates who already have an
+// activated account. Unlike the old admin-wide trigger this replaces, it's
+// not date-gated and records nothing to matchRSVPReminders.
+func TestMatchTestReminderSubmit(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Test Reminder League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Test Reminder Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Test Reminder Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Test Reminder Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	// Deliberately far from the real 3/2/1-day RSVP schedule — proves the
+	// test-reminder tool isn't date-gated like the real scheduled sends.
+	matchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID,
+		MatchDate: time.Now().AddDate(0, 0, 30),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	homeCaptainID := setupTeamCaptain(t, homeTeamID, "test-reminder-captain@test.com", "validpassword123")
+
+	mrrm := &models.MatchRSVPReminderModel{DB: testDB}
+
+	t.Run("the captain can send a test reminder to a typed-in email", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "test-reminder-captain@test.com", "validpassword123")
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/testReminder", matchID), url.Values{
+			"teamID":     {fmt.Sprintf("%d", homeTeamID)},
+			"emails":     {"someone@example.com, not-an-email, another@example.com"},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", matchID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/match/%d", matchID), loc)
+		}
+
+		// A far-future match is nowhere near the real 3/2/1-day schedule —
+		// the test send must not have touched the real tracking table.
+		wasSent, err := mrrm.WasSent(matchID, homeCaptainID, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wasSent {
+			t.Fatal("expected the test reminder to record nothing to matchRSVPReminders")
+		}
+	})
+
+	t.Run("a plain roster member (not the captain) can't send a test reminder", func(t *testing.T) {
+		setupRosterMember(t, homeTeamID, "test-reminder-bystander@test.com", "validpassword123")
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "test-reminder-bystander@test.com", "validpassword123")
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/testReminder", matchID), url.Values{
+			"teamID":     {fmt.Sprintf("%d", homeTeamID)},
+			"emails":     {"someone@example.com"},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+	})
+
+	t.Run("selecting an activated teammate resolves to their real login email", func(t *testing.T) {
+		um := &models.UserModel{DB: testDB}
+		pm := &models.PlayerModel{DB: testDB}
+		tmm := &models.TeamMemberModel{DB: testDB}
+		teammateID, err := pm.Insert(&models.Player{FirstName: "Active", LastName: "Teammate"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tmm.AddMembership(teammateID, homeTeamID); err != nil {
+			t.Fatal(err)
+		}
+		userID, err := um.Insert("active-teammate@test.com", "validpassword123")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := um.Activate(userID); err != nil {
+			t.Fatal(err)
+		}
+		if err := um.SetPlayerID(userID, teammateID); err != nil {
+			t.Fatal(err)
+		}
+
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "test-reminder-captain@test.com", "validpassword123")
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if !strings.Contains(formBody, "active-teammate@test.com") {
+			t.Error("expected the activated teammate to appear in the test-reminder picker")
+		}
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, _, _ := ts.postForm(t, fmt.Sprintf("/match/%d/testReminder", matchID), url.Values{
+			"teamID":     {fmt.Sprintf("%d", homeTeamID)},
+			"playerIDs":  {fmt.Sprintf("%d", teammateID)},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+	})
+
+	t.Run("no addresses and no selection redirects back with a flash, sends nothing", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "test-reminder-captain@test.com", "validpassword123")
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/testReminder", matchID), url.Values{
+			"teamID":     {fmt.Sprintf("%d", homeTeamID)},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", matchID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/match/%d", matchID), loc)
+		}
+	})
+}
+
+// A viewer who captains one of a match's two teams sees edit controls
+// (Player of the Match/Notes/Captain's Message form, Send Test Reminder)
+// for only their own side — even when they're also an admin, whose access
+// would otherwise reach both sides. A viewer who isn't captain of either
+// team (a plain admin, here) is unaffected and still sees both.
+func TestMatchScreenEditBoxesScopedToOwnCaptain(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Scoped Edit Boxes League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Scoped Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Scoped Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Scoped Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// setupTeamCaptain's player isn't an admin; promote this one to admin
+	// too, mirroring the real case that prompted this (a captain whose
+	// account also happens to be a system admin).
+	um := &models.UserModel{DB: testDB}
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	adminCaptainID, err := pm.Insert(&models.Player{FirstName: "Admin", LastName: "Captain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(adminCaptainID, homeTeamID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tm.SetCaptain(homeTeamID, sql.NullInt32{Int32: int32(adminCaptainID), Valid: true}); err != nil {
+		t.Fatal(err)
+	}
+	adminCaptainUserID, err := um.Insert("admin-captain@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.Activate(adminCaptainUserID); err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetPlayerID(adminCaptainUserID, adminCaptainID); err != nil {
+		t.Fatal(err)
+	}
+	if err := um.InsertUserRole(adminCaptainUserID, "ADMIN"); err != nil {
+		t.Fatal(err)
+	}
+
+	homeTeamIDField := fmt.Sprintf("name='teamID' value='%d'", homeTeamID)
+	awayTeamIDField := fmt.Sprintf("name='teamID' value='%d'", awayTeamID)
+
+	t.Run("an admin who captains the home team sees only the home team's edit boxes", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "admin-captain@test.com", "validpassword123")
+
+		_, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if !strings.Contains(body, homeTeamIDField) {
+			t.Error("expected the home team's edit controls to be visible")
+		}
+		if strings.Contains(body, awayTeamIDField) {
+			t.Error("expected the away team's edit controls to be hidden from the home captain, even though they're an admin")
+		}
+	})
+
+	t.Run("a plain admin who captains neither team sees both teams' edit boxes", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testAdminEmail, testAdminPass)
+
+		_, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if !strings.Contains(body, homeTeamIDField) {
+			t.Error("expected the home team's edit controls to be visible to a plain admin")
+		}
+		if !strings.Contains(body, awayTeamIDField) {
+			t.Error("expected the away team's edit controls to be visible to a plain admin")
 		}
 	})
 }

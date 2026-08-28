@@ -98,6 +98,16 @@ func (m *MatchModel) GetByTeamAndSeason(teamID, seasonID int) ([]*Match, error) 
 	return m.queryMatches(stmt, seasonID, teamID, teamID)
 }
 
+// GetByDate returns every match scheduled on exactly date (a plain
+// year/month/day match against the DATE column) — used by
+// MatchReminderService to find matches N days out.
+func (m *MatchModel) GetByDate(date time.Time) ([]*Match, error) {
+	stmt := `SELECT id, seasonID, homeTeamID, awayTeamID, matchDate, locationID, homeScore, awayScore, notes, created
+		FROM matches WHERE matchDate = ? ORDER BY id ASC`
+
+	return m.queryMatches(stmt, date)
+}
+
 // TeamMatchAggregate is one team's win/loss/draw/goal tally across a
 // season's scored matches — the raw numbers standings are built from.
 // Points aren't included here since they're a display-layer rule (3/1/0),

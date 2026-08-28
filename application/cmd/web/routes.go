@@ -52,6 +52,7 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodGet, "/match/:id", active.ThenFunc(app.matchView))
 	router.Handler(http.MethodPost, "/match/:id/rsvp", active.ThenFunc(app.matchRSVPSubmit))
 	router.Handler(http.MethodPost, "/match/:id/notes", active.ThenFunc(app.matchTeamNoteSubmit))
+	router.Handler(http.MethodPost, "/match/:id/testReminder", active.ThenFunc(app.matchTestReminderSubmit))
 
 	// team-manager routes (logged in + active + (admin OR captain OR league
 	// admin of :teamID))

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -47,10 +48,19 @@ func (app *application) recoverPanic(next http.Handler) http.Handler {
 	})
 }
 
+// loginRedirectURL builds a /user/login?next=... URL that carries r's own
+// path+query through the login flow, so a logged-out hit on a deep link
+// (an email's "RSVP Now!" link, for instance) lands back where it was
+// headed instead of just the homepage. userLoginPost only honors next when
+// isSafeNextURL approves it.
+func loginRedirectURL(r *http.Request) string {
+	return "/user/login?next=" + url.QueryEscape(r.URL.RequestURI())
+}
+
 func (app *application) requireAuthentication(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !app.isAuthenticated(r) {
-			http.Redirect(w, r, "/user/login", http.StatusSeeOther)
+			http.Redirect(w, r, loginRedirectURL(r), http.StatusSeeOther)
 			return
 		}
 
@@ -63,6 +73,14 @@ func (app *application) requireAuthentication(next http.Handler) http.Handler {
 func (app *application) requireActive(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !app.isActive(r) {
+			// Not authenticated at all: send them through login, carrying
+			// this URL as next. Authenticated but not yet active: a login
+			// redirect can't fix that (they need to activate their
+			// account), so fall back to the homepage as before.
+			if !app.isAuthenticated(r) {
+				http.Redirect(w, r, loginRedirectURL(r), http.StatusSeeOther)
+				return
+			}
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}

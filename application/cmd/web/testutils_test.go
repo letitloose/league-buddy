@@ -137,6 +137,7 @@ func newTestApplication(t *testing.T) *application {
 	rsvpService := &services.RSVPService{RSVPModel: rsvps}
 	matchTeamNotes := &models.MatchTeamNoteModel{DB: testDB}
 	matchTeamNoteService := &services.MatchTeamNoteService{MatchTeamNoteModel: matchTeamNotes, DB: testDB}
+	matchReminderService := &services.MatchReminderService{DB: testDB}
 	invites := &models.InviteModel{DB: testDB}
 	inviteService := &services.InviteService{InviteModel: invites, DB: testDB}
 	joinRequests := &models.JoinRequestModel{DB: testDB}
@@ -154,6 +155,7 @@ func newTestApplication(t *testing.T) *application {
 		matchService:         matchService,
 		rsvpService:          rsvpService,
 		matchTeamNoteService: matchTeamNoteService,
+		matchReminderService: matchReminderService,
 		inviteService:        inviteService,
 		joinRequestService:   joinRequestService,
 		templateCache:        templateCache,

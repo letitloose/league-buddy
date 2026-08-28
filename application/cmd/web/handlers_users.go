@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/letitloose/league-buddy/internal/models"
@@ -144,9 +145,20 @@ func (app *application) userSignupPost(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/user/login", http.StatusSeeOther)
 }
 
+// isSafeNextURL reports whether next is safe to redirect to after login: a
+// same-origin path (starts with exactly one "/"), never an absolute URL or
+// protocol-relative one ("//evil.example.com") that would send the user
+// somewhere else entirely.
+func isSafeNextURL(next string) bool {
+	return strings.HasPrefix(next, "/") && !strings.HasPrefix(next, "//")
+}
+
 func (app *application) userLogin(w http.ResponseWriter, r *http.Request) {
 	data := app.newTemplateData(r)
 	data.Form = services.UserForm{}
+	if next := r.URL.Query().Get("next"); isSafeNextURL(next) {
+		data.NextURL = next
+	}
 	app.render(w, http.StatusOK, "login.html", data)
 }
 
@@ -155,6 +167,11 @@ func (app *application) userLoginPost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		app.clientError(w, http.StatusBadRequest)
 		return
+	}
+
+	next := r.PostForm.Get("next")
+	if !isSafeNextURL(next) {
+		next = ""
 	}
 
 	form := services.UserForm{
@@ -167,12 +184,14 @@ func (app *application) userLoginPost(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, models.ErrBadData) {
 			data := app.newTemplateData(r)
 			data.Form = form
+			data.NextURL = next
 			app.render(w, http.StatusUnprocessableEntity, "login.html", data)
 			return
 		} else if errors.Is(err, models.ErrInvalidCredentials) {
 			form.AddNonFieldError("Email or password is incorrect")
 			data := app.newTemplateData(r)
 			data.Form = form
+			data.NextURL = next
 			app.render(w, http.StatusUnprocessableEntity, "login.html", data)
 		} else {
 			app.serverError(w, err)
@@ -188,6 +207,10 @@ func (app *application) userLoginPost(w http.ResponseWriter, r *http.Request) {
 
 	app.sessionManager.Put(r.Context(), "authenticatedUserID", id)
 
+	if next != "" {
+		http.Redirect(w, r, next, http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

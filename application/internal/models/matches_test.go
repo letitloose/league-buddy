@@ -167,6 +167,41 @@ func TestGetBySeasonAndGetByTeamAndSeason(t *testing.T) {
 	}
 }
 
+func TestGetByDate(t *testing.T) {
+	db := NewTestDB(t)
+
+	seasonID := newTestSeason(t, db, 1)
+	opponentID := newTestOpponentTeam(t, db, 1, "Rival FC")
+	otherTeamID := newTestOpponentTeam(t, db, 1, "Third FC")
+	mm := MatchModel{DB: db}
+
+	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: time.Date(2024, 5, 5, 0, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: opponentID, AwayTeamID: otherTeamID, MatchDate: time.Date(2024, 5, 5, 0, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: otherTeamID, MatchDate: time.Date(2024, 5, 6, 0, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatal(err)
+	}
+
+	matches, err := mm.GetByDate(time.Date(2024, 5, 5, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 matches on 2024-05-05, got %d", len(matches))
+	}
+
+	noMatches, err := mm.GetByDate(time.Date(2024, 5, 7, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(noMatches) != 0 {
+		t.Fatalf("expected 0 matches on a date with none scheduled, got %d", len(noMatches))
+	}
+}
+
 func TestNextMatchForTeam(t *testing.T) {
 	db := NewTestDB(t)
 

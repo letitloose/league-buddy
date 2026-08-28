@@ -28,7 +28,7 @@ func TestUpsertMatchTeamNoteInsertAndUpdate(t *testing.T) {
 	if err := mtnm.Upsert(&MatchTeamNote{MatchID: matchID, TeamID: 1, Notes: sql.NullString{String: "great effort all around", Valid: true}, UpdatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := mtnm.Upsert(&MatchTeamNote{MatchID: matchID, TeamID: 1, PlayerOfMatchID: sql.NullInt32{Int32: int32(playerID), Valid: true}, Notes: sql.NullString{String: "Sam was everywhere", Valid: true}, UpdatedAt: time.Now()}); err != nil {
+	if err := mtnm.Upsert(&MatchTeamNote{MatchID: matchID, TeamID: 1, PlayerOfMatchID: sql.NullInt32{Int32: int32(playerID), Valid: true}, Notes: sql.NullString{String: "Sam was everywhere", Valid: true}, CaptainMessage: sql.NullString{String: "Meet at 6:15, wear white", Valid: true}, UpdatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -41,6 +41,9 @@ func TestUpsertMatchTeamNoteInsertAndUpdate(t *testing.T) {
 	}
 	if note.Notes.String != "Sam was everywhere" {
 		t.Fatalf("expected updated notes, got %+v", note.Notes)
+	}
+	if note.CaptainMessage.String != "Meet at 6:15, wear white" {
+		t.Fatalf("expected updated captainMessage, got %+v", note.CaptainMessage)
 	}
 }
 

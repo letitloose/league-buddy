@@ -49,6 +49,7 @@ type templateData struct {
 	MyAdminLeagues  []NavLeagueInfo
 	CSRFToken       string
 	Breadcrumbs     []Breadcrumb
+	NextURL         string
 }
 
 func pickerDate(t time.Time) string {

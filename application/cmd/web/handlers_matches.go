@@ -350,6 +350,7 @@ type goalBoxScoreRow struct {
 	Minute       int // 0 = not recorded
 	ScorerName   string
 	AssisterName string
+	IsOwnGoal    bool // scorer is on the *other* team's roster, not the one credited with the goal
 }
 
 // cardBoxScoreRow is one card on the read-only match view. PlayerName is
@@ -499,11 +500,24 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 		return nil, err
 	}
 	playerName := make(map[int]string, len(homeRoster)+len(awayRoster))
+	homeRosterIDs := make(map[int]bool, len(homeRoster))
 	for _, player := range homeRoster {
 		playerName[player.ID] = player.FirstName + " " + player.LastName
+		homeRosterIDs[player.ID] = true
 	}
+	awayRosterIDs := make(map[int]bool, len(awayRoster))
 	for _, player := range awayRoster {
 		playerName[player.ID] = player.FirstName + " " + player.LastName
+		awayRosterIDs[player.ID] = true
+	}
+	// isOnCreditedRoster reports whether playerID belongs to the roster of
+	// teamID — used to flag an own goal (a goal's scorer credited to a team
+	// they're not actually on).
+	isOnCreditedRoster := func(playerID, teamID int) bool {
+		if teamID == match.HomeTeamID {
+			return homeRosterIDs[playerID]
+		}
+		return awayRosterIDs[playerID]
 	}
 	// nameFor falls back to a direct lookup for a player who scored/was
 	// carded but has since left the roster shown above — rare, but a
@@ -540,6 +554,9 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 			return nil, err
 		}
 		row := &goalBoxScoreRow{ScorerName: scorerName, AssisterName: assisterName}
+		if g.ScorerPlayerID.Valid && !isOnCreditedRoster(int(g.ScorerPlayerID.Int32), g.TeamID) {
+			row.IsOwnGoal = true
+		}
 		if g.Minute.Valid {
 			row.Minute = int(g.Minute.Int32)
 		}

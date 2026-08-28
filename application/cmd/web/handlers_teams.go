@@ -53,6 +53,7 @@ type teamViewData struct {
 	LeadersByPlayer         map[int]*models.StatLine
 	LeadingScorer           *models.StatLine
 	LeadingAssister         *models.StatLine
+	LeadingOwnGoals         *models.StatLine
 	Schedule                []*seasonMatchRow
 	HasAccount              map[int]bool
 	RosterSort              string
@@ -269,13 +270,16 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var leadingScorer, leadingAssister *models.StatLine
+	var leadingScorer, leadingAssister, leadingOwnGoals *models.StatLine
 	for _, line := range leaders {
 		if line.Goals > 0 && (leadingScorer == nil || line.Goals > leadingScorer.Goals) {
 			leadingScorer = line
 		}
 		if line.Assists > 0 && (leadingAssister == nil || line.Assists > leadingAssister.Assists) {
 			leadingAssister = line
+		}
+		if line.OwnGoals > 0 && (leadingOwnGoals == nil || line.OwnGoals > leadingOwnGoals.OwnGoals) {
+			leadingOwnGoals = line
 		}
 	}
 
@@ -331,6 +335,7 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		LeadersByPlayer:         leadersByPlayer,
 		LeadingScorer:           leadingScorer,
 		LeadingAssister:         leadingAssister,
+		LeadingOwnGoals:         leadingOwnGoals,
 		Schedule:                schedule,
 		HasAccount:              hasAccount,
 		RosterSort:              rosterSort,

@@ -1555,6 +1555,16 @@ func TestMatchUpdateSavesGoalsAndCards(t *testing.T) {
 
 	scorerID := setupTeamCaptain(t, homeTeamID, "events-scorer-captain@test.com", "validpassword123")
 
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	awayPlayerID, err := pm.Insert(&models.Player{FirstName: "Unlucky", LastName: "Defender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(awayPlayerID, awayTeamID); err != nil {
+		t.Fatal(err)
+	}
+
 	ts := newTestServer(t, app.routes())
 	ts.login(t, testAdminEmail, testAdminPass)
 
@@ -1631,6 +1641,47 @@ func TestMatchUpdateSavesGoalsAndCards(t *testing.T) {
 		}
 		if len(stats) != 1 || stats[0].Goals != 1 || stats[0].Assists != 1 || stats[0].YellowCards != 1 {
 			t.Fatalf("expected the recomputed cache to show goals=1 assists=1 yellowCards=1, got %+v", stats)
+		}
+	})
+
+	t.Run("an own goal can be credited to a team with a scorer from the other roster", func(t *testing.T) {
+		form := url.Values{
+			"matchdate":    {"2024-05-05"},
+			"homescore":    {"2"},
+			"awayscore":    {"0"},
+			"goalTeamID":   {fmt.Sprintf("%d", homeTeamID)},
+			"goalScorerID": {fmt.Sprintf("%d", awayPlayerID)},
+			"goalMinute":   {"75"},
+		}
+		code, headers := postGoalsAndCards(t, form)
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", matchID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/match/%d", matchID), loc)
+		}
+
+		mgm := &models.MatchGoalModel{DB: testDB}
+		goals, err := mgm.ListByMatch(matchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(goals) != 1 || goals[0].TeamID != homeTeamID || !goals[0].ScorerPlayerID.Valid || int(goals[0].ScorerPlayerID.Int32) != awayPlayerID {
+			t.Fatalf("expected the own goal saved credited to home with the away player as scorer, got %+v", goals)
+		}
+
+		_, _, viewBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if !strings.Contains(viewBody, "(own goal)") {
+			t.Error("expected the match view box score to flag the own goal")
+		}
+
+		pmsm := &models.PlayerMatchStatModel{DB: testDB}
+		stats, err := pmsm.ListByMatch(matchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(stats) != 1 || stats[0].PlayerID != awayPlayerID || stats[0].TeamID != awayTeamID || stats[0].Goals != 0 || stats[0].OwnGoals != 1 {
+			t.Fatalf("expected the scorer tallied under the away team with OwnGoals=1 and Goals=0, got %+v", stats)
 		}
 	})
 
@@ -2294,6 +2345,66 @@ func TestTeamRosterDefaultSortAndToggle(t *testing.T) {
 			t.Error("expected the active Name header to link to toggle into DESC")
 		}
 	})
+}
+
+// The team page's leaders line includes an Own goal leader alongside the
+// existing leading scorer/assister, once someone on the roster has one.
+func TestTeamViewOwnGoalLeader(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Own Goal Leader League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Own Goal Leader Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Own Goal Leader Opponent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Own Goal Leader Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: teamID, AwayTeamID: opponentID, MatchDate: time.Now(),
+		HomeScore: sql.NullInt32{Int32: 0, Valid: true}, AwayScore: sql.NullInt32{Int32: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	pmsm := &models.PlayerMatchStatModel{DB: testDB}
+
+	unluckyID, err := pm.Insert(&models.Player{FirstName: "Unlucky", LastName: "Defender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(unluckyID, teamID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pmsm.Upsert(&models.PlayerMatchStat{MatchID: matchID, PlayerID: unluckyID, TeamID: teamID, OwnGoals: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	code, _, body := ts.get(t, fmt.Sprintf("/team/%d", teamID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if !strings.Contains(body, "Own goal leader: Unlucky Defender (1)") {
+		t.Error("expected the Own goal leader line to appear on the team page")
+	}
 }
 
 // A captain can designate a roster member as a scorekeeper, which grants

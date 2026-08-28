@@ -20,6 +20,7 @@ type PlayerMatchStat struct {
 	Assists     int
 	YellowCards int
 	RedCards    int
+	OwnGoals    int
 }
 
 // StatLine is one player's aggregated stats across a team's matches in a
@@ -31,6 +32,7 @@ type StatLine struct {
 	Assists     int
 	YellowCards int
 	RedCards    int
+	OwnGoals    int
 }
 
 // LeagueLeaderLine is one player's total for a single stat (goals or
@@ -50,14 +52,14 @@ type PlayerMatchStatModel struct {
 // Upsert inserts stat, or updates the existing (matchID, playerID) row if
 // one already exists.
 func (m *PlayerMatchStatModel) Upsert(stat *PlayerMatchStat) error {
-	statement := `INSERT INTO playerMatchStats (matchID, playerID, teamID, goals, assists, yellowCards, redCards) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	statement := `INSERT INTO playerMatchStats (matchID, playerID, teamID, goals, assists, yellowCards, redCards, ownGoals) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
-	_, err := m.DB.Exec(statement, stat.MatchID, stat.PlayerID, stat.TeamID, stat.Goals, stat.Assists, stat.YellowCards, stat.RedCards)
+	_, err := m.DB.Exec(statement, stat.MatchID, stat.PlayerID, stat.TeamID, stat.Goals, stat.Assists, stat.YellowCards, stat.RedCards, stat.OwnGoals)
 	if err != nil {
 		var mySQLError *mysql.MySQLError
 		if errors.As(err, &mySQLError) && mySQLError.Number == 1062 {
-			update := `UPDATE playerMatchStats SET teamID = ?, goals = ?, assists = ?, yellowCards = ?, redCards = ? WHERE matchID = ? AND playerID = ?`
-			_, err = m.DB.Exec(update, stat.TeamID, stat.Goals, stat.Assists, stat.YellowCards, stat.RedCards, stat.MatchID, stat.PlayerID)
+			update := `UPDATE playerMatchStats SET teamID = ?, goals = ?, assists = ?, yellowCards = ?, redCards = ?, ownGoals = ? WHERE matchID = ? AND playerID = ?`
+			_, err = m.DB.Exec(update, stat.TeamID, stat.Goals, stat.Assists, stat.YellowCards, stat.RedCards, stat.OwnGoals, stat.MatchID, stat.PlayerID)
 			return err
 		}
 		return err
@@ -75,7 +77,7 @@ func (m *PlayerMatchStatModel) DeleteByMatch(matchID int) error {
 
 // ListByMatch returns every stat line recorded for matchID.
 func (m *PlayerMatchStatModel) ListByMatch(matchID int) ([]*PlayerMatchStat, error) {
-	stmt := `SELECT id, matchID, playerID, teamID, goals, assists, yellowCards, redCards FROM playerMatchStats WHERE matchID = ?`
+	stmt := `SELECT id, matchID, playerID, teamID, goals, assists, yellowCards, redCards, ownGoals FROM playerMatchStats WHERE matchID = ?`
 
 	rows, err := m.DB.Query(stmt, matchID)
 	if err != nil {
@@ -86,7 +88,7 @@ func (m *PlayerMatchStatModel) ListByMatch(matchID int) ([]*PlayerMatchStat, err
 	stats := []*PlayerMatchStat{}
 	for rows.Next() {
 		stat := &PlayerMatchStat{}
-		err := rows.Scan(&stat.ID, &stat.MatchID, &stat.PlayerID, &stat.TeamID, &stat.Goals, &stat.Assists, &stat.YellowCards, &stat.RedCards)
+		err := rows.Scan(&stat.ID, &stat.MatchID, &stat.PlayerID, &stat.TeamID, &stat.Goals, &stat.Assists, &stat.YellowCards, &stat.RedCards, &stat.OwnGoals)
 		if err != nil {
 			return nil, err
 		}
@@ -100,7 +102,8 @@ func (m *PlayerMatchStatModel) ListByMatch(matchID int) ([]*PlayerMatchStat, err
 func (m *PlayerMatchStatModel) LeaderboardByTeamSeason(teamID, seasonID int) ([]*StatLine, error) {
 	stmt := `SELECT p.id, p.firstname, p.lastname,
 			SUM(pms.goals) AS goals, SUM(pms.assists) AS assists,
-			SUM(pms.yellowCards) AS yellowCards, SUM(pms.redCards) AS redCards
+			SUM(pms.yellowCards) AS yellowCards, SUM(pms.redCards) AS redCards,
+			SUM(pms.ownGoals) AS ownGoals
 		FROM playerMatchStats pms
 		JOIN matches mt ON mt.id = pms.matchID
 		JOIN players p ON p.id = pms.playerID
@@ -118,7 +121,7 @@ func (m *PlayerMatchStatModel) LeaderboardByTeamSeason(teamID, seasonID int) ([]
 	for rows.Next() {
 		var firstName, lastName string
 		line := &StatLine{}
-		err := rows.Scan(&line.PlayerID, &firstName, &lastName, &line.Goals, &line.Assists, &line.YellowCards, &line.RedCards)
+		err := rows.Scan(&line.PlayerID, &firstName, &lastName, &line.Goals, &line.Assists, &line.YellowCards, &line.RedCards, &line.OwnGoals)
 		if err != nil {
 			return nil, err
 		}

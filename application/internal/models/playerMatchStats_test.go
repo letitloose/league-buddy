@@ -26,7 +26,7 @@ func TestUpsertPlayerMatchStatInsertAndUpdate(t *testing.T) {
 	if err := pmsm.Upsert(&PlayerMatchStat{MatchID: matchID, PlayerID: playerID, TeamID: 1, Goals: 1, Assists: 0}); err != nil {
 		t.Fatal(err)
 	}
-	if err := pmsm.Upsert(&PlayerMatchStat{MatchID: matchID, PlayerID: playerID, TeamID: 1, Goals: 2, Assists: 1}); err != nil {
+	if err := pmsm.Upsert(&PlayerMatchStat{MatchID: matchID, PlayerID: playerID, TeamID: 1, Goals: 2, Assists: 1, OwnGoals: 1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -37,8 +37,8 @@ func TestUpsertPlayerMatchStatInsertAndUpdate(t *testing.T) {
 	if len(stats) != 1 {
 		t.Fatalf("expected upsert to update in place, got %d rows", len(stats))
 	}
-	if stats[0].Goals != 2 || stats[0].Assists != 1 {
-		t.Fatalf("expected updated stats goals=2 assists=1, got %+v", stats[0])
+	if stats[0].Goals != 2 || stats[0].Assists != 1 || stats[0].OwnGoals != 1 {
+		t.Fatalf("expected updated stats goals=2 assists=1 ownGoals=1, got %+v", stats[0])
 	}
 }
 
@@ -80,7 +80,7 @@ func TestLeaderboardByTeamSeason(t *testing.T) {
 	if err := pmsm.Upsert(&PlayerMatchStat{MatchID: match2, PlayerID: striker, TeamID: 1, Goals: 1, Assists: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := pmsm.Upsert(&PlayerMatchStat{MatchID: match1, PlayerID: winger, TeamID: 1, Goals: 0, Assists: 3}); err != nil {
+	if err := pmsm.Upsert(&PlayerMatchStat{MatchID: match1, PlayerID: winger, TeamID: 1, Goals: 0, Assists: 3, OwnGoals: 2}); err != nil {
 		t.Fatal(err)
 	}
 	// A different season's stat line should not be included.
@@ -98,8 +98,8 @@ func TestLeaderboardByTeamSeason(t *testing.T) {
 	if board[0].PlayerID != striker || board[0].Goals != 3 {
 		t.Fatalf("expected striker leading with 3 goals, got %+v", board[0])
 	}
-	if board[1].PlayerID != winger || board[1].Assists != 3 {
-		t.Fatalf("expected winger with 3 assists, got %+v", board[1])
+	if board[1].PlayerID != winger || board[1].Assists != 3 || board[1].OwnGoals != 2 {
+		t.Fatalf("expected winger with 3 assists and 2 own goals, got %+v", board[1])
 	}
 }
 

@@ -64,6 +64,7 @@
                 <li>
                     <span class="font-semibold">{{if gt .Minute 0}}{{.Minute}}&rsquo;{{else}}&mdash;{{end}}</span>
                     {{if .ScorerName}}{{.ScorerName}}{{else}}<span class="text-gray-400">Unattributed goal</span>{{end}}
+                    {{if .IsOwnGoal}}<span class="text-gray-500">(own goal)</span>{{end}}
                     {{with .AssisterName}}<span class="text-gray-500">(assist: {{.}})</span>{{end}}
                 </li>
                 {{end}}
@@ -110,6 +111,7 @@
                 <li>
                     <span class="font-semibold">{{if gt .Minute 0}}{{.Minute}}&rsquo;{{else}}&mdash;{{end}}</span>
                     {{if .ScorerName}}{{.ScorerName}}{{else}}<span class="text-gray-400">Unattributed goal</span>{{end}}
+                    {{if .IsOwnGoal}}<span class="text-gray-500">(own goal)</span>{{end}}
                     {{with .AssisterName}}<span class="text-gray-500">(assist: {{.}})</span>{{end}}
                 </li>
                 {{end}}

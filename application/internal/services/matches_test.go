@@ -353,7 +353,10 @@ func TestUpdateMatchGoalRowsExceedingScoreFails(t *testing.T) {
 
 // A scorer/assister/carded player must actually belong to that row's
 // team's roster.
-func TestUpdateMatchRejectsPlayerNotOnRowsTeam(t *testing.T) {
+// A scorer must be on one of this match's two rosters — but not
+// necessarily the one credited with the goal, see
+// TestUpdateMatchAllowsOwnGoalScorerFromOtherRoster.
+func TestUpdateMatchRejectsPlayerNotOnEitherRoster(t *testing.T) {
 	db := models.NewTestDB(t)
 
 	seasons := &models.SeasonModel{DB: db}
@@ -389,6 +392,74 @@ func TestUpdateMatchRejectsPlayerNotOnRowsTeam(t *testing.T) {
 	err = matchService.UpdateMatch(updateForm, "admin@example.com")
 	if err != models.ErrBadData {
 		t.Fatalf("expected ErrBadData, got %v", err)
+	}
+}
+
+// An own goal is credited to the team that benefits, but actually kicked in
+// by a player on the *other* team — the scorer only has to be on one of
+// the match's two rosters, not specifically the credited team's. The own
+// goal counts toward the credited team's recorded score, but never inflates
+// the actual scorer's personal Goals tally — it's tallied as an OwnGoal
+// under their real team instead.
+func TestUpdateMatchAllowsOwnGoalScorerFromOtherRoster(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	seasons := &models.SeasonModel{DB: db}
+	teams := &models.TeamModel{DB: db}
+	players := &models.PlayerModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+	matches := &models.MatchModel{DB: db}
+	pmsm := &models.PlayerMatchStatModel{DB: db}
+	matchService := MatchService{MatchModel: matches, DB: db}
+
+	seasonID, err := seasons.Insert(&models.Season{LeagueID: 1, Name: "Spring 2024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := teams.Insert(&models.Team{LeagueID: 1, Name: "Rival FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// On the away roster — the one who (accidentally) scores for home.
+	awayPlayerID, err := players.Insert(&models.Player{FirstName: "Unlucky", LastName: "Defender"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(awayPlayerID, opponentID); err != nil {
+		t.Fatal(err)
+	}
+
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05"}
+	id, err := matchService.CreateMatch(form, "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Credited to home (TeamID: 1), scored by an away-roster player.
+	updateForm := &MatchForm{
+		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
+		HomeScore: "1", AwayScore: "0",
+		Goals: []GoalInput{{TeamID: 1, ScorerPlayerID: awayPlayerID, Minute: 42}},
+	}
+	if err := matchService.UpdateMatch(updateForm, "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	mgm := &models.MatchGoalModel{DB: db}
+	goals, err := mgm.ListByMatch(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(goals) != 1 || goals[0].TeamID != 1 || !goals[0].ScorerPlayerID.Valid || int(goals[0].ScorerPlayerID.Int32) != awayPlayerID {
+		t.Fatalf("expected the own goal saved credited to team 1 with the away player as scorer, got %+v", goals)
+	}
+
+	stats, err := pmsm.ListByMatch(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 1 || stats[0].PlayerID != awayPlayerID || stats[0].TeamID != opponentID || stats[0].Goals != 0 || stats[0].OwnGoals != 1 {
+		t.Fatalf("expected the scorer tallied under their own (away) team with OwnGoals=1 and Goals=0, got %+v", stats)
 	}
 }
 

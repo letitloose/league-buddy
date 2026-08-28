@@ -137,10 +137,18 @@ func validateMatchForm(form *MatchForm, db *sql.DB) (time.Time, sql.NullInt32, s
 
 // validateMatchEvents checks every goal/card row's TeamID is actually one
 // of the match's two teams, and — only when a specific player was picked
-// (0 means unattributed, always allowed) — that they belong to that row's
-// team's roster. A mismatch only happens from a tampered request, since the
-// form's dropdowns only ever offer valid combinations, but it's cheap to
-// catch rather than trust.
+// (0 means unattributed, always allowed) — that they belong to a roster
+// that actually belongs in this match. A mismatch only happens from a
+// tampered request, since the form's dropdowns only ever offer valid
+// combinations, but it's cheap to catch rather than trust.
+//
+// A goal's scorer/assister only has to be on *either* team's roster, not
+// specifically the team credited with the goal — an own goal is credited
+// to the team that benefits, but actually kicked in by a player on the
+// other team, so restricting it to the credited team's roster would make
+// own goals impossible to attribute to a specific player. Cards have no
+// equivalent case (a card is always issued to a player for their own
+// team's foul), so they stay restricted to the credited team's roster.
 func validateMatchEvents(form *MatchForm, db *sql.DB) {
 	tmm := &models.TeamMemberModel{DB: db}
 
@@ -151,17 +159,20 @@ func validateMatchEvents(form *MatchForm, db *sql.DB) {
 		isMember, err := tmm.IsMember(playerID, teamID)
 		return err == nil && isMember
 	}
+	onEitherRoster := func(playerID int) bool {
+		return onRoster(playerID, form.HomeTeamID) || onRoster(playerID, form.AwayTeamID)
+	}
 
 	for _, g := range form.Goals {
 		if !validTeam(g.TeamID) {
 			form.AddNonFieldError("Every goal must belong to one of this match's two teams.")
 			continue
 		}
-		if g.ScorerPlayerID > 0 && !onRoster(g.ScorerPlayerID, g.TeamID) {
-			form.AddNonFieldError("A goal's scorer must be on that team's roster.")
+		if g.ScorerPlayerID > 0 && !onEitherRoster(g.ScorerPlayerID) {
+			form.AddNonFieldError("A goal's scorer must be on one of this match's two rosters.")
 		}
-		if g.AssisterPlayerID > 0 && !onRoster(g.AssisterPlayerID, g.TeamID) {
-			form.AddNonFieldError("A goal's assister must be on that team's roster.")
+		if g.AssisterPlayerID > 0 && !onEitherRoster(g.AssisterPlayerID) {
+			form.AddNonFieldError("A goal's assister must be on one of this match's two rosters.")
 		}
 		if g.Minute < 0 || g.Minute > 200 {
 			form.AddNonFieldError("A goal's minute must be a reasonable number (0-200).")
@@ -235,7 +246,7 @@ func (service *MatchService) CreateMatch(form *MatchForm, actorEmail string) (in
 		return 0, err
 	}
 
-	if err := saveMatchEvents(service.DB, id, form.Goals, form.Cards); err != nil {
+	if err := saveMatchEvents(service.DB, id, form.HomeTeamID, form.AwayTeamID, form.Goals, form.Cards); err != nil {
 		return 0, err
 	}
 
@@ -268,7 +279,7 @@ func (service *MatchService) UpdateMatch(form *MatchForm, actorEmail string) err
 		return err
 	}
 
-	if err := saveMatchEvents(service.DB, form.ID, form.Goals, form.Cards); err != nil {
+	if err := saveMatchEvents(service.DB, form.ID, form.HomeTeamID, form.AwayTeamID, form.Goals, form.Cards); err != nil {
 		return err
 	}
 
@@ -282,8 +293,9 @@ func (service *MatchService) UpdateMatch(form *MatchForm, actorEmail string) err
 // was carded in any of the just-saved rows gets one recomputed line. Runs
 // inside one transaction so the events and the cache derived from them are
 // never left out of step with each other: either the whole save lands, or
-// none of it does.
-func saveMatchEvents(db *sql.DB, matchID int, goals []GoalInput, cards []CardInput) error {
+// none of it does. homeTeamID/awayTeamID (not derivable from the goal/card
+// rows alone) are needed to find an own goal's scorer's *actual* team.
+func saveMatchEvents(db *sql.DB, matchID, homeTeamID, awayTeamID int, goals []GoalInput, cards []CardInput) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -319,6 +331,7 @@ func saveMatchEvents(db *sql.DB, matchID int, goals []GoalInput, cards []CardInp
 		return err
 	}
 
+	tmm := &models.TeamMemberModel{DB: db}
 	tally := map[int]*models.PlayerMatchStat{}
 	statFor := func(playerID, teamID int) *models.PlayerMatchStat {
 		stat, ok := tally[playerID]
@@ -328,12 +341,39 @@ func saveMatchEvents(db *sql.DB, matchID int, goals []GoalInput, cards []CardInp
 		}
 		return stat
 	}
+	// A goal only counts toward the scorer's personal Goals tally when
+	// they're actually on the credited team's roster. When they're not
+	// (allowed by validateMatchEvents, since a scorer only has to be on
+	// *one* of the match's two rosters) it's an own goal: it still counts
+	// toward the credited team's score via matches.homeScore/awayScore
+	// (entered separately), but the player is tallied under their own
+	// actual team — whichever of the match's two teams isn't the one
+	// credited — as an OwnGoals, never a personal Goals credit for an
+	// accident. An assister has no own-goal equivalent (nobody assists an
+	// accident), so one picked from the other roster is simply not
+	// tallied at all.
 	for _, g := range goals {
 		if g.ScorerPlayerID > 0 {
-			statFor(g.ScorerPlayerID, g.TeamID).Goals++
+			isCredited, err := tmm.IsMember(g.ScorerPlayerID, g.TeamID)
+			if err != nil {
+				return err
+			}
+			if isCredited {
+				statFor(g.ScorerPlayerID, g.TeamID).Goals++
+			} else {
+				actualTeamID := homeTeamID
+				if g.TeamID == homeTeamID {
+					actualTeamID = awayTeamID
+				}
+				statFor(g.ScorerPlayerID, actualTeamID).OwnGoals++
+			}
 		}
 		if g.AssisterPlayerID > 0 {
-			statFor(g.AssisterPlayerID, g.TeamID).Assists++
+			if isMember, err := tmm.IsMember(g.AssisterPlayerID, g.TeamID); err != nil {
+				return err
+			} else if isMember {
+				statFor(g.AssisterPlayerID, g.TeamID).Assists++
+			}
 		}
 	}
 	for _, c := range cards {

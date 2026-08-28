@@ -415,6 +415,8 @@ type matchViewData struct {
 	AwayRSVPsOut    []*rsvpDisplayRow
 	HomeNote        *matchTeamNoteView
 	AwayNote        *matchTeamNoteView
+	ShowHomeBox     bool
+	ShowAwayBox     bool
 }
 
 // buildRSVPRows returns a row for every roster player who RSVP'd status
@@ -585,6 +587,19 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 	isPast := matchIsPast(match)
 	canRSVP := playerID > 0 && !isPast && (app.isMemberOfTeam(r, match.HomeTeamID) || app.isMemberOfTeam(r, match.AwayTeamID))
 
+	// Before the match has a recorded result, a non-manager only sees their
+	// own team's box — not the opponent's roster/RSVP roll call, notes,
+	// etc. — so a team can't scout who's confirmed to play for the other
+	// side ahead of the match. Once the score is in, that concern is moot
+	// and everyone sees both boxes. Keyed off the score rather than
+	// goal-by-goal detail specifically, matching the "Score not recorded"
+	// convention already used just above on this same page — some
+	// (especially older) matches only ever get a final score, never
+	// goal-by-goal rows, and should still unlock.
+	hasResult := match.HomeScore.Valid && match.AwayScore.Valid
+	showHomeBox := canManage || hasResult || app.isMemberOfTeam(r, match.HomeTeamID)
+	showAwayBox := canManage || hasResult || app.isMemberOfTeam(r, match.AwayTeamID)
+
 	mtnm := &models.MatchTeamNoteModel{DB: app.playerService.DB}
 	um := &models.UserModel{DB: app.playerService.DB}
 	buildNoteView := func(teamID int, roster []*models.Player, canManageSide, canSendTestReminder bool) (*matchTeamNoteView, error) {
@@ -670,6 +685,8 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 		AwayRSVPsOut:    buildRSVPRows(awayRoster, rsvpsByPlayer, "no"),
 		HomeNote:        homeNote,
 		AwayNote:        awayNote,
+		ShowHomeBox:     showHomeBox,
+		ShowAwayBox:     showAwayBox,
 	}, nil
 }
 

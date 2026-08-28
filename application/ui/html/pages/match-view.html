@@ -52,7 +52,8 @@
     </div>
     {{end}}
 
-    <div class="grid gap-4 sm:grid-cols-2 w-full md:w-2/3 mb-6">
+    <div class="grid gap-4 {{if and .Data.ShowHomeBox .Data.ShowAwayBox}}sm:grid-cols-2{{end}} w-full md:w-2/3 mb-6">
+        {{if .Data.ShowHomeBox}}
         <div class="bg-white shadow-md rounded px-4 py-4">
             <h4 class="pt-0 text-center"><a href="/team/{{.Data.HomeTeam.ID}}">{{.Data.HomeTeam.Name}}</a></h4>
             {{template "team-note-panel" (teamNoteSideData $ .Data.HomeNote)}}
@@ -97,6 +98,8 @@
             </ul>
             {{end}}
         </div>
+        {{end}}
+        {{if .Data.ShowAwayBox}}
         <div class="bg-white shadow-md rounded px-4 py-4">
             <h4 class="pt-0 text-center"><a href="/team/{{.Data.AwayTeam.ID}}">{{.Data.AwayTeam.Name}}</a></h4>
             {{template "team-note-panel" (teamNoteSideData $ .Data.AwayNote)}}
@@ -141,6 +144,7 @@
             </ul>
             {{end}}
         </div>
+        {{end}}
     </div>
 </div>
 {{end}}
@@ -169,6 +173,7 @@
 {{define "team-note-panel"}}
 {{$hasNote := or .Row.PlayerOfMatchName .Row.Notes .Row.CaptainMessage}}
 {{$hasErrors := or .Row.Form.FieldErrors.playerOfMatchID .Row.Form.FieldErrors.notes .Row.Form.FieldErrors.captainMessage}}
+{{$hasVisibleNote := or .Row.PlayerOfMatchName .Row.Notes}}
 {{if .Row.CanManage}}
 <div class="mt-3 mb-4 text-sm text-center">
     {{if and $hasNote (not $hasErrors)}}
@@ -176,7 +181,7 @@
         <summary class="cursor-pointer list-none">
             <span class="font-semibold">Player of the Match:</span> {{if .Row.PlayerOfMatchName}}{{.Row.PlayerOfMatchName}}{{else}}<span class="text-gray-400">(not set)</span>{{end}}<br>
             <span class="font-semibold">Captain's Notes:</span> {{if .Row.Notes}}<span class="italic">&ldquo;{{.Row.Notes}}&rdquo;</span>{{else}}<span class="text-gray-400">(not set)</span>{{end}}<br>
-            <span class="font-semibold">Message for RSVP Reminders:</span> {{if .Row.CaptainMessage}}<span class="italic">&ldquo;{{.Row.CaptainMessage}}&rdquo;</span>{{else}}<span class="text-gray-400">(not set)</span>{{end}}<br>
+            <span class="font-semibold">Message for RSVP Reminders:</span> {{if .Row.CaptainMessage}}<span class="text-gray-400 italic">(set &mdash; only shown in the reminder email)</span>{{else}}<span class="text-gray-400">(not set)</span>{{end}}<br>
             <span class="text-blue-600">Edit</span>
         </summary>
         <div class="mt-2">{{template "team-note-form" .}}</div>
@@ -186,11 +191,10 @@
     {{end}}
 </div>
 {{else}}
-{{if $hasNote}}
+{{if $hasVisibleNote}}
 <div class="mt-3 mb-4 text-sm text-center">
     {{with .Row.PlayerOfMatchName}}<p><span class="font-semibold">Player of the Match:</span> {{.}}</p>{{end}}
     {{with .Row.Notes}}<p class="text-gray-600 italic">&ldquo;{{.}}&rdquo;</p>{{end}}
-    {{with .Row.CaptainMessage}}<p class="text-gray-600">Message: <span class="italic">&ldquo;{{.}}&rdquo;</span></p>{{end}}
 </div>
 {{end}}
 {{end}}

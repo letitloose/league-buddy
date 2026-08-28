@@ -1933,7 +1933,7 @@ func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
 
 	mm := &models.MatchModel{DB: testDB}
 
-	t.Run("upcoming match shows both Confirmed and Not Attending", func(t *testing.T) {
+	t.Run("upcoming match shows both Confirmed and Not Attending to the team's own roster", func(t *testing.T) {
 		matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now()})
 		if err != nil {
 			t.Fatal(err)
@@ -1945,8 +1945,12 @@ func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		// A member of the home roster — before the match has a result, a
+		// non-manager only sees their own team's box (see
+		// TestMatchScreenBoxVisibilityBeforeResult for the hidden case).
+		setupRosterMember(t, homeTeamID, "attendance-viewer@test.com", "validpassword123")
 		ts := newTestServer(t, app.routes())
-		ts.login(t, testActiveEmail, testActivePass)
+		ts.login(t, "attendance-viewer@test.com", "validpassword123")
 
 		code, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
 		if code != http.StatusOK {
@@ -2509,7 +2513,10 @@ func TestMatchTeamNotes(t *testing.T) {
 			t.Error("expected the Player of the Match's name to appear on the match view")
 		}
 		if !strings.Contains(body, "Meet at the field 30 minutes early") {
-			t.Error("expected the saved captain's message to appear on the match view")
+			t.Error("expected the saved captain's message to round-trip into the edit form")
+		}
+		if !strings.Contains(body, "only shown in the reminder email") {
+			t.Error("expected the captain's message to be flagged as set without its text appearing in the read-only summary")
 		}
 	})
 
@@ -3093,6 +3100,104 @@ func TestViewAsPlayerToggle(t *testing.T) {
 		_, _, body := reLogin.get(t, "/")
 		if !strings.Contains(body, ">Admin<") {
 			t.Error("expected re-logging in to reset the stale 'view as player' toggle")
+		}
+	})
+}
+
+// Before a match has a recorded result, a non-manager only sees their own
+// team's box on the match screen — not the opponent's roster/RSVP roll
+// call, notes, etc. — so a team can't scout who's confirmed to play for
+// the other side ahead of time. A captain (or any other manager) is
+// unaffected and always sees both; once the match has a score, the
+// restriction lifts for everyone.
+func TestMatchScreenBoxVisibilityBeforeResult(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Box Visibility League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Box Visibility Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Box Visibility Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Box Visibility Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupRosterMember(t, homeTeamID, "box-visibility-home-member@test.com", "validpassword123")
+	setupTeamCaptain(t, homeTeamID, "box-visibility-home-captain@test.com", "validpassword123")
+
+	// Each box's card heading links to /team/<id> immediately followed by
+	// </h4> — specific enough not to also match the nav's own "My Teams"
+	// link to the same team (which a roster-member viewer would otherwise
+	// also have), unlike a bare href="/team/<id>" check.
+	homeBoxMarker := fmt.Sprintf(`<a href="/team/%d">Box Visibility Home FC</a></h4>`, homeTeamID)
+	awayBoxMarker := fmt.Sprintf(`<a href="/team/%d">Box Visibility Away FC</a></h4>`, awayTeamID)
+
+	t.Run("an unrelated active user sees neither box before a result", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testActiveEmail, testActivePass)
+
+		_, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if strings.Contains(body, homeBoxMarker) {
+			t.Error("expected the home box to be hidden before a result")
+		}
+		if strings.Contains(body, awayBoxMarker) {
+			t.Error("expected the away box to be hidden before a result")
+		}
+	})
+
+	t.Run("a home roster member sees their own box but not the away box", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "box-visibility-home-member@test.com", "validpassword123")
+
+		_, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if !strings.Contains(body, homeBoxMarker) {
+			t.Error("expected their own (home) box to be visible")
+		}
+		if strings.Contains(body, awayBoxMarker) {
+			t.Error("expected the away box to still be hidden")
+		}
+	})
+
+	t.Run("the home captain sees both boxes regardless", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "box-visibility-home-captain@test.com", "validpassword123")
+
+		_, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if !strings.Contains(body, homeBoxMarker) || !strings.Contains(body, awayBoxMarker) {
+			t.Error("expected a captain to see both boxes even before a result")
+		}
+	})
+
+	t.Run("once the match has a score, the unrelated active user sees both boxes", func(t *testing.T) {
+		if err := mm.Update(&models.Match{
+			ID: matchID, SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now(),
+			HomeScore: sql.NullInt32{Int32: 2, Valid: true}, AwayScore: sql.NullInt32{Int32: 1, Valid: true},
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testActiveEmail, testActivePass)
+
+		_, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if !strings.Contains(body, homeBoxMarker) || !strings.Contains(body, awayBoxMarker) {
+			t.Error("expected both boxes visible once the match has a recorded score")
 		}
 	})
 }

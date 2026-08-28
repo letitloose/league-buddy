@@ -2545,14 +2545,22 @@ func TestMatchTeamNotes(t *testing.T) {
 		}
 	})
 
-	t.Run("a designated scorekeeper can also edit the home team's notes", func(t *testing.T) {
+	t.Run("a designated scorekeeper cannot edit the home team's Player of the Match/Notes/RSVP message", func(t *testing.T) {
 		ts := newTestServer(t, app.routes())
 		ts.login(t, "notes-home-scorekeeper@test.com", "validpassword123")
 
+		// Scorekeepers get match-day editing (score/goals/cards) but not
+		// this captain-only section — they can still see the read-only
+		// Player of the Match/Notes (they're a roster member), just not
+		// edit them, so a CSRF token is available regardless of which form
+		// it comes from.
 		_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if strings.Contains(formBody, "field-label\">Player of the Match<") {
+			t.Error("expected the scorekeeper to see no editable form, only the read-only view")
+		}
 		csrfToken := extractCSRFToken(t, formBody)
 
-		code, _, _ := ts.postForm(t, fmt.Sprintf("/match/%d/notes", matchID), url.Values{
+		code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/notes", matchID), url.Values{
 			"teamID":     {fmt.Sprintf("%d", homeTeamID)},
 			"notes":      {"updated by the scorekeeper"},
 			"csrf_token": {csrfToken},
@@ -2560,10 +2568,16 @@ func TestMatchTeamNotes(t *testing.T) {
 		if code != http.StatusSeeOther {
 			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
 		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
 
 		_, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
-		if !strings.Contains(body, "updated by the scorekeeper") {
-			t.Error("expected the scorekeeper's update to be saved and displayed")
+		if strings.Contains(body, "updated by the scorekeeper") {
+			t.Error("expected the scorekeeper's update to be rejected, not saved")
+		}
+		if !strings.Contains(body, "Great effort from everyone") {
+			t.Error("expected the previously saved notes to remain unchanged")
 		}
 	})
 

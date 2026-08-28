@@ -327,13 +327,16 @@ func (app *application) canManageTeam(r *http.Request, teamID int) bool {
 }
 
 // canManageMatchSide reports whether the current request's user may edit
-// teamID's own Player of the Match / captain's notes — the same tier
-// canManageTeam already grants, plus a scorekeeper the captain has
-// designated. Unlike canManageMatch (either team's manager can edit the
-// shared score/goals/cards), this is scoped to one side only, since these
-// fields are each team's own designation.
+// teamID's own Player of the Match / Captain's Notes / captain's RSVP-
+// reminder message — exactly canManageTeam's tier (admin, league admin of
+// the team, or the team's own captain). Deliberately excludes
+// scorekeepers: they get canManageMatch's match-day editing (score, goals,
+// cards) but not this "captain's section," which stays captain-only.
+// Unlike canManageMatch (either team's manager can edit the shared
+// score/goals/cards), this is scoped to one side only, since these fields
+// are each team's own designation.
 func (app *application) canManageMatchSide(r *http.Request, teamID int) bool {
-	return app.canManageTeam(r, teamID) || app.isScorekeeperOfTeam(r, teamID)
+	return app.canManageTeam(r, teamID)
 }
 
 // canDeleteTeam reports whether the current request's user may delete

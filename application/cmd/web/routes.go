@@ -39,6 +39,7 @@ func (app *application) routes() http.Handler {
 
 	// active routes (logged in + active)
 	active := dynamic.Append(app.requireActive)
+	router.Handler(http.MethodPost, "/user/toggleViewAsPlayer", active.ThenFunc(app.toggleViewAsPlayer))
 	router.Handler(http.MethodGet, "/player/view/:id", active.ThenFunc(app.playerView))
 	router.Handler(http.MethodGet, "/player/update/:id", active.ThenFunc(app.playerUpdate))
 	router.Handler(http.MethodPost, "/player/update", active.ThenFunc(app.playerUpdatePost))

@@ -2907,3 +2907,192 @@ func TestMatchScreenEditBoxesScopedToOwnCaptain(t *testing.T) {
 		}
 	})
 }
+
+// "View as player" lets an admin (who is very often also a captain/league
+// admin, like this app's real primary user) temporarily see the site
+// exactly as a plain roster member would — no admin/captain/league-admin
+// controls anywhere, even though the underlying account still holds those
+// roles. Only a real admin can toggle it, and it never survives a fresh
+// login.
+func TestViewAsPlayerToggle(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "View As Player League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "View As Player FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "View As Player Opponent FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "View As Player Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamID, AwayTeamID: opponentID, MatchDate: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An admin who is also this team's captain and this league's admin —
+	// mirroring the real account this feature is for.
+	um := &models.UserModel{DB: testDB}
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	lam := &models.LeagueAdminModel{DB: testDB}
+
+	playerID, err := pm.Insert(&models.Player{FirstName: "Admin", LastName: "Captain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, teamID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tm.SetCaptain(teamID, sql.NullInt32{Int32: int32(playerID), Valid: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := lam.AddAdmin(playerID, leagueID); err != nil {
+		t.Fatal(err)
+	}
+	userID, err := um.Insert("view-as-player@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.Activate(userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetPlayerID(userID, playerID); err != nil {
+		t.Fatal(err)
+	}
+	if err := um.InsertUserRole(userID, "ADMIN"); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "view-as-player@test.com", "validpassword123")
+
+	t.Run("before toggling, the account sees its real admin/captain controls", func(t *testing.T) {
+		_, _, body := ts.get(t, "/")
+		if !strings.Contains(body, ">Admin<") {
+			t.Error("expected the Admin nav dropdown to be visible")
+		}
+		if !strings.Contains(body, "My Leagues (Admin)") {
+			t.Error("expected the My Leagues (Admin) nav dropdown to be visible")
+		}
+		if !strings.Contains(body, "View as Player") {
+			t.Error("expected the toggle control itself to be visible")
+		}
+		if strings.Contains(body, "Exit Player View") {
+			t.Error("expected the toggle to still read 'View as Player', not 'Exit Player View'")
+		}
+	})
+
+	t.Run("toggling on hides every admin/captain/league-admin control", func(t *testing.T) {
+		_, _, formBody := ts.get(t, "/")
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := ts.postForm(t, "/user/toggleViewAsPlayer", url.Values{"csrf_token": {csrfToken}})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+
+		_, _, body := ts.get(t, "/")
+		if strings.Contains(body, ">Admin<") {
+			t.Error("expected the Admin nav dropdown to be hidden while viewing as player")
+		}
+		if strings.Contains(body, "My Leagues (Admin)") {
+			t.Error("expected the My Leagues (Admin) nav dropdown to be hidden while viewing as player")
+		}
+		if !strings.Contains(body, "Viewing as a plain player") {
+			t.Error("expected the persistent banner to appear")
+		}
+		if !strings.Contains(body, "Exit Player View") {
+			t.Error("expected the toggle to now read 'Exit Player View'")
+		}
+
+		// Confirms the suppression reaches real permission checks
+		// (canManageMatch), not just what the nav happens to render.
+		_, _, matchBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if strings.Contains(matchBody, "Edit Match") {
+			t.Error("expected the Edit Match link to be hidden while viewing as player")
+		}
+	})
+
+	t.Run("toggling off restores every control", func(t *testing.T) {
+		_, _, formBody := ts.get(t, "/")
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, _, _ := ts.postForm(t, "/user/toggleViewAsPlayer", url.Values{"csrf_token": {csrfToken}})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+
+		_, _, body := ts.get(t, "/")
+		if !strings.Contains(body, ">Admin<") {
+			t.Error("expected the Admin nav dropdown to be visible again")
+		}
+		if !strings.Contains(body, "View as Player") {
+			t.Error("expected the toggle to read 'View as Player' again")
+		}
+		if strings.Contains(body, "Exit Player View") {
+			t.Error("expected 'Exit Player View' to be gone")
+		}
+	})
+
+	t.Run("a non-admin can't enable it", func(t *testing.T) {
+		other := newTestServer(t, app.routes())
+		other.login(t, testActiveEmail, testActivePass)
+
+		_, _, formBody := other.get(t, "/")
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := other.postForm(t, "/user/toggleViewAsPlayer", url.Values{"csrf_token": {csrfToken}})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+
+		_, _, body := other.get(t, "/")
+		if strings.Contains(body, "View as Player") || strings.Contains(body, "Exit Player View") {
+			t.Error("expected a non-admin to never see the toggle control at all")
+		}
+	})
+
+	t.Run("re-logging in resets a stale toggle", func(t *testing.T) {
+		reLogin := newTestServer(t, app.routes())
+		reLogin.login(t, "view-as-player@test.com", "validpassword123")
+
+		_, _, formBody := reLogin.get(t, "/")
+		csrfToken := extractCSRFToken(t, formBody)
+		reLogin.postForm(t, "/user/toggleViewAsPlayer", url.Values{"csrf_token": {csrfToken}})
+
+		_, _, toggledBody := reLogin.get(t, "/")
+		if strings.Contains(toggledBody, ">Admin<") {
+			t.Fatal("setup: expected the toggle to have taken effect before re-login")
+		}
+
+		// Same session/cookie jar, logging in again without logging out
+		// first — RenewToken rotates the session ID but keeps existing
+		// data unless explicitly cleared, which is exactly what
+		// userLoginPost's Remove(viewAsPlayer) guards against.
+		reLogin.login(t, "view-as-player@test.com", "validpassword123")
+
+		_, _, body := reLogin.get(t, "/")
+		if !strings.Contains(body, ">Admin<") {
+			t.Error("expected re-logging in to reset the stale 'view as player' toggle")
+		}
+	})
+}

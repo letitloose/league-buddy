@@ -21,6 +21,8 @@ func (app *application) newTemplateData(r *http.Request) *templateData {
 		IsAuthenticated: app.isAuthenticated(r),
 		IsActive:        app.isActive(r),
 		IsAdmin:         app.isAdmin(r),
+		IsRealAdmin:     app.isRealAdmin(r),
+		ViewingAsPlayer: app.isViewingAsPlayer(r),
 		PlayerID:        app.getPlayerID(r),
 		UserName:        app.getUserName(r),
 		CSRFToken:       nosurf.Token(r),
@@ -36,13 +38,19 @@ func (app *application) newTemplateData(r *http.Request) *templateData {
 			app.errorLog.Println(err)
 		}
 
-		lam := &models.LeagueAdminModel{DB: app.playerService.DB}
-		if leagues, err := lam.GetLeaguesForPlayer(playerID); err == nil {
-			for _, league := range leagues {
-				data.MyAdminLeagues = append(data.MyAdminLeagues, NavLeagueInfo{ID: league.ID, Name: league.Name})
+		// Skipped while viewing as player — a plain player's nav never
+		// shows leagues they administer, and this query is independent of
+		// the isAdmin/isLeagueAdminOfLeague context suppression above (it
+		// hits the DB directly), so it needs its own check here.
+		if !app.isViewingAsPlayer(r) {
+			lam := &models.LeagueAdminModel{DB: app.playerService.DB}
+			if leagues, err := lam.GetLeaguesForPlayer(playerID); err == nil {
+				for _, league := range leagues {
+					data.MyAdminLeagues = append(data.MyAdminLeagues, NavLeagueInfo{ID: league.ID, Name: league.Name})
+				}
+			} else {
+				app.errorLog.Println(err)
 			}
-		} else {
-			app.errorLog.Println(err)
 		}
 	}
 
@@ -186,6 +194,32 @@ func (app *application) isAdmin(r *http.Request) bool {
 	}
 
 	return isAdmin
+}
+
+// isRealAdmin reports the account's true admin status, unaffected by "view
+// as player" — see isAdmin, which is what's actually suppressed while
+// viewing as player. Used only to decide whether to show the toggle
+// control itself, so an admin can always find their way back.
+func (app *application) isRealAdmin(r *http.Request) bool {
+	realIsAdmin, ok := r.Context().Value(realIsAdminContextKey).(bool)
+	if !ok {
+		return false
+	}
+
+	return realIsAdmin
+}
+
+// isViewingAsPlayer reports whether an admin has toggled into "view as
+// player" mode for this request — see authenticate in middleware.go, which
+// suppresses isAdmin and every captain/scorekeeper/league-admin context key
+// while this is true.
+func (app *application) isViewingAsPlayer(r *http.Request) bool {
+	viewingAsPlayer, ok := r.Context().Value(viewingAsPlayerContextKey).(bool)
+	if !ok {
+		return false
+	}
+
+	return viewingAsPlayer
 }
 
 func (app *application) getUserName(r *http.Request) string {

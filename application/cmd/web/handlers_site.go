@@ -76,7 +76,10 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 		var err error
 		if app.isAdmin(r) {
 			leagues, err = (&models.LeagueModel{DB: app.playerService.DB}).List()
-		} else if playerID := app.getPlayerID(r); playerID > 0 {
+		} else if playerID := app.getPlayerID(r); playerID > 0 && !app.isViewingAsPlayer(r) {
+			// Skipped while viewing as player, same reasoning as
+			// newTemplateData's MyAdminLeagues — this query hits the DB
+			// directly rather than going through a suppressible context key.
 			leagues, err = (&models.LeagueAdminModel{DB: app.playerService.DB}).GetLeaguesForPlayer(playerID)
 		}
 		if err != nil {

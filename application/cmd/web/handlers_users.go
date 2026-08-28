@@ -206,6 +206,9 @@ func (app *application) userLoginPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.sessionManager.Put(r.Context(), "authenticatedUserID", id)
+	// A stale "view as player" flag shouldn't carry over into a fresh
+	// login (RenewToken rotates the session ID but keeps existing data).
+	app.sessionManager.Remove(r.Context(), "viewAsPlayer")
 
 	if next != "" {
 		http.Redirect(w, r, next, http.StatusSeeOther)
@@ -221,7 +224,27 @@ func (app *application) userLogoutPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	app.sessionManager.Remove(r.Context(), "authenticatedUserID")
+	app.sessionManager.Remove(r.Context(), "viewAsPlayer")
 	app.sessionManager.Put(r.Context(), "flash", "You've been logged out successfully!")
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// toggleViewAsPlayer flips an admin's session-scoped "view as player" flag
+// — see authenticate in middleware.go, which suppresses isAdmin and every
+// captain/scorekeeper/league-admin context key while it's set, so the UI
+// renders exactly as a plain roster member would see it. Lives on the
+// active tier (not admin-only) and re-checks the account's real,
+// unsuppressed admin status via isRealAdmin, since requireAdmin would
+// otherwise lock an admin out of switching back once already in player
+// view.
+func (app *application) toggleViewAsPlayer(w http.ResponseWriter, r *http.Request) {
+	if !app.isRealAdmin(r) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	viewingAsPlayer := app.sessionManager.GetBool(r.Context(), "viewAsPlayer")
+	app.sessionManager.Put(r.Context(), "viewAsPlayer", !viewingAsPlayer)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

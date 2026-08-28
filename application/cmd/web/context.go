@@ -15,3 +15,10 @@ const captainTeamIDsContextKey = contextKey("captainTeamIDs")
 const scorekeeperTeamIDsContextKey = contextKey("scorekeeperTeamIDs")
 const leagueAdminLeagueIDsContextKey = contextKey("leagueAdminLeagueIDs")
 const leagueAdminTeamIDsContextKey = contextKey("leagueAdminTeamIDs")
+
+// realIsAdminContextKey always reflects the account's true admin status,
+// even while viewingAsPlayerContextKey is suppressing isAdminContextKey —
+// so an admin who's toggled into player view can still find their way
+// back. See "view as player" in middleware.go's authenticate.
+const realIsAdminContextKey = contextKey("realIsAdmin")
+const viewingAsPlayerContextKey = contextKey("viewingAsPlayer")

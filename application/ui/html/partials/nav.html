@@ -52,9 +52,15 @@
                 {{if .IsAuthenticated}}
                 <div class="dropdown text-neutral-100 hover:text-orange-400 mr-4">
                     <button class="dropbtn">{{.UserName}}</button>
-                    <div class="dropdown-content" style="right: 0; width: 140px;">
+                    <div class="dropdown-content" style="right: 0; width: 170px;">
                         {{if and .IsActive (gt .PlayerID 0)}}
                             <a href='/player/view/{{.PlayerID}}'>Profile</a>
+                        {{end}}
+                        {{if .IsRealAdmin}}
+                            <form action='/user/toggleViewAsPlayer' method='POST'>
+                                <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                                <button type='submit'>{{if .ViewingAsPlayer}}Exit Player View{{else}}View as Player{{end}}</button>
+                            </form>
                         {{end}}
                         <form action='/user/logout' method='POST'>
                             <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
@@ -93,6 +99,14 @@
         {{if .IsAuthenticated}}
             {{if and .IsActive (gt .PlayerID 0)}}
                 <a href='/player/view/{{.PlayerID}}' class="block px-4 py-2 text-neutral-100">Profile</a>
+            {{end}}
+            {{if .IsRealAdmin}}
+                <div class="px-4 py-2">
+                    <form action='/user/toggleViewAsPlayer' method='POST'>
+                        <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                        <button type='submit' class="text-neutral-100">{{if .ViewingAsPlayer}}Exit Player View{{else}}View as Player{{end}}</button>
+                    </form>
+                </div>
             {{end}}
             <div class="px-4 py-2">
                 <form action='/user/logout' method='POST'>

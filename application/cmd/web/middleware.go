@@ -195,11 +195,25 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), isAuthenticatedContextKey, true)
 		r = r.WithContext(ctx)
 
+		// realIsAdminContextKey is set unconditionally — it's what lets an
+		// admin who's toggled into "view as player" still see the toggle
+		// control to switch back, even though every other elevated field
+		// below is suppressed for them exactly as if they held no special
+		// roles at all (see the "view as player" admin feature).
+		ctx = context.WithValue(r.Context(), realIsAdminContextKey, ac.IsAdmin)
+		r = r.WithContext(ctx)
+
+		viewingAsPlayer := ac.IsAdmin && app.sessionManager.GetBool(r.Context(), "viewAsPlayer")
+		if viewingAsPlayer {
+			ctx = context.WithValue(r.Context(), viewingAsPlayerContextKey, true)
+			r = r.WithContext(ctx)
+		}
+
 		if ac.Active {
 			ctx = context.WithValue(r.Context(), isActiveContextKey, true)
 			r = r.WithContext(ctx)
 		}
-		if ac.IsAdmin {
+		if ac.IsAdmin && !viewingAsPlayer {
 			ctx = context.WithValue(r.Context(), isAdminContextKey, true)
 			r = r.WithContext(ctx)
 		}
@@ -211,19 +225,19 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 			ctx = context.WithValue(r.Context(), teamIDsContextKey, ac.TeamIDs)
 			r = r.WithContext(ctx)
 		}
-		if len(ac.CaptainTeamIDs) > 0 {
+		if len(ac.CaptainTeamIDs) > 0 && !viewingAsPlayer {
 			ctx = context.WithValue(r.Context(), captainTeamIDsContextKey, ac.CaptainTeamIDs)
 			r = r.WithContext(ctx)
 		}
-		if len(ac.ScorekeeperTeamIDs) > 0 {
+		if len(ac.ScorekeeperTeamIDs) > 0 && !viewingAsPlayer {
 			ctx = context.WithValue(r.Context(), scorekeeperTeamIDsContextKey, ac.ScorekeeperTeamIDs)
 			r = r.WithContext(ctx)
 		}
-		if len(ac.LeagueAdminLeagueIDs) > 0 {
+		if len(ac.LeagueAdminLeagueIDs) > 0 && !viewingAsPlayer {
 			ctx = context.WithValue(r.Context(), leagueAdminLeagueIDsContextKey, ac.LeagueAdminLeagueIDs)
 			r = r.WithContext(ctx)
 		}
-		if len(ac.LeagueAdminTeamIDs) > 0 {
+		if len(ac.LeagueAdminTeamIDs) > 0 && !viewingAsPlayer {
 			ctx = context.WithValue(r.Context(), leagueAdminTeamIDsContextKey, ac.LeagueAdminTeamIDs)
 			r = r.WithContext(ctx)
 		}

@@ -43,6 +43,8 @@ type templateData struct {
 	IsAuthenticated bool
 	IsActive        bool
 	IsAdmin         bool
+	IsRealAdmin     bool
+	ViewingAsPlayer bool
 	UserName        string
 	PlayerID        int
 	MyTeams         []NavTeamInfo

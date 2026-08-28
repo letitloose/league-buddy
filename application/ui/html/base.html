@@ -13,6 +13,15 @@
         <header>
             {{template "nav" .}}
         </header>
+        {{if .ViewingAsPlayer}}
+        <div class="bg-amber-400 text-amber-950 px-4 py-2 text-center text-sm font-semibold flex flex-wrap justify-center items-center gap-3">
+            <span>Viewing as a plain player — admin/captain controls are hidden.</span>
+            <form action='/user/toggleViewAsPlayer' method='POST' class="inline">
+                <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                <button type='submit' class="underline">Exit Player View</button>
+            </form>
+        </div>
+        {{end}}
         <main class="flex-1 min-h-0 bg-gray-100 overflow-auto">
             {{template "breadcrumbs" .}}
             {{with .Flash}}

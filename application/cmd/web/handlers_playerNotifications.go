@@ -27,7 +27,18 @@ type playerNotificationsData struct {
 // captain/league-admin of any team the player is on — only lets the
 // logged-in user's own linked player through. Notification consent isn't
 // something anyone else can grant on a player's behalf.
+//
+// Also 404s the whole notifications feature while no SMS provider is
+// configured (smsFeatureEnabled) — the page's whole point is choosing a
+// text-delivery channel, so there's nothing useful to show, and the link
+// to it is already hidden (see player-view.html), so a direct hit here
+// should look like the feature doesn't exist rather than half-work.
 func (app *application) requireOwnPlayer(w http.ResponseWriter, r *http.Request) (*models.Player, bool) {
+	if !app.smsFeatureEnabled() {
+		app.notFound(w)
+		return nil, false
+	}
+
 	params := httprouter.ParamsFromContext(r.Context())
 	id, err := strconv.Atoi(params.ByName("id"))
 	if err != nil || id < 1 {

@@ -34,24 +34,25 @@ type NavLeagueInfo struct {
 }
 
 type templateData struct {
-	CurrentYear     int
-	LastUpdate      string
-	Form            any
-	Data            any
-	SupportData     any
-	Flash           string
-	IsAuthenticated bool
-	IsActive        bool
-	IsAdmin         bool
-	IsRealAdmin     bool
-	ViewingAsPlayer bool
-	UserName        string
-	PlayerID        int
-	MyTeams         []NavTeamInfo
-	MyAdminLeagues  []NavLeagueInfo
-	CSRFToken       string
-	Breadcrumbs     []Breadcrumb
-	NextURL         string
+	CurrentYear       int
+	LastUpdate        string
+	Form              any
+	Data              any
+	SupportData       any
+	Flash             string
+	IsAuthenticated   bool
+	IsActive          bool
+	IsAdmin           bool
+	IsRealAdmin       bool
+	ViewingAsPlayer   bool
+	UserName          string
+	PlayerID          int
+	MyTeams           []NavTeamInfo
+	MyAdminLeagues    []NavLeagueInfo
+	CSRFToken         string
+	Breadcrumbs       []Breadcrumb
+	NextURL           string
+	SMSFeatureEnabled bool
 }
 
 func pickerDate(t time.Time) string {

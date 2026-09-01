@@ -35,6 +35,12 @@ const (
 var testDB *sql.DB
 
 func TestMain(m *testing.M) {
+	// Tests exercise the notifications feature by default; individual
+	// tests that specifically cover the "not yet launched" state
+	// (TestPlayerNotificationsHiddenWithoutSMSConfigured) temporarily
+	// unset this for their own duration.
+	os.Setenv("SMS_FEATURE_ENABLED", "true")
+
 	var err error
 	testDB, err = setupTestDB()
 	if err != nil {

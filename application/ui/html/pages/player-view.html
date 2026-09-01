@@ -33,7 +33,7 @@
     <a class="btn" href="/player/update/{{.ID}}">Edit</a>
 </div>
 {{end}}
-{{if .IsSelf}}
+{{if and .IsSelf $.SMSFeatureEnabled}}
 <div class="text-center mt-2">
     <a class="btn-secondary" href="/player/notifications/{{.ID}}">Notification Preferences</a>
 </div>

@@ -15,17 +15,18 @@ import (
 
 func (app *application) newTemplateData(r *http.Request) *templateData {
 	data := &templateData{
-		CurrentYear:     time.Now().Year(),
-		LastUpdate:      os.Getenv("SOFTWARE_LAST_UPDATE"),
-		Flash:           app.sessionManager.PopString(r.Context(), "flash"),
-		IsAuthenticated: app.isAuthenticated(r),
-		IsActive:        app.isActive(r),
-		IsAdmin:         app.isAdmin(r),
-		IsRealAdmin:     app.isRealAdmin(r),
-		ViewingAsPlayer: app.isViewingAsPlayer(r),
-		PlayerID:        app.getPlayerID(r),
-		UserName:        app.getUserName(r),
-		CSRFToken:       nosurf.Token(r),
+		CurrentYear:       time.Now().Year(),
+		LastUpdate:        os.Getenv("SOFTWARE_LAST_UPDATE"),
+		Flash:             app.sessionManager.PopString(r.Context(), "flash"),
+		IsAuthenticated:   app.isAuthenticated(r),
+		IsActive:          app.isActive(r),
+		IsAdmin:           app.isAdmin(r),
+		IsRealAdmin:       app.isRealAdmin(r),
+		ViewingAsPlayer:   app.isViewingAsPlayer(r),
+		PlayerID:          app.getPlayerID(r),
+		UserName:          app.getUserName(r),
+		CSRFToken:         nosurf.Token(r),
+		SMSFeatureEnabled: app.smsFeatureEnabled(),
 	}
 
 	if playerID := app.getPlayerID(r); app.isActive(r) && playerID > 0 {
@@ -333,6 +334,19 @@ func (app *application) canManageTeam(r *http.Request, teamID int) bool {
 // appointing or replacing a captain always has admin oversight.
 func (app *application) canInviteAsCaptain(r *http.Request, teamID int) bool {
 	return app.isAdmin(r) || app.isLeagueAdminOfTeam(r, teamID)
+}
+
+// smsFeatureEnabled reports whether phone verification/notification
+// preferences should be visible on the site at all — gated on
+// SMS_FEATURE_ENABLED specifically, NOT on whether SMS_ACCOUNT_SID is
+// configured (see main.go). Those are deliberately different questions:
+// real credentials can sit in the environment for testing/prep — e.g.
+// while a toll-free number is still pending carrier approval — without
+// exposing a "verify your phone" flow that would fail for real users
+// hitting it in the meantime. Flip SMS_FEATURE_ENABLED=true once the
+// number is actually approved and ready to text real users.
+func (app *application) smsFeatureEnabled() bool {
+	return os.Getenv("SMS_FEATURE_ENABLED") == "true"
 }
 
 // canManageMatchSide reports whether the current request's user may edit

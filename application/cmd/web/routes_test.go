@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -3242,6 +3243,40 @@ func TestMatchTestReminderSMSSubmit(t *testing.T) {
 	_, _, afterBody := ts.get(t, headers.Get("Location"))
 	if !strings.Contains(afterBody, "Test text sent to 1 teammate(s).") {
 		t.Error("expected the flash to report exactly 1 teammate texted (the unverified one must not count)")
+	}
+}
+
+// While SMS_FEATURE_ENABLED isn't set to "true" — deliberately a
+// different signal than whether SMS_ACCOUNT_SID/credentials exist, since
+// real credentials can sit in the environment for testing before a
+// number is actually carrier-approved — the whole notifications feature
+// (the link on a player's profile, and the page itself) is hidden rather
+// than offering a "verify your phone" flow that can't actually deliver
+// anything to real users yet.
+func TestPlayerNotificationsHiddenWithoutSMSConfigured(t *testing.T) {
+	os.Setenv("SMS_FEATURE_ENABLED", "false")
+	defer os.Setenv("SMS_FEATURE_ENABLED", "true")
+
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "SMS Disabled Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playerID := setupRosterMember(t, teamID, "sms-disabled-self@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "sms-disabled-self@test.com", "validpassword123")
+
+	_, _, profileBody := ts.get(t, fmt.Sprintf("/player/view/%d", playerID))
+	if strings.Contains(profileBody, "Notification Preferences") {
+		t.Error("expected the Notification Preferences link to be hidden while SMS isn't configured")
+	}
+
+	code, _, _ := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
+	if code != http.StatusNotFound {
+		t.Errorf("want %d; got %d", http.StatusNotFound, code)
 	}
 }
 

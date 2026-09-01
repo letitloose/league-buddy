@@ -96,6 +96,168 @@ func TestSendDueRSVPRemindersOnlyEmailsNonResponders(t *testing.T) {
 	}
 }
 
+// verifyPlayerPhone drives a player's phone through the real
+// request-code/confirm-code model methods (rather than hand-writing SQL),
+// so tests exercise the same path the app actually uses to mark a phone
+// verified.
+func verifyPlayerPhone(t *testing.T, pm *models.PlayerModel, playerID int) {
+	t.Helper()
+	if err := pm.SetPhoneVerificationCode(playerID, "123456", time.Now().Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.ConfirmPhoneVerified(playerID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSendDueRSVPRemindersRespectsChannelPreference(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	seasons := &models.SeasonModel{DB: db}
+	teams := &models.TeamModel{DB: db}
+	mm := &models.MatchModel{DB: db}
+	pm := &models.PlayerModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+	mrrm := &models.MatchRSVPReminderModel{DB: db}
+	npm := &models.NotificationPreferenceModel{DB: db}
+	reminderService := MatchReminderService{DB: db}
+
+	seasonID, err := seasons.Insert(&models.Season{LeagueID: 1, Name: "Spring 2024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := teams.Insert(&models.Team{LeagueID: 1, Name: "Rival FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	asOf := time.Now()
+	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: dateNDaysOut(asOf, 3)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verified phone, SMS-only preference, no email at all — still counts
+	// as sent (proves SMS alone can deliver without falling back).
+	smsOnlyID, err := pm.Insert(&models.Player{FirstName: "Sms", LastName: "Only", PhoneNumber: sql.NullString{String: "518-555-0100", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyPlayerPhone(t, pm, smsOnlyID)
+	if err := npm.SetChannel(smsOnlyID, models.CategoryRSVPReminder, models.ChannelSMS); err != nil {
+		t.Fatal(err)
+	}
+
+	// SMS preference but phone never verified — must fall back to email,
+	// not be silently dropped.
+	unverifiedID, err := pm.Insert(&models.Player{FirstName: "Unverified", LastName: "Phone", Email: sql.NullString{String: "unverified@example.com", Valid: true}, PhoneNumber: sql.NullString{String: "518-555-0101", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := npm.SetChannel(unverifiedID, models.CategoryRSVPReminder, models.ChannelSMS); err != nil {
+		t.Fatal(err)
+	}
+
+	// Explicit "off" — must not be counted or recorded as sent at all.
+	offID, err := pm.Insert(&models.Player{FirstName: "Opted", LastName: "Out", Email: sql.NullString{String: "opted-out@example.com", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := npm.SetChannel(offID, models.CategoryRSVPReminder, models.ChannelOff); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, playerID := range []int{smsOnlyID, unverifiedID, offID} {
+		if err := tmm.AddMembership(playerID, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sent, err := reminderService.SendDueRSVPReminders(asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent != 2 {
+		t.Fatalf("expected 2 reminders sent (sms-only and the unverified-fallback-to-email player, not the opted-out one), got %d", sent)
+	}
+
+	wasSentSMSOnly, err := mrrm.WasSent(matchID, smsOnlyID, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wasSentSMSOnly {
+		t.Fatal("expected the verified SMS-only player to be marked reminded")
+	}
+	wasSentUnverified, err := mrrm.WasSent(matchID, unverifiedID, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wasSentUnverified {
+		t.Fatal("expected the unverified-but-has-email player to be marked reminded via the email fallback")
+	}
+	wasSentOff, err := mrrm.WasSent(matchID, offID, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wasSentOff {
+		t.Fatal("expected the opted-out player to never be marked reminded")
+	}
+}
+
+func TestSendTestReminderSMSOnlyTextsVerifiedRosterMembers(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	seasons := &models.SeasonModel{DB: db}
+	teams := &models.TeamModel{DB: db}
+	mm := &models.MatchModel{DB: db}
+	pm := &models.PlayerModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+	reminderService := MatchReminderService{DB: db}
+
+	seasonID, err := seasons.Insert(&models.Season{LeagueID: 1, Name: "Spring 2024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := teams.Insert(&models.Team{LeagueID: 1, Name: "Rival FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: time.Now().AddDate(0, 0, 3)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	verifiedID, err := pm.Insert(&models.Player{FirstName: "Verified", LastName: "Teammate", PhoneNumber: sql.NullString{String: "518-555-0100", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyPlayerPhone(t, pm, verifiedID)
+	if err := tmm.AddMembership(verifiedID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	unverifiedID, err := pm.Insert(&models.Player{FirstName: "Unverified", LastName: "Teammate", PhoneNumber: sql.NullString{String: "518-555-0101", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(unverifiedID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	notOnRosterID, err := pm.Insert(&models.Player{FirstName: "Not", LastName: "OnRoster", PhoneNumber: sql.NullString{String: "518-555-0102", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyPlayerPhone(t, pm, notOnRosterID)
+
+	sent, err := reminderService.SendTestReminderSMS(matchID, 1, []int{verifiedID, unverifiedID, notOnRosterID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent != 1 {
+		t.Fatalf("expected exactly 1 test text sent (only the verified roster member), got %d", sent)
+	}
+}
+
 func TestSendDueRSVPRemindersSkipsMatchesOutsideTheSchedule(t *testing.T) {
 	db := models.NewTestDB(t)
 

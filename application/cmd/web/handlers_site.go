@@ -48,6 +48,17 @@ type homeData struct {
 	UpcomingMatchTeamCount int
 }
 
+// privacyPolicy and termsConditions are plain public pages — no auth
+// required, since carrier/Twilio A2P campaign review needs to reach them
+// without logging in.
+func (app *application) privacyPolicy(w http.ResponseWriter, r *http.Request) {
+	app.render(w, http.StatusOK, "privacy-policy.html", app.newTemplateData(r))
+}
+
+func (app *application) termsConditions(w http.ResponseWriter, r *http.Request) {
+	app.render(w, http.StatusOK, "terms-conditions.html", app.newTemplateData(r))
+}
+
 func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		app.notFound(w)

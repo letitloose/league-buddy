@@ -145,6 +145,7 @@ type playerProfile struct {
 	*models.Player
 	Address   *models.Address
 	CanManage bool
+	IsSelf    bool
 }
 
 // getPlayerAddress fetches the address linked to a player, if any. Returns
@@ -218,7 +219,7 @@ func (app *application) playerView(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := app.newTemplateData(r)
-	data.Data = &playerProfile{Player: player, Address: address, CanManage: app.canManagePlayer(r, player)}
+	data.Data = &playerProfile{Player: player, Address: address, CanManage: app.canManagePlayer(r, player), IsSelf: app.getPlayerID(r) == player.ID}
 	if team != nil {
 		data.Breadcrumbs = append(app.teamBreadcrumbs(team, league, false),
 			Breadcrumb{Label: "Roster", URL: fmt.Sprintf("/team/%d", team.ID)},

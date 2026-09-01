@@ -1,0 +1,71 @@
+{{define "title"}}Notification Preferences{{end}}
+
+{{define "main"}}
+<div class="flex items-center flex-col">
+    <h2>Notification Preferences</h2>
+    <div class="w-full max-w-md">
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <h3 class="pt-0 text-center">Phone Number</h3>
+            {{if .Data.PhoneVerified}}
+            <p class="text-center mb-4"><span class="text-green-700">&check; Verified</span> &mdash; {{.Data.Player.PhoneNumber.String}}</p>
+            <p class="text-sm text-gray-500 text-center mb-4">Changing your number below will require re-verifying it.</p>
+            {{else}}
+            <p class="text-center text-gray-500 mb-4">Not verified{{if .Data.Player.PhoneNumber.Valid}} &mdash; {{.Data.Player.PhoneNumber.String}}{{end}}. Verify a number to unlock text notifications.</p>
+            {{end}}
+
+            <form action="/player/notifications/{{.Data.Player.ID}}/phone" method="POST" class="mb-4">
+                <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                <label class="field-label">{{if .Data.PhoneVerified}}Change phone number{{else}}Phone number{{end}}</label>
+                <input class="form-field" type="tel" name="phonenumber" placeholder="518-555-0100" value="{{.Data.Player.PhoneNumber.String}}">
+                <div class="mt-2 text-center"><input class="btn-secondary m-0" type="submit" value="Send Verification Code"></div>
+            </form>
+
+            {{if .Data.HasPendingCode}}
+            <form action="/player/notifications/{{.Data.Player.ID}}/phone/confirm" method="POST">
+                <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                <label class="field-label">Enter the 6-digit code we texted you</label>
+                <input class="form-field" type="text" name="code" inputmode="numeric" maxlength="6" placeholder="123456">
+                <div class="mt-2 text-center"><input class="btn m-0" type="submit" value="Confirm Code"></div>
+            </form>
+            {{end}}
+        </div>
+
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <h3 class="pt-0 text-center">Reminder Delivery</h3>
+            <form action="/player/notifications/{{.Data.Player.ID}}/preferences" method="POST">
+                <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+
+                <div class="mb-4">
+                    <label class="field-label">RSVP Reminders</label>
+                    <select class="form-field" name="rsvpChannel">
+                        <option value="email" {{if eq .Data.RSVPChannel "email"}}selected{{end}}>Email</option>
+                        <option value="sms" {{if eq .Data.RSVPChannel "sms"}}selected{{end}} {{if not .Data.PhoneVerified}}disabled{{end}}>Text</option>
+                        <option value="both" {{if eq .Data.RSVPChannel "both"}}selected{{end}} {{if not .Data.PhoneVerified}}disabled{{end}}>Both</option>
+                        <option value="off" {{if eq .Data.RSVPChannel "off"}}selected{{end}}>Off</option>
+                    </select>
+                </div>
+
+                <div class="mb-4">
+                    <label class="field-label">Captain's Message Reminders</label>
+                    <p class="text-xs text-gray-500 mb-1">Only sent if you're a team's captain.</p>
+                    <select class="form-field" name="captainMessageChannel">
+                        <option value="email" {{if eq .Data.CaptainMessageChannel "email"}}selected{{end}}>Email</option>
+                        <option value="sms" {{if eq .Data.CaptainMessageChannel "sms"}}selected{{end}} {{if not .Data.PhoneVerified}}disabled{{end}}>Text</option>
+                        <option value="both" {{if eq .Data.CaptainMessageChannel "both"}}selected{{end}} {{if not .Data.PhoneVerified}}disabled{{end}}>Both</option>
+                        <option value="off" {{if eq .Data.CaptainMessageChannel "off"}}selected{{end}}>Off</option>
+                    </select>
+                </div>
+
+                {{if not .Data.PhoneVerified}}
+                <p class="text-xs text-gray-500 mb-4">Verify your phone number above to choose Text or Both.</p>
+                {{end}}
+
+                <div class="flex justify-between">
+                    <input class="btn m-0" type='submit' value='Save'>
+                    <a class="btn m-0" href="/player/view/{{.Data.Player.ID}}">Back</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{{end}}

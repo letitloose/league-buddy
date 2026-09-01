@@ -33,6 +33,11 @@
     <a class="btn" href="/player/update/{{.ID}}">Edit</a>
 </div>
 {{end}}
+{{if .IsSelf}}
+<div class="text-center mt-2">
+    <a class="btn-secondary" href="/player/notifications/{{.ID}}">Notification Preferences</a>
+</div>
+{{end}}
 {{if $.IsAdmin}}
 <div class="text-center">
     <button class="btn bg-red-600 hover:bg-red-700" data-delete-url="/player/delete/{{.ID}}" data-confirm-message="Permanently delete {{.FirstName}} {{.LastName}}? This removes their bio, address, and every team membership." data-redirect-url="/">Delete Player</button>

@@ -40,7 +40,59 @@ var easternLocation = func() *time.Location {
 type MatchReminderService struct {
 	DB *sql.DB
 	*Email
+	SMS     *SMS
 	InfoLog *log.Logger
+}
+
+// notify sends emailBody/smsBody to recipient according to their saved
+// preference for category (defaulting to email if they've never set one
+// — see models.NotificationPreferenceModel.GetChannel). If the preference
+// wants SMS but the phone isn't currently verified (e.g. verification
+// lapsed after a phone-number change since they set the preference), it
+// falls back to email rather than silently dropping the reminder. Returns
+// whether anything was actually dispatched — false for a player whose
+// preference is ChannelOff, which callers use to decide whether this
+// counts as a real send (for their "N reminders sent" count and whether
+// to record it in matchRSVPReminders/matchCaptainMessageReminders).
+func (service *MatchReminderService) notify(category string, recipient *models.Player, emailSubject, emailBody, smsBody string) (bool, error) {
+	npm := &models.NotificationPreferenceModel{DB: service.DB}
+	channel, err := npm.GetChannel(recipient.ID, category)
+	if err != nil {
+		return false, err
+	}
+
+	wantsEmail := channel == models.ChannelEmail || channel == models.ChannelBoth
+	wantsSMS := channel == models.ChannelSMS || channel == models.ChannelBoth
+	if wantsSMS && !recipient.PhoneVerifiedAt.Valid {
+		wantsSMS = false
+		wantsEmail = true
+	}
+
+	sent := false
+
+	if wantsEmail && recipient.Email.Valid && recipient.Email.String != "" {
+		if service.Email != nil {
+			if err := service.SendEmailV2(emailSubject, "", emailBody, recipient.Email.String); err != nil {
+				return sent, err
+			}
+		} else if service.InfoLog != nil {
+			service.InfoLog.Printf("no email configured -- reminder for %s: %s", recipient.Email.String, emailSubject)
+		}
+		sent = true
+	}
+
+	if wantsSMS {
+		if service.SMS != nil {
+			if err := service.SMS.Send(recipient.PhoneNumber.String, smsBody); err != nil {
+				return sent, err
+			}
+		} else if service.InfoLog != nil {
+			service.InfoLog.Printf("no SMS provider configured -- text reminder for player %d: %s", recipient.ID, smsBody)
+		}
+		sent = true
+	}
+
+	return sent, nil
 }
 
 // dateNDaysOut returns the UTC-midnight date (matching how matches.matchDate
@@ -125,7 +177,9 @@ func (service *MatchReminderService) SendDueRSVPReminders(asOf time.Time) (int, 
 					if _, responded := respondedByPlayer[player.ID]; responded {
 						continue
 					}
-					if !player.Email.Valid || player.Email.String == "" {
+					hasEmail := player.Email.Valid && player.Email.String != ""
+					hasVerifiedPhone := player.PhoneVerifiedAt.Valid
+					if !hasEmail && !hasVerifiedPhone {
 						continue
 					}
 					wasSent, err := mrrm.WasSent(match.ID, player.ID, daysOut)
@@ -136,10 +190,17 @@ func (service *MatchReminderService) SendDueRSVPReminders(asOf time.Time) (int, 
 						continue
 					}
 
-					if err := service.sendRSVPReminder(match, homeTeam, awayTeam, roster, respondedByPlayer, note, player); err != nil {
+					delivered, err := service.sendRSVPReminder(match, homeTeam, awayTeam, roster, respondedByPlayer, note, player)
+					if err != nil {
 						if service.InfoLog != nil {
 							service.InfoLog.Printf("rsvp reminder: failed to email player %d for match %d: %v", player.ID, match.ID, err)
 						}
+						continue
+					}
+					if !delivered {
+						// Preference is off — nothing to record, and no
+						// reason to stop the other side's roster from
+						// re-checking this player's preference too.
 						continue
 					}
 					if err := mrrm.MarkSent(match.ID, player.ID, daysOut); err != nil {
@@ -229,18 +290,23 @@ func buildRSVPReminderContent(match *models.Match, homeTeam, awayTeam *models.Te
 	return subject, b.String()
 }
 
-// sendRSVPReminder emails recipient a real, scheduled RSVP reminder for
-// match.
-func (service *MatchReminderService) sendRSVPReminder(match *models.Match, homeTeam, awayTeam *models.Team, roster []*models.Player, respondedByPlayer map[int]*models.RSVP, note *models.MatchTeamNote, recipient *models.Player) error {
-	subject, body := buildRSVPReminderContent(match, homeTeam, awayTeam, roster, respondedByPlayer, note)
+// buildRSVPReminderSMSBody is the RSVP reminder's short text-message
+// counterpart to buildRSVPReminderContent's HTML email body — just the
+// nudge and the link, no confirmed/not-attending detail (that stays
+// in-app, consistent with texting being one-way).
+func buildRSVPReminderSMSBody(match *models.Match, homeTeam, awayTeam *models.Team) string {
+	matchURL := fmt.Sprintf("https://%s/match/%d", os.Getenv("PUBLIC_HOST"), match.ID)
+	dateStr := match.MatchDate.Format("01/02/2006")
+	return fmt.Sprintf("RSVP for %s vs %s on %s: %s", homeTeam.Name, awayTeam.Name, dateStr, matchURL)
+}
 
-	if service.Email != nil {
-		return service.SendEmailV2(subject, "", body, recipient.Email.String)
-	}
-	if service.InfoLog != nil {
-		service.InfoLog.Printf("no email configured -- RSVP reminder for %s (match %d): %s", recipient.Email.String, match.ID, fmt.Sprintf("https://%s/match/%d", os.Getenv("PUBLIC_HOST"), match.ID))
-	}
-	return nil
+// sendRSVPReminder sends recipient a real, scheduled RSVP reminder for
+// match, by whichever channel(s) they've chosen (see notify) — returns
+// whether anything was actually sent (false if their preference is off).
+func (service *MatchReminderService) sendRSVPReminder(match *models.Match, homeTeam, awayTeam *models.Team, roster []*models.Player, respondedByPlayer map[int]*models.RSVP, note *models.MatchTeamNote, recipient *models.Player) (bool, error) {
+	subject, body := buildRSVPReminderContent(match, homeTeam, awayTeam, roster, respondedByPlayer, note)
+	smsBody := buildRSVPReminderSMSBody(match, homeTeam, awayTeam)
+	return service.notify(models.CategoryRSVPReminder, recipient, subject, body, smsBody)
 }
 
 // SendTestReminder builds the same RSVP-reminder content real reminders use
@@ -305,6 +371,66 @@ func (service *MatchReminderService) SendTestReminder(matchID, teamID int, addre
 	return nil
 }
 
+// SendTestReminderSMS is SendTestReminder's SMS counterpart. Unlike
+// SendTestReminder (which accepts arbitrary addresses), every playerID is
+// re-checked here against teamID's roster and PhoneVerifiedAt regardless
+// of what the caller passed — this is the one place a consent mistake
+// would actually text someone, so it doesn't trust the picker alone.
+// Returns how many were sent.
+func (service *MatchReminderService) SendTestReminderSMS(matchID, teamID int, playerIDs []int) (int, error) {
+	mm := &models.MatchModel{DB: service.DB}
+	match, err := mm.Get(matchID)
+	if err != nil {
+		return 0, err
+	}
+
+	tm := &models.TeamModel{DB: service.DB}
+	homeTeam, err := tm.Get(match.HomeTeamID)
+	if err != nil {
+		return 0, err
+	}
+	awayTeam, err := tm.Get(match.AwayTeamID)
+	if err != nil {
+		return 0, err
+	}
+
+	smsBody := "[TEST] " + buildRSVPReminderSMSBody(match, homeTeam, awayTeam)
+
+	pm := &models.PlayerModel{DB: service.DB}
+	tmm := &models.TeamMemberModel{DB: service.DB}
+
+	sent := 0
+	for _, playerID := range playerIDs {
+		isMember, err := tmm.IsMember(playerID, teamID)
+		if err != nil {
+			return sent, err
+		}
+		if !isMember {
+			continue
+		}
+		player, err := pm.Get(playerID)
+		if err != nil {
+			if errors.Is(err, models.ErrNoRecord) {
+				continue
+			}
+			return sent, err
+		}
+		if !player.PhoneVerifiedAt.Valid {
+			continue
+		}
+
+		if service.SMS != nil {
+			if err := service.SMS.Send(player.PhoneNumber.String, smsBody); err != nil {
+				return sent, err
+			}
+		} else if service.InfoLog != nil {
+			service.InfoLog.Printf("no SMS provider configured -- test text for player %d (match %d, team %d)", playerID, match.ID, teamID)
+		}
+		sent++
+	}
+	return sent, nil
+}
+
 // SendDueCaptainMessageReminders emails a team's captain, once, 4 days
 // before a match, if that team hasn't yet set a captain's message for it —
 // skipped entirely if the team has no captain assigned or the captain has
@@ -359,14 +485,20 @@ func (service *MatchReminderService) SendDueCaptainMessageReminders(asOf time.Ti
 			if err != nil {
 				return sent, err
 			}
-			if !captain.Email.Valid || captain.Email.String == "" {
+			hasEmail := captain.Email.Valid && captain.Email.String != ""
+			hasVerifiedPhone := captain.PhoneVerifiedAt.Valid
+			if !hasEmail && !hasVerifiedPhone {
 				continue
 			}
 
-			if err := service.sendCaptainMessageReminder(match, side.team, side.opponent, captain); err != nil {
+			delivered, err := service.sendCaptainMessageReminder(match, side.team, side.opponent, captain)
+			if err != nil {
 				if service.InfoLog != nil {
 					service.InfoLog.Printf("captain-message reminder: failed to email captain %d for match %d: %v", captain.ID, match.ID, err)
 				}
+				continue
+			}
+			if !delivered {
 				continue
 			}
 			if err := mcrm.MarkSent(match.ID, side.team.ID); err != nil {
@@ -379,19 +511,16 @@ func (service *MatchReminderService) SendDueCaptainMessageReminders(asOf time.Ti
 	return sent, nil
 }
 
-func (service *MatchReminderService) sendCaptainMessageReminder(match *models.Match, team, opponent *models.Team, captain *models.Player) error {
+// sendCaptainMessageReminder returns whether anything was actually sent
+// (false if the captain's preference is off) — see notify.
+func (service *MatchReminderService) sendCaptainMessageReminder(match *models.Match, team, opponent *models.Team, captain *models.Player) (bool, error) {
 	matchURL := fmt.Sprintf("https://%s/match/%d", os.Getenv("PUBLIC_HOST"), match.ID)
 	dateStr := match.MatchDate.Format("01/02/2006")
 	subject := fmt.Sprintf("Add a message for %s's match vs %s — %s", team.Name, opponent.Name, dateStr)
 	body := fmt.Sprintf(
 		`<html><body><p>Your team plays %s on %s. <a href="%s">Add a message for your team</a> to include in their RSVP reminder emails.</p></body></html>`,
 		html.EscapeString(opponent.Name), dateStr, matchURL)
+	smsBody := fmt.Sprintf("Add a message for %s's match vs %s on %s: %s", team.Name, opponent.Name, dateStr, matchURL)
 
-	if service.Email != nil {
-		return service.SendEmailV2(subject, "", body, captain.Email.String)
-	}
-	if service.InfoLog != nil {
-		service.InfoLog.Printf("no email configured -- captain-message reminder for %s (match %d, team %d): %s", captain.Email.String, match.ID, team.ID, matchURL)
-	}
-	return nil
+	return service.notify(models.CategoryCaptainMessageReminder, captain, subject, body, smsBody)
 }

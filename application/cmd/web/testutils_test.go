@@ -146,27 +146,30 @@ func newTestApplication(t *testing.T) *application {
 	joinRequestService := &services.JoinRequestService{JoinRequestModel: joinRequests, DB: testDB}
 	rosterExportService := &services.RosterExportService{DB: testDB}
 	rosterImportService := &services.RosterImportService{DB: testDB}
+	notificationPreferences := &models.NotificationPreferenceModel{DB: testDB}
+	notificationPreferenceService := &services.NotificationPreferenceService{NotificationPreferenceModel: notificationPreferences, DB: testDB}
 
 	return &application{
-		errorLog:             log.New(io.Discard, "", 0),
-		infoLog:              log.New(io.Discard, "", 0),
-		playerService:        playerService,
-		userService:          userService,
-		leagueService:        leagueService,
-		teamService:          teamService,
-		locationService:      locationService,
-		seasonService:        seasonService,
-		matchService:         matchService,
-		rsvpService:          rsvpService,
-		matchTeamNoteService: matchTeamNoteService,
-		matchReminderService: matchReminderService,
-		inviteService:        inviteService,
-		joinRequestService:   joinRequestService,
-		rosterExportService:  rosterExportService,
-		rosterImportService:  rosterImportService,
-		templateCache:        templateCache,
-		sessionManager:       sessionManager,
-		useTemplateCache:     true,
+		errorLog:                      log.New(io.Discard, "", 0),
+		infoLog:                       log.New(io.Discard, "", 0),
+		playerService:                 playerService,
+		userService:                   userService,
+		leagueService:                 leagueService,
+		teamService:                   teamService,
+		locationService:               locationService,
+		seasonService:                 seasonService,
+		matchService:                  matchService,
+		rsvpService:                   rsvpService,
+		matchTeamNoteService:          matchTeamNoteService,
+		matchReminderService:          matchReminderService,
+		inviteService:                 inviteService,
+		joinRequestService:            joinRequestService,
+		rosterExportService:           rosterExportService,
+		rosterImportService:           rosterImportService,
+		notificationPreferenceService: notificationPreferenceService,
+		templateCache:                 templateCache,
+		sessionManager:                sessionManager,
+		useTemplateCache:              true,
 	}
 }
 

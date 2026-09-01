@@ -257,6 +257,20 @@
                 <div class="mt-2 text-center"><input class="btn-secondary m-0" type="submit" value="Send Test to Selected"></div>
             </form>
             {{end}}
+            {{if .Row.VerifiedPhoneTeammates}}
+            <form action="/match/{{.Root.Data.Match.ID}}/testReminderSMS" method="POST">
+                <input type='hidden' name='csrf_token' value='{{.Root.CSRFToken}}'>
+                <input type='hidden' name='teamID' value='{{.Row.TeamID}}'>
+                <p class="field-label mb-1">Or send a test text to a teammate with a verified phone number</p>
+                {{range .Row.VerifiedPhoneTeammates}}
+                <label class="flex items-center gap-2 mb-1">
+                    <input type="checkbox" name="smsPlayerIDs" value="{{.PlayerID}}">
+                    <span>{{.Name}} <span class="text-gray-500 text-xs">({{.Phone}})</span></span>
+                </label>
+                {{end}}
+                <div class="mt-2 text-center"><input class="btn-secondary m-0" type="submit" value="Send Test Text"></div>
+            </form>
+            {{end}}
         </div>
     </details>
 </div>

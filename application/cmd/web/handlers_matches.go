@@ -372,27 +372,31 @@ type rsvpDisplayRow struct {
 // notes, template-facing — Form carries the sticky (possibly invalid) value
 // on a failed submission, or the currently saved value otherwise.
 type matchTeamNoteView struct {
-	TeamID              int
-	Roster              []*models.Player
-	PlayerOfMatchName   string
-	Notes               string
-	CaptainMessage      string
-	CanManage           bool
-	Form                *services.MatchTeamNoteForm
-	CanSendTestReminder bool
-	ActivatedTeammates  []*teammateOption
+	TeamID                 int
+	Roster                 []*models.Player
+	PlayerOfMatchName      string
+	Notes                  string
+	CaptainMessage         string
+	CanManage              bool
+	Form                   *services.MatchTeamNoteForm
+	CanSendTestReminder    bool
+	ActivatedTeammates     []*teammateOption
+	VerifiedPhoneTeammates []*teammateOption
 }
 
-// teammateOption is one roster player with an activated account — the
-// "select from a list of teammates" picker on the match test-reminder tool
-// (cmd/web/handlers_matches.go's matchTestReminderSubmit), mirroring the
-// invite screen's roster-picker pattern (RosterWithoutAccount in
-// handlers_teams.go) but for the opposite case: players who *do* already
-// have a working login to send a test reminder to.
+// teammateOption is one roster player offered on the match test-reminder
+// tool's "select from a list of teammates" pickers (matchTestReminderSubmit
+// for email/ActivatedTeammates, matchTestReminderSMSSubmit for
+// text/VerifiedPhoneTeammates) — mirroring the invite screen's
+// roster-picker pattern (RosterWithoutAccount in handlers_teams.go) but
+// for the opposite case: someone reachable enough to send a test to.
+// Only one of Email/Phone is populated depending on which list this came
+// from.
 type teammateOption struct {
 	PlayerID int
 	Name     string
 	Email    string
+	Phone    string
 }
 
 type matchViewData struct {
@@ -637,6 +641,9 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 			for _, p := range roster {
 				if email, ok := activatedEmails[p.ID]; ok {
 					view.ActivatedTeammates = append(view.ActivatedTeammates, &teammateOption{PlayerID: p.ID, Name: p.FirstName + " " + p.LastName, Email: email})
+				}
+				if p.PhoneVerifiedAt.Valid {
+					view.VerifiedPhoneTeammates = append(view.VerifiedPhoneTeammates, &teammateOption{PlayerID: p.ID, Name: p.FirstName + " " + p.LastName, Phone: p.PhoneNumber.String})
 				}
 			}
 		}
@@ -950,6 +957,56 @@ func (app *application) matchTestReminderSubmit(w http.ResponseWriter, r *http.R
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", fmt.Sprintf("Test reminder sent to %d address(es).", len(addresses)))
+	http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
+}
+
+// matchTestReminderSMSSubmit is matchTestReminderSubmit's SMS counterpart
+// — same admin-or-that-team's-captain gate, but with no free-text option
+// at all: playerIDs must come from the VerifiedPhoneTeammates picker
+// (SendTestReminderSMS re-checks roster membership and verification
+// itself regardless of what's posted here, so this handler doesn't need
+// to duplicate that check).
+func (app *application) matchTestReminderSMSSubmit(w http.ResponseWriter, r *http.Request) {
+	match, ok := app.getRouteMatch(w, r)
+	if !ok {
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	teamID, err := strconv.Atoi(r.PostForm.Get("teamID"))
+	if err != nil || (teamID != match.HomeTeamID && teamID != match.AwayTeamID) {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+	if !app.isAdmin(r) && !app.isCaptainOfTeam(r, teamID) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	var playerIDs []int
+	for _, s := range r.PostForm["smsPlayerIDs"] {
+		if id, err := strconv.Atoi(s); err == nil {
+			playerIDs = append(playerIDs, id)
+		}
+	}
+
+	if len(playerIDs) == 0 {
+		app.sessionManager.Put(r.Context(), "flash", "Select at least one teammate with a verified phone number.")
+		http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
+		return
+	}
+
+	sent, err := app.matchReminderService.SendTestReminderSMS(match.ID, teamID, playerIDs)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", fmt.Sprintf("Test text sent to %d teammate(s).", sent))
 	http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
 }
 

@@ -3,6 +3,7 @@ package models
 import (
 	"database/sql"
 	"testing"
+	"time"
 )
 
 func TestInsertPlayer(t *testing.T) {
@@ -116,5 +117,63 @@ func TestGetPlayersByTeam(t *testing.T) {
 	expected := 2
 	if len(players) != expected {
 		t.Fatalf("wrong number of results. expecting %d, got %d", expected, len(players))
+	}
+}
+
+// Changing phonenumber via Update must clear any existing phone
+// verification — this is the one place every phone-number write in the
+// app funnels through, so it's the one place the "changing the number
+// clears verification" consent rule can be enforced.
+func TestUpdatePlayerClearsPhoneVerificationOnNumberChange(t *testing.T) {
+	db := NewTestDB(t)
+
+	pm := PlayerModel{DB: db}
+	player := &Player{FirstName: "Lou", LastName: "Garwood", PhoneNumber: sql.NullString{String: "518-555-0100", Valid: true}}
+	id, err := pm.Insert(player)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.SetPhoneVerificationCode(id, "123456", time.Now().Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.ConfirmPhoneVerified(id); err != nil {
+		t.Fatal(err)
+	}
+
+	verified, err := pm.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verified.PhoneVerifiedAt.Valid {
+		t.Fatal("expected phone to be verified before the update")
+	}
+
+	// Updating with the SAME phone number must leave verification intact.
+	verified.FirstName = "Louis"
+	if err := pm.Update(verified); err != nil {
+		t.Fatal(err)
+	}
+	stillVerified, err := pm.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stillVerified.PhoneVerifiedAt.Valid {
+		t.Fatal("expected verification to survive an update that didn't change the phone number")
+	}
+
+	// Updating with a DIFFERENT phone number must clear verification.
+	stillVerified.PhoneNumber = sql.NullString{String: "518-555-0199", Valid: true}
+	if err := pm.Update(stillVerified); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := pm.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.PhoneVerifiedAt.Valid {
+		t.Fatal("expected verification to be cleared after the phone number changed")
+	}
+	if cleared.PhoneVerificationCode.Valid || cleared.PhoneVerificationExpiresAt.Valid {
+		t.Fatal("expected any pending verification code to be cleared too")
 	}
 }

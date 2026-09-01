@@ -32,6 +32,8 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodPost, "/user/forgotPassword", dynamic.ThenFunc(app.forgotPasswordPost))
 	router.Handler(http.MethodGet, "/user/resetPassword", dynamic.ThenFunc(app.resetPassword))
 	router.Handler(http.MethodPost, "/user/resetPassword", dynamic.ThenFunc(app.resetPasswordPost))
+	router.Handler(http.MethodGet, "/privacy", dynamic.ThenFunc(app.privacyPolicy))
+	router.Handler(http.MethodGet, "/terms", dynamic.ThenFunc(app.termsConditions))
 
 	// authenticated routes (logged in; need not be active)
 	authenticated := dynamic.Append(app.requireAuthentication)
@@ -43,6 +45,10 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodGet, "/player/view/:id", active.ThenFunc(app.playerView))
 	router.Handler(http.MethodGet, "/player/update/:id", active.ThenFunc(app.playerUpdate))
 	router.Handler(http.MethodPost, "/player/update", active.ThenFunc(app.playerUpdatePost))
+	router.Handler(http.MethodGet, "/player/notifications/:id", active.ThenFunc(app.playerNotifications))
+	router.Handler(http.MethodPost, "/player/notifications/:id/phone", active.ThenFunc(app.playerPhoneVerificationRequest))
+	router.Handler(http.MethodPost, "/player/notifications/:id/phone/confirm", active.ThenFunc(app.playerPhoneVerificationConfirm))
+	router.Handler(http.MethodPost, "/player/notifications/:id/preferences", active.ThenFunc(app.playerNotificationPreferencesSave))
 	router.Handler(http.MethodGet, "/league", active.ThenFunc(app.leagueList))
 	router.Handler(http.MethodGet, "/league/:id", active.ThenFunc(app.leagueView))
 	router.Handler(http.MethodGet, "/team/:teamID", active.ThenFunc(app.teamView))
@@ -54,6 +60,7 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodPost, "/match/:id/rsvp", active.ThenFunc(app.matchRSVPSubmit))
 	router.Handler(http.MethodPost, "/match/:id/notes", active.ThenFunc(app.matchTeamNoteSubmit))
 	router.Handler(http.MethodPost, "/match/:id/testReminder", active.ThenFunc(app.matchTestReminderSubmit))
+	router.Handler(http.MethodPost, "/match/:id/testReminderSMS", active.ThenFunc(app.matchTestReminderSMSSubmit))
 	router.Handler(http.MethodGet, "/rosterImport/sample.csv", active.ThenFunc(app.rosterImportSample))
 
 	// team-manager routes (logged in + active + (admin OR captain OR league

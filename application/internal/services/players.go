@@ -1,8 +1,10 @@
 package services
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 	"unicode"
@@ -28,7 +30,9 @@ type PlayerForm struct {
 
 type PlayerService struct {
 	*models.PlayerModel
-	DB *sql.DB // needed for AddressModel/TeamModel/CommonService side calls
+	DB      *sql.DB // needed for AddressModel/TeamModel/CommonService side calls
+	SMS     *SMS
+	InfoLog *log.Logger
 }
 
 func parseOptionalDate(value string) sql.NullTime {
@@ -208,6 +212,103 @@ func (service *PlayerService) UpdatePlayer(form *PlayerForm, actorEmail string) 
 
 	cs := &CommonService{DB: service.DB}
 	return cs.InsertAuditLog(actorEmail, time.Now(), "player record updated: "+form.FirstName+" "+form.LastName)
+}
+
+// phoneCodeValidity is how long a verification code stays usable.
+// phoneCodeResendCooldown is the minimum gap between two code requests for
+// the same player, since each one costs money to send.
+const (
+	phoneCodeValidity       = 10 * time.Minute
+	phoneCodeResendCooldown = 60 * time.Second
+)
+
+// generatePhoneVerificationCode returns a random 6-digit numeric code.
+func generatePhoneVerificationCode() (string, error) {
+	digits := make([]byte, 6)
+	if _, err := rand.Read(digits); err != nil {
+		return "", err
+	}
+	for i, b := range digits {
+		digits[i] = '0' + b%10
+	}
+	return string(digits), nil
+}
+
+// RequestPhoneVerification normalizes/validates phoneNumber, saves it on
+// the player (via Update, so PlayerModel.Update's invariant clears any
+// stale verification for a number that's actually changing), then
+// generates and texts a fresh 6-digit code good for phoneCodeValidity.
+// Returns models.ErrBadData for an invalid phone number, and
+// models.ErrVerificationCooldown if the last code for this player was
+// requested less than phoneCodeResendCooldown ago.
+func (service *PlayerService) RequestPhoneVerification(playerID int, phoneNumber string) error {
+	normalized, ok := normalizePhoneNumber(phoneNumber)
+	if !ok {
+		return models.ErrBadData
+	}
+
+	existing, err := service.Get(playerID)
+	if err != nil {
+		return err
+	}
+
+	if existing.PhoneVerificationExpiresAt.Valid {
+		requestedAt := existing.PhoneVerificationExpiresAt.Time.Add(-phoneCodeValidity)
+		if time.Now().UTC().Before(requestedAt.Add(phoneCodeResendCooldown)) {
+			return models.ErrVerificationCooldown
+		}
+	}
+
+	existing.PhoneNumber = sql.NullString{String: normalized, Valid: true}
+	if err := service.Update(existing); err != nil {
+		return err
+	}
+
+	code, err := generatePhoneVerificationCode()
+	if err != nil {
+		return err
+	}
+	expiresAt := time.Now().UTC().Add(phoneCodeValidity)
+	if err := service.SetPhoneVerificationCode(playerID, code, expiresAt); err != nil {
+		return err
+	}
+
+	body := fmt.Sprintf("Your Blame the Ball verification code is: %s", code)
+	if service.SMS != nil {
+		if err := service.SMS.Send(normalized, body); err != nil {
+			return err
+		}
+	} else if service.InfoLog != nil {
+		service.InfoLog.Printf("no SMS provider configured -- verification code for player %d (%s): %s", playerID, normalized, code)
+	}
+
+	return nil
+}
+
+// ConfirmPhoneVerification checks code against the stored one and its
+// expiry for playerID. Returns (false, nil) for a wrong or expired code
+// (not an error — the caller re-renders the form with a message), (true,
+// nil) once verified.
+func (service *PlayerService) ConfirmPhoneVerification(playerID int, code string) (bool, error) {
+	player, err := service.Get(playerID)
+	if err != nil {
+		return false, err
+	}
+
+	if !player.PhoneVerificationCode.Valid || !player.PhoneVerificationExpiresAt.Valid {
+		return false, nil
+	}
+	if time.Now().UTC().After(player.PhoneVerificationExpiresAt.Time) {
+		return false, nil
+	}
+	if player.PhoneVerificationCode.String != code {
+		return false, nil
+	}
+
+	if err := service.ConfirmPhoneVerified(playerID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // DeletePlayer wipes the player's bio, address, and every team membership,

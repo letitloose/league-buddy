@@ -3145,6 +3145,247 @@ func TestMatchTestReminderSubmit(t *testing.T) {
 	})
 }
 
+// The SMS side of Test Reminder has no free-text option at all — only
+// roster players with a verified phone number appear in the picker, and
+// SendTestReminderSMS re-checks that server-side regardless of what's
+// posted.
+func TestMatchTestReminderSMSSubmit(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Test Reminder SMS League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Test Reminder SMS Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Test Reminder SMS Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Test Reminder SMS Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID,
+		MatchDate: time.Now().AddDate(0, 0, 30),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, homeTeamID, "test-reminder-sms-captain@test.com", "validpassword123")
+
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+
+	verifiedID, err := pm.Insert(&models.Player{FirstName: "Verified", LastName: "Teammate", PhoneNumber: sql.NullString{String: "518-555-0100", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(verifiedID, homeTeamID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.SetPhoneVerificationCode(verifiedID, "123456", time.Now().Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.ConfirmPhoneVerified(verifiedID); err != nil {
+		t.Fatal(err)
+	}
+
+	unverifiedID, err := pm.Insert(&models.Player{FirstName: "Unverified", LastName: "Teammate", PhoneNumber: sql.NullString{String: "518-555-0101", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(unverifiedID, homeTeamID); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "test-reminder-sms-captain@test.com", "validpassword123")
+
+	_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+	// Both players' names legitimately appear elsewhere on the page (e.g.
+	// the Player of the Match dropdown lists the whole roster regardless
+	// of verification), so check for the phone number the SMS picker
+	// specifically renders alongside a verified teammate's name — that
+	// only ever appears in the VerifiedPhoneTeammates picker.
+	if !strings.Contains(formBody, "(518-555-0100)") {
+		t.Error("expected the verified teammate's phone to appear in the SMS test-reminder picker")
+	}
+	if strings.Contains(formBody, "(518-555-0101)") {
+		t.Error("expected the unverified teammate to NOT appear in the SMS test-reminder picker")
+	}
+	csrfToken := extractCSRFToken(t, formBody)
+
+	// Post both IDs — even the unverified one, which a crafted request
+	// could add even though the UI never offers it — and confirm only the
+	// verified one is actually counted as sent.
+	code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/testReminderSMS", matchID), url.Values{
+		"teamID":       {fmt.Sprintf("%d", homeTeamID)},
+		"smsPlayerIDs": {fmt.Sprintf("%d", verifiedID), fmt.Sprintf("%d", unverifiedID)},
+		"csrf_token":   {csrfToken},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", matchID) {
+		t.Errorf("want Location %q; got %q", fmt.Sprintf("/match/%d", matchID), loc)
+	}
+
+	_, _, afterBody := ts.get(t, headers.Get("Location"))
+	if !strings.Contains(afterBody, "Test text sent to 1 teammate(s).") {
+		t.Error("expected the flash to report exactly 1 teammate texted (the unverified one must not count)")
+	}
+}
+
+// Notification Preferences is a player's own account settings — narrower
+// than canManagePlayer, which also lets an admin or a captain/league-admin
+// of the player's team manage roster contact info. Nobody but the player
+// themself can reach it, including their own team's captain and an admin.
+func TestPlayerNotificationsGating(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Notifications Gating Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playerID := setupRosterMember(t, teamID, "notif-gating-self@test.com", "validpassword123")
+	setupTeamCaptain(t, teamID, "notif-gating-captain@test.com", "validpassword123")
+
+	t.Run("the player themself can reach it", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "notif-gating-self@test.com", "validpassword123")
+		code, _, _ := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
+		if code != http.StatusOK {
+			t.Errorf("want %d; got %d", http.StatusOK, code)
+		}
+	})
+
+	t.Run("that team's own captain cannot", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "notif-gating-captain@test.com", "validpassword123")
+		code, headers, _ := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
+		if code != http.StatusSeeOther {
+			t.Errorf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+	})
+
+	t.Run("an admin cannot", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testAdminEmail, testAdminPass)
+		code, headers, _ := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
+		if code != http.StatusSeeOther {
+			t.Errorf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+	})
+}
+
+// End-to-end: a player requests a verification code, confirms it, and can
+// then set an RSVP-reminder preference of "sms" — and that setting sms
+// before ever verifying is rejected.
+func TestPlayerNotificationsVerifyPhoneAndSetPreference(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Notifications Flow Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playerID := setupRosterMember(t, teamID, "notif-flow-self@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "notif-flow-self@test.com", "validpassword123")
+
+	_, _, body := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
+	csrfToken := extractCSRFToken(t, body)
+
+	// Setting sms before ever verifying a phone is rejected.
+	code, headers, _ := ts.postForm(t, fmt.Sprintf("/player/notifications/%d/preferences", playerID), url.Values{
+		"csrf_token":  {csrfToken},
+		"rsvpChannel": {"sms"},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	pm := &models.PlayerModel{DB: testDB}
+	npm := &models.NotificationPreferenceModel{DB: testDB}
+	channel, err := npm.GetChannel(playerID, models.CategoryRSVPReminder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if channel != models.ChannelEmail {
+		t.Fatalf("expected the sms preference to be rejected (still default %q), got %q", models.ChannelEmail, channel)
+	}
+
+	// Request a verification code.
+	code, headers, _ = ts.postForm(t, fmt.Sprintf("/player/notifications/%d/phone", playerID), url.Values{
+		"csrf_token":  {csrfToken},
+		"phonenumber": {"518-555-0100"},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+
+	player, err := pm.Get(playerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !player.PhoneVerificationCode.Valid {
+		t.Fatal("expected a pending verification code after requesting one")
+	}
+
+	// Confirm with the real code.
+	_, _, body = ts.get(t, headers.Get("Location"))
+	csrfToken = extractCSRFToken(t, body)
+	code, headers, _ = ts.postForm(t, fmt.Sprintf("/player/notifications/%d/phone/confirm", playerID), url.Values{
+		"csrf_token": {csrfToken},
+		"code":       {player.PhoneVerificationCode.String},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+
+	verified, err := pm.Get(playerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verified.PhoneVerifiedAt.Valid {
+		t.Fatal("expected the phone to be verified")
+	}
+
+	// Now sms is accepted.
+	_, _, body = ts.get(t, headers.Get("Location"))
+	csrfToken = extractCSRFToken(t, body)
+	code, _, _ = ts.postForm(t, fmt.Sprintf("/player/notifications/%d/preferences", playerID), url.Values{
+		"csrf_token":  {csrfToken},
+		"rsvpChannel": {"sms"},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	channel, err = npm.GetChannel(playerID, models.CategoryRSVPReminder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if channel != models.ChannelSMS {
+		t.Fatalf("expected channel %q after verifying, got %q", models.ChannelSMS, channel)
+	}
+}
+
 // A viewer who captains one of a match's two teams sees edit controls
 // (Player of the Match/Notes/Captain's Message form, Send Test Reminder)
 // for only their own side — even when they're also an admin, whose access

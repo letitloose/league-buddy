@@ -19,26 +19,28 @@ import (
 )
 
 type application struct {
-	errorLog             *log.Logger
-	infoLog              *log.Logger
-	playerService        *services.PlayerService
-	userService          *services.UserService
-	leagueService        *services.LeagueService
-	teamService          *services.TeamService
-	locationService      *services.LocationService
-	seasonService        *services.SeasonService
-	matchService         *services.MatchService
-	rsvpService          *services.RSVPService
-	matchTeamNoteService *services.MatchTeamNoteService
-	matchReminderService *services.MatchReminderService
-	inviteService        *services.InviteService
-	joinRequestService   *services.JoinRequestService
-	rosterExportService  *services.RosterExportService
-	rosterImportService  *services.RosterImportService
-	emailService         *services.Email
-	templateCache        map[string]*template.Template
-	sessionManager       *scs.SessionManager
-	useTemplateCache     bool
+	errorLog                      *log.Logger
+	infoLog                       *log.Logger
+	playerService                 *services.PlayerService
+	userService                   *services.UserService
+	leagueService                 *services.LeagueService
+	teamService                   *services.TeamService
+	locationService               *services.LocationService
+	seasonService                 *services.SeasonService
+	matchService                  *services.MatchService
+	rsvpService                   *services.RSVPService
+	matchTeamNoteService          *services.MatchTeamNoteService
+	matchReminderService          *services.MatchReminderService
+	inviteService                 *services.InviteService
+	joinRequestService            *services.JoinRequestService
+	rosterExportService           *services.RosterExportService
+	rosterImportService           *services.RosterImportService
+	notificationPreferenceService *services.NotificationPreferenceService
+	emailService                  *services.Email
+	smsService                    *services.SMS
+	templateCache                 map[string]*template.Template
+	sessionManager                *scs.SessionManager
+	useTemplateCache              bool
 }
 
 func main() {
@@ -82,8 +84,20 @@ func main() {
 		}
 	}
 
+	// Same "only construct when configured" pattern as email — dev/CI
+	// without Twilio (or whatever provider) creds falls back to InfoLog
+	// logging instead of a nil-pointer panic in SMS.Send.
+	var sms *services.SMS
+	if os.Getenv("SMS_ACCOUNT_SID") != "" {
+		sms = &services.SMS{
+			AccountSID: os.Getenv("SMS_ACCOUNT_SID"),
+			AuthToken:  os.Getenv("SMS_AUTH_TOKEN"),
+			FromNumber: os.Getenv("SMS_FROM_NUMBER"),
+		}
+	}
+
 	players := &models.PlayerModel{DB: db}
-	playerService := &services.PlayerService{PlayerModel: players, DB: db}
+	playerService := &services.PlayerService{PlayerModel: players, DB: db, SMS: sms, InfoLog: infoLog}
 	users := &models.UserModel{DB: db}
 	userService := &services.UserService{UserModel: users, Email: email, InfoLog: infoLog}
 	leagues := &models.LeagueModel{DB: db}
@@ -100,39 +114,43 @@ func main() {
 	rsvpService := &services.RSVPService{RSVPModel: rsvps}
 	matchTeamNotes := &models.MatchTeamNoteModel{DB: db}
 	matchTeamNoteService := &services.MatchTeamNoteService{MatchTeamNoteModel: matchTeamNotes, DB: db}
-	matchReminderService := &services.MatchReminderService{DB: db, Email: email, InfoLog: infoLog}
+	matchReminderService := &services.MatchReminderService{DB: db, Email: email, SMS: sms, InfoLog: infoLog}
 	invites := &models.InviteModel{DB: db}
 	inviteService := &services.InviteService{InviteModel: invites, DB: db, Email: email, InfoLog: infoLog}
 	joinRequests := &models.JoinRequestModel{DB: db}
 	joinRequestService := &services.JoinRequestService{JoinRequestModel: joinRequests, DB: db, Email: email, InfoLog: infoLog}
 	rosterExportService := &services.RosterExportService{DB: db}
 	rosterImportService := &services.RosterImportService{DB: db}
+	notificationPreferences := &models.NotificationPreferenceModel{DB: db}
+	notificationPreferenceService := &services.NotificationPreferenceService{NotificationPreferenceModel: notificationPreferences, DB: db}
 
 	sessionManager := scs.New()
 	sessionManager.Store = mysqlstore.New(db)
 	sessionManager.Lifetime = 12 * time.Hour
 
 	app := &application{
-		errorLog:             errorLog,
-		infoLog:              infoLog,
-		playerService:        playerService,
-		userService:          userService,
-		leagueService:        leagueService,
-		teamService:          teamService,
-		locationService:      locationService,
-		seasonService:        seasonService,
-		matchService:         matchService,
-		rsvpService:          rsvpService,
-		matchTeamNoteService: matchTeamNoteService,
-		matchReminderService: matchReminderService,
-		inviteService:        inviteService,
-		joinRequestService:   joinRequestService,
-		rosterExportService:  rosterExportService,
-		rosterImportService:  rosterImportService,
-		emailService:         email,
-		templateCache:        templateCache,
-		sessionManager:       sessionManager,
-		useTemplateCache:     *useTemplateCache,
+		errorLog:                      errorLog,
+		infoLog:                       infoLog,
+		playerService:                 playerService,
+		userService:                   userService,
+		leagueService:                 leagueService,
+		teamService:                   teamService,
+		locationService:               locationService,
+		seasonService:                 seasonService,
+		matchService:                  matchService,
+		rsvpService:                   rsvpService,
+		matchTeamNoteService:          matchTeamNoteService,
+		matchReminderService:          matchReminderService,
+		inviteService:                 inviteService,
+		joinRequestService:            joinRequestService,
+		rosterExportService:           rosterExportService,
+		rosterImportService:           rosterImportService,
+		notificationPreferenceService: notificationPreferenceService,
+		emailService:                  email,
+		smsService:                    sms,
+		templateCache:                 templateCache,
+		sessionManager:                sessionManager,
+		useTemplateCache:              *useTemplateCache,
 	}
 
 	reset := os.Getenv("RESETDB")

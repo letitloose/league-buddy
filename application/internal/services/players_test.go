@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/letitloose/league-buddy/internal/models"
 )
@@ -394,5 +395,124 @@ func TestDeletePlayerRemovesAllMemberships(t *testing.T) {
 		t.Fatal(err)
 	} else if isMember {
 		t.Fatal("expected second team membership to be removed")
+	}
+}
+
+func TestRequestAndConfirmPhoneVerification(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	players := &models.PlayerModel{DB: db}
+	playerService := PlayerService{PlayerModel: players, DB: db}
+
+	id, err := players.Insert(&models.Player{FirstName: "Lou", LastName: "Garwood"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := playerService.RequestPhoneVerification(id, "518-555-0100"); err != nil {
+		t.Fatal(err)
+	}
+
+	player, err := players.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !player.PhoneVerificationCode.Valid {
+		t.Fatal("expected a pending verification code")
+	}
+	if player.PhoneNumber.String != "518-555-0100" {
+		t.Fatalf("expected the phone number to already be saved, got %q", player.PhoneNumber.String)
+	}
+
+	// Wrong code doesn't verify.
+	ok, err := playerService.ConfirmPhoneVerification(id, "000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("expected a wrong code to fail")
+	}
+
+	// Right code verifies.
+	ok, err = playerService.ConfirmPhoneVerification(id, player.PhoneVerificationCode.String)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected the correct code to verify")
+	}
+	verified, err := players.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verified.PhoneVerifiedAt.Valid {
+		t.Fatal("expected the phone to be marked verified")
+	}
+	if verified.PhoneVerificationCode.Valid {
+		t.Fatal("expected the pending code to be cleared after verifying")
+	}
+}
+
+// The resend cooldown only applies while a code is still outstanding —
+// ConfirmPhoneVerified clears the pending code/expiry once verified (see
+// TestRequestAndConfirmPhoneVerification), so there's nothing left to
+// cool down after a successful verification. This test covers the
+// realistic case the cooldown actually guards: requesting a second code
+// before ever confirming the first one.
+func TestRequestPhoneVerificationRejectsRapidResend(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	players := &models.PlayerModel{DB: db}
+	playerService := PlayerService{PlayerModel: players, DB: db}
+
+	id, err := players.Insert(&models.Player{FirstName: "Lou", LastName: "Garwood"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := playerService.RequestPhoneVerification(id, "518-555-0100"); err != nil {
+		t.Fatal(err)
+	}
+	if err := playerService.RequestPhoneVerification(id, "518-555-0100"); err != models.ErrVerificationCooldown {
+		t.Fatalf("expected ErrVerificationCooldown on an immediate resend, got %v", err)
+	}
+}
+
+func TestConfirmPhoneVerificationRejectsExpiredCode(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	players := &models.PlayerModel{DB: db}
+	playerService := PlayerService{PlayerModel: players, DB: db}
+
+	id, err := players.Insert(&models.Player{FirstName: "Lou", LastName: "Garwood"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := players.SetPhoneVerificationCode(id, "123456", time.Now().Add(-1*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := playerService.ConfirmPhoneVerification(id, "123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("expected an expired code to fail")
+	}
+}
+
+func TestRequestPhoneVerificationRejectsInvalidNumber(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	players := &models.PlayerModel{DB: db}
+	playerService := PlayerService{PlayerModel: players, DB: db}
+
+	id, err := players.Insert(&models.Player{FirstName: "Lou", LastName: "Garwood"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := playerService.RequestPhoneVerification(id, "not-a-phone-number"); err != models.ErrBadData {
+		t.Fatalf("expected ErrBadData, got %v", err)
 	}
 }

@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/letitloose/league-buddy/internal/models"
@@ -345,6 +347,134 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 	data.Breadcrumbs = app.teamBreadcrumbs(team, league, true)
 
 	app.render(w, http.StatusOK, "team-view.html", data)
+}
+
+// teamRosterExport serves the team's roster as a downloadable PDF matching
+// the league's official roster-registration form. Gated by the
+// teamManager route tier (admin or this team's captain), same as the rest
+// of this file's management actions.
+func (app *application) teamRosterExport(w http.ResponseWriter, r *http.Request) {
+	team, ok := app.getRouteTeam(w, r)
+	if !ok {
+		return
+	}
+
+	pdfBytes, err := app.rosterExportService.BuildRosterPDF(team.ID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	filename := rosterExportFilename(team.Name)
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.Write(pdfBytes)
+}
+
+// rosterExportFilename turns a team name into a safe download filename,
+// keeping only letters, digits, and hyphens so an arbitrary team name can
+// never break the Content-Disposition header.
+func rosterExportFilename(teamName string) string {
+	var b strings.Builder
+	lastWasDash := false
+	for _, r := range teamName {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(r)
+			lastWasDash = false
+		case !lastWasDash:
+			b.WriteRune('-')
+			lastWasDash = true
+		}
+	}
+	name := strings.Trim(b.String(), "-")
+	if name == "" {
+		name = "team"
+	}
+	return name + "-roster.pdf"
+}
+
+// teamRosterImportForm renders the CSV upload page.
+func (app *application) teamRosterImportForm(w http.ResponseWriter, r *http.Request) {
+	team, ok := app.getRouteTeam(w, r)
+	if !ok {
+		return
+	}
+
+	breadcrumbs, ok := app.teamActionBreadcrumbs(w, team, Breadcrumb{Label: "Import Roster"})
+	if !ok {
+		return
+	}
+
+	data := app.newTemplateData(r)
+	data.Data = &teamRosterImportFormData{Team: team}
+	data.Breadcrumbs = breadcrumbs
+
+	app.render(w, http.StatusOK, "team-roster-import.html", data)
+}
+
+// teamRosterImportFormData wraps the team the upload form's CSV will be
+// imported onto.
+type teamRosterImportFormData struct {
+	Team *models.Team
+}
+
+// teamRosterImportSubmit parses the uploaded CSV and renders a results
+// page. A malformed file (bad CSV, missing a required column) flashes a
+// plain error back to the upload form; everything else — including every
+// per-row problem — is handled by ImportCSV and shown on the results page.
+func (app *application) teamRosterImportSubmit(w http.ResponseWriter, r *http.Request) {
+	team, ok := app.getRouteTeam(w, r)
+	if !ok {
+		return
+	}
+
+	if err := r.ParseMultipartForm(5 << 20); err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		app.sessionManager.Put(r.Context(), "flash", "You must choose a CSV file to upload.")
+		http.Redirect(w, r, fmt.Sprintf("/team/%d/rosterImport", team.ID), http.StatusSeeOther)
+		return
+	}
+	defer file.Close()
+
+	result, err := app.rosterImportService.ImportCSV(team.ID, file, app.getUserName(r))
+	if err != nil {
+		app.sessionManager.Put(r.Context(), "flash", "Couldn't import that file: "+err.Error())
+		http.Redirect(w, r, fmt.Sprintf("/team/%d/rosterImport", team.ID), http.StatusSeeOther)
+		return
+	}
+
+	breadcrumbs, ok := app.teamActionBreadcrumbs(w, team, Breadcrumb{Label: "Import Roster"})
+	if !ok {
+		return
+	}
+
+	data := app.newTemplateData(r)
+	data.Data = &teamRosterImportResultData{Team: team, Result: result}
+	data.Breadcrumbs = breadcrumbs
+
+	app.render(w, http.StatusOK, "team-roster-import-result.html", data)
+}
+
+// teamRosterImportResultData wraps the team and the full per-row report
+// from ImportCSV.
+type teamRosterImportResultData struct {
+	Team   *models.Team
+	Result *services.RosterImportResult
+}
+
+// rosterImportSample serves the downloadable CSV template shown on the
+// Import Roster page — not team-scoped, since the format is identical for
+// every team.
+func (app *application) rosterImportSample(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", `attachment; filename="roster-import-sample.csv"`)
+	w.Write([]byte(services.SampleRosterCSV))
 }
 
 // teamFormBreadcrumbs is the shared "Leagues / Add Team" trail for the
@@ -883,6 +1013,7 @@ type teamInviteData struct {
 	Team                 *models.Team
 	PendingInvites       []*models.Invite
 	RosterWithoutAccount []*models.Player
+	CanInviteAsCaptain   bool
 }
 
 // rosterWithoutAccount returns teamID's roster filtered down to players who
@@ -942,7 +1073,7 @@ func (app *application) teamInviteForm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := app.newTemplateData(r)
-	data.Data = &teamInviteData{Team: team, PendingInvites: pending, RosterWithoutAccount: withoutAccount}
+	data.Data = &teamInviteData{Team: team, PendingInvites: pending, RosterWithoutAccount: withoutAccount, CanInviteAsCaptain: app.canInviteAsCaptain(r, team.ID)}
 	data.Form = services.InviteForm{}
 	data.Breadcrumbs = breadcrumbs
 
@@ -962,7 +1093,8 @@ func (app *application) teamInviteSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	form := &services.InviteForm{
-		Emails: r.PostForm.Get("emails"),
+		Emails:    r.PostForm.Get("emails"),
+		AsCaptain: r.PostForm.Get("asCaptain") == "on" && app.canInviteAsCaptain(r, team.ID),
 	}
 
 	loggedInUserID := app.sessionManager.GetInt(r.Context(), "authenticatedUserID")
@@ -986,7 +1118,7 @@ func (app *application) teamInviteSend(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			data := app.newTemplateData(r)
-			data.Data = &teamInviteData{Team: team, PendingInvites: pending, RosterWithoutAccount: withoutAccount}
+			data.Data = &teamInviteData{Team: team, PendingInvites: pending, RosterWithoutAccount: withoutAccount, CanInviteAsCaptain: app.canInviteAsCaptain(r, team.ID)}
 			data.Form = form
 			data.Breadcrumbs = breadcrumbs
 			app.render(w, http.StatusUnprocessableEntity, "team-invite.html", data)

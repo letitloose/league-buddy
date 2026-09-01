@@ -1,0 +1,23 @@
+{{define "title"}}Import Roster{{end}}
+
+{{define "main"}}
+<div class="flex items-center flex-col">
+    <h2>Import Roster for {{.Data.Team.Name}}</h2>
+    <div class="w-full max-w-md">
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <p class="text-sm text-gray-600 mb-4">Upload a CSV with your roster. Only Last Name, First Name, and Email are required per row &mdash; Address, Phone, and DOB are optional. Re-uploading later (to fix a typo or add players) is safe: rows are matched by email, so existing players are updated rather than duplicated.</p>
+            <p class="text-center mb-4"><a href="/rosterImport/sample.csv">Download a sample CSV</a></p>
+            <form class="text-center" action="/team/{{.Data.Team.ID}}/rosterImport" method="POST" enctype="multipart/form-data">
+                <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                <div class="mb-4">
+                    <input class="form-field" type="file" name="file" accept=".csv" required>
+                </div>
+                <div class="flex justify-between">
+                    <input class="btn m-0" type='submit' value='Import Roster'>
+                    <a class="btn m-0" href="/team/{{.Data.Team.ID}}">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{{end}}

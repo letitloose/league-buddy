@@ -326,6 +326,15 @@ func (app *application) canManageTeam(r *http.Request, teamID int) bool {
 	return app.isAdmin(r) || app.isCaptainOfTeam(r, teamID) || app.isLeagueAdminOfTeam(r, teamID)
 }
 
+// canInviteAsCaptain reports whether the current request's user may mark an
+// Invite Players submission as "invite as team captain" — deliberately
+// narrower than canManageTeam: a system admin or a league admin of teamID's
+// league only, never the team's own (possibly outgoing) captain, so
+// appointing or replacing a captain always has admin oversight.
+func (app *application) canInviteAsCaptain(r *http.Request, teamID int) bool {
+	return app.isAdmin(r) || app.isLeagueAdminOfTeam(r, teamID)
+}
+
 // canManageMatchSide reports whether the current request's user may edit
 // teamID's own Player of the Match / Captain's Notes / captain's RSVP-
 // reminder message — exactly canManageTeam's tier (admin, league admin of

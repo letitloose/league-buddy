@@ -567,6 +567,35 @@ func TestTeamManagerTier(t *testing.T) {
 	})
 }
 
+// The Export Roster button's route renders a downloadable PDF for the
+// team's captain. Gating itself (admin-or-captain-only) is already covered
+// by TestTeamManagerTier above since this route sits on the same
+// teamManager tier — this just proves the route itself works.
+func TestTeamRosterExport(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Roster Export Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupTeamCaptain(t, teamID, "roster-export-captain@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "roster-export-captain@test.com", "validpassword123")
+
+	code, headers, body := ts.get(t, fmt.Sprintf("/team/%d/rosterExport", teamID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if ct := headers.Get("Content-Type"); ct != "application/pdf" {
+		t.Errorf("want Content-Type application/pdf; got %q", ct)
+	}
+	if len(body) == 0 {
+		t.Error("expected non-empty PDF body")
+	}
+}
+
 // End-to-end: an unaffiliated active player requests to join a team, and the
 // team's captain can approve it, which assigns the team and clears the
 // pending request.
@@ -934,6 +963,175 @@ func TestTeamInviteExistingAccountAddsImmediately(t *testing.T) {
 	}
 	if len(pending) != 0 {
 		t.Fatalf("expected no dangling invite for an existing account, got %v", pending)
+	}
+}
+
+// Only a system admin or a league admin of the team's league can mark an
+// invite "as captain" — a team's own captain posting asCaptain=on has it
+// silently dropped (not an error, just treated as a normal invite), and
+// more than one email with asCaptain is rejected regardless of who sends
+// it, since a team can only have one captain.
+func TestTeamInviteAsCaptainGating(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Captain Invite Gating Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupTeamCaptain(t, teamID, "gating-captain@test.com", "validpassword123")
+
+	im := &models.InviteModel{DB: testDB}
+
+	t.Run("team's own captain cannot mark an invite as captain", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "gating-captain@test.com", "validpassword123")
+
+		_, _, getBody := ts.get(t, fmt.Sprintf("/team/%d/invite", teamID))
+		csrfToken := extractCSRFToken(t, getBody)
+
+		form := url.Values{}
+		form.Add("csrf_token", csrfToken)
+		form.Add("emails", "captain-attempt@test.com")
+		form.Add("asCaptain", "on")
+		code, _, _ := ts.postForm(t, fmt.Sprintf("/team/%d/invite", teamID), form)
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+
+		pending, err := im.ListPendingByTeam(teamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found *models.Invite
+		for _, invite := range pending {
+			if invite.Email == "captain-attempt@test.com" {
+				found = invite
+			}
+		}
+		if found == nil {
+			t.Fatal("expected the invite to still be sent")
+		}
+		if found.AsCaptain {
+			t.Fatal("expected a non-admin's asCaptain request to be ignored")
+		}
+	})
+
+	t.Run("admin can mark an invite as captain", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testAdminEmail, testAdminPass)
+
+		_, _, getBody := ts.get(t, fmt.Sprintf("/team/%d/invite", teamID))
+		csrfToken := extractCSRFToken(t, getBody)
+
+		form := url.Values{}
+		form.Add("csrf_token", csrfToken)
+		form.Add("emails", "admin-appointed-captain@test.com")
+		form.Add("asCaptain", "on")
+		code, _, _ := ts.postForm(t, fmt.Sprintf("/team/%d/invite", teamID), form)
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+
+		pending, err := im.ListPendingByTeam(teamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found *models.Invite
+		for _, invite := range pending {
+			if invite.Email == "admin-appointed-captain@test.com" {
+				found = invite
+			}
+		}
+		if found == nil {
+			t.Fatal("expected the invite to be sent")
+		}
+		if !found.AsCaptain {
+			t.Fatal("expected an admin's asCaptain request to be honored")
+		}
+	})
+
+	t.Run("multiple emails with asCaptain is rejected", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testAdminEmail, testAdminPass)
+
+		_, _, getBody := ts.get(t, fmt.Sprintf("/team/%d/invite", teamID))
+		csrfToken := extractCSRFToken(t, getBody)
+
+		form := url.Values{}
+		form.Add("csrf_token", csrfToken)
+		form.Add("emails", "one@test.com, two@test.com")
+		form.Add("asCaptain", "on")
+		code, _, body := ts.postForm(t, fmt.Sprintf("/team/%d/invite", teamID), form)
+		if code != http.StatusUnprocessableEntity {
+			t.Fatalf("want %d; got %d", http.StatusUnprocessableEntity, code)
+		}
+		if !strings.Contains(body, "Only one person can be invited as team captain") {
+			t.Fatal("expected the multi-email/asCaptain field error to be rendered")
+		}
+	})
+}
+
+// A captain can upload a CSV on the Import Roster page and see the new
+// players show up on the roster. The teamManager tier gating itself is
+// already covered generically by TestTeamManagerTier, so this only proves
+// the route/handler/service wiring works end to end.
+func TestTeamRosterImportSubmit(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Roster Import Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupTeamCaptain(t, teamID, "roster-import-captain@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "roster-import-captain@test.com", "validpassword123")
+
+	_, _, getBody := ts.get(t, fmt.Sprintf("/team/%d/rosterImport", teamID))
+	csrfToken := extractCSRFToken(t, getBody)
+
+	csvBody := "Last Name,First Name,Email\nRoute,Test,route-import@test.com\n"
+	code, _, body := ts.postMultipart(t, fmt.Sprintf("/team/%d/rosterImport", teamID), csrfToken, "file", "roster.csv", []byte(csvBody))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if !strings.Contains(body, "1") || !strings.Contains(body, "player(s) added") {
+		t.Fatalf("expected the result page to report 1 player added, got body: %s", body)
+	}
+
+	pm := &models.PlayerModel{DB: testDB}
+	player, err := pm.GetByEmail("route-import@test.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	isMember, err := tmm.IsMember(player.ID, teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isMember {
+		t.Fatal("expected the imported player to be on the roster")
+	}
+}
+
+// The sample CSV template is downloadable by any active user, not just team
+// managers — it's just a static format reference.
+func TestRosterImportSample(t *testing.T) {
+	app := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	code, headers, body := ts.get(t, "/rosterImport/sample.csv")
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if ct := headers.Get("Content-Type"); ct != "text/csv" {
+		t.Errorf("want Content-Type text/csv; got %q", ct)
+	}
+	if !strings.Contains(body, "Last Name,First Name,Email") {
+		t.Fatalf("expected the sample CSV header row, got body: %s", body)
 	}
 }
 

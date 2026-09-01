@@ -16,6 +16,7 @@ type Invite struct {
 	UsedAt          sql.NullTime
 	UsedByUserID    sql.NullInt32
 	CanceledAt      sql.NullTime
+	AsCaptain       bool
 }
 
 type InviteModel struct {
@@ -23,10 +24,10 @@ type InviteModel struct {
 }
 
 func (m *InviteModel) Insert(invite *Invite) (int, error) {
-	statement := `INSERT INTO invites (token, teamID, email, createdByUserID, createdAt)
-		VALUES (?, ?, ?, ?, UTC_TIMESTAMP())`
+	statement := `INSERT INTO invites (token, teamID, email, createdByUserID, createdAt, asCaptain)
+		VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), ?)`
 
-	result, err := m.DB.Exec(statement, invite.Token, invite.TeamID, invite.Email, invite.CreatedByUserID)
+	result, err := m.DB.Exec(statement, invite.Token, invite.TeamID, invite.Email, invite.CreatedByUserID, invite.AsCaptain)
 	if err != nil {
 		return 0, err
 	}
@@ -39,12 +40,12 @@ func (m *InviteModel) Insert(invite *Invite) (int, error) {
 }
 
 func (m *InviteModel) Get(id int) (*Invite, error) {
-	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID, canceledAt
+	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID, canceledAt, asCaptain
 		FROM invites WHERE id = ?`
 
 	invite := &Invite{}
 	err := m.DB.QueryRow(stmt, id).Scan(&invite.ID, &invite.Token, &invite.TeamID, &invite.Email,
-		&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID, &invite.CanceledAt)
+		&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID, &invite.CanceledAt, &invite.AsCaptain)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -55,12 +56,12 @@ func (m *InviteModel) Get(id int) (*Invite, error) {
 }
 
 func (m *InviteModel) GetByToken(token string) (*Invite, error) {
-	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID, canceledAt
+	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID, canceledAt, asCaptain
 		FROM invites WHERE token = ?`
 
 	invite := &Invite{}
 	err := m.DB.QueryRow(stmt, token).Scan(&invite.ID, &invite.Token, &invite.TeamID, &invite.Email,
-		&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID, &invite.CanceledAt)
+		&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID, &invite.CanceledAt, &invite.AsCaptain)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -74,7 +75,7 @@ func (m *InviteModel) GetByToken(token string) (*Invite, error) {
 // canceled, oldest first — powers the outstanding-invites list on the invite
 // page and the team page's pending-invite badge count.
 func (m *InviteModel) ListPendingByTeam(teamID int) ([]*Invite, error) {
-	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID, canceledAt
+	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID, canceledAt, asCaptain
 		FROM invites WHERE teamID = ? AND usedAt IS NULL AND canceledAt IS NULL ORDER BY createdAt ASC`
 
 	rows, err := m.DB.Query(stmt, teamID)
@@ -87,7 +88,7 @@ func (m *InviteModel) ListPendingByTeam(teamID int) ([]*Invite, error) {
 	for rows.Next() {
 		invite := &Invite{}
 		err := rows.Scan(&invite.ID, &invite.Token, &invite.TeamID, &invite.Email,
-			&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID, &invite.CanceledAt)
+			&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID, &invite.CanceledAt, &invite.AsCaptain)
 		if err != nil {
 			return nil, err
 		}

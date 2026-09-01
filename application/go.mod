@@ -13,4 +13,7 @@ require (
 	golang.org/x/crypto v0.54.0
 )
 
-require filippo.io/edwards25519 v1.2.0 // indirect
+require (
+	filippo.io/edwards25519 v1.2.0 // indirect
+	github.com/go-pdf/fpdf v0.9.0 // indirect
+)

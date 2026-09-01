@@ -54,6 +54,7 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodPost, "/match/:id/rsvp", active.ThenFunc(app.matchRSVPSubmit))
 	router.Handler(http.MethodPost, "/match/:id/notes", active.ThenFunc(app.matchTeamNoteSubmit))
 	router.Handler(http.MethodPost, "/match/:id/testReminder", active.ThenFunc(app.matchTestReminderSubmit))
+	router.Handler(http.MethodGet, "/rosterImport/sample.csv", active.ThenFunc(app.rosterImportSample))
 
 	// team-manager routes (logged in + active + (admin OR captain OR league
 	// admin of :teamID))
@@ -68,6 +69,9 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodGet, "/team/:teamID/joinRequests", teamManager.ThenFunc(app.joinRequestList))
 	router.Handler(http.MethodPost, "/team/:teamID/joinRequests/:requestID/approve", teamManager.ThenFunc(app.joinRequestApprove))
 	router.Handler(http.MethodPost, "/team/:teamID/joinRequests/:requestID/reject", teamManager.ThenFunc(app.joinRequestReject))
+	router.Handler(http.MethodGet, "/team/:teamID/rosterExport", teamManager.ThenFunc(app.teamRosterExport))
+	router.Handler(http.MethodGet, "/team/:teamID/rosterImport", teamManager.ThenFunc(app.teamRosterImportForm))
+	router.Handler(http.MethodPost, "/team/:teamID/rosterImport", teamManager.ThenFunc(app.teamRosterImportSubmit))
 	// GET /admin/team/update/:teamID edits a team's own info (name/motto/
 	// established date) — allowed to the same tier as roster management
 	// (admin, captain, or league admin), unlike team creation/deletion below.

@@ -33,6 +33,8 @@ type application struct {
 	matchReminderService *services.MatchReminderService
 	inviteService        *services.InviteService
 	joinRequestService   *services.JoinRequestService
+	rosterExportService  *services.RosterExportService
+	rosterImportService  *services.RosterImportService
 	emailService         *services.Email
 	templateCache        map[string]*template.Template
 	sessionManager       *scs.SessionManager
@@ -103,6 +105,8 @@ func main() {
 	inviteService := &services.InviteService{InviteModel: invites, DB: db, Email: email, InfoLog: infoLog}
 	joinRequests := &models.JoinRequestModel{DB: db}
 	joinRequestService := &services.JoinRequestService{JoinRequestModel: joinRequests, DB: db, Email: email, InfoLog: infoLog}
+	rosterExportService := &services.RosterExportService{DB: db}
+	rosterImportService := &services.RosterImportService{DB: db}
 
 	sessionManager := scs.New()
 	sessionManager.Store = mysqlstore.New(db)
@@ -123,6 +127,8 @@ func main() {
 		matchReminderService: matchReminderService,
 		inviteService:        inviteService,
 		joinRequestService:   joinRequestService,
+		rosterExportService:  rosterExportService,
+		rosterImportService:  rosterImportService,
 		emailService:         email,
 		templateCache:        templateCache,
 		sessionManager:       sessionManager,

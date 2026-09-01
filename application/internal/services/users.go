@@ -303,6 +303,11 @@ func (service *UserService) linkOrCreatePlayer(userID int, email string) error {
 				if err := tmm.AddMembership(existing.ID, invite.TeamID); err != nil && !errors.Is(err, models.ErrDuplicateMembership) {
 					return err
 				}
+				if invite.AsCaptain {
+					if err := (&models.TeamModel{DB: service.DB}).SetCaptain(invite.TeamID, sql.NullInt32{Int32: int32(existing.ID), Valid: true}); err != nil {
+						return err
+					}
+				}
 			} else if service.InfoLog != nil {
 				service.InfoLog.Printf("invite auto-join skipped for %s: already on a team in league %d", email, team.LeagueID)
 			}
@@ -329,6 +334,11 @@ func (service *UserService) linkOrCreatePlayer(userID int, email string) error {
 			// conflict is possible.
 			if err := tmm.AddMembership(playerID, invite.TeamID); err != nil {
 				return err
+			}
+			if invite.AsCaptain {
+				if err := (&models.TeamModel{DB: service.DB}).SetCaptain(invite.TeamID, sql.NullInt32{Int32: int32(playerID), Valid: true}); err != nil {
+					return err
+				}
 			}
 		}
 		if err := service.UserModel.SetPlayerID(userID, playerID); err != nil {

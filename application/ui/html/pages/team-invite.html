@@ -20,6 +20,15 @@
                     <p class='error-message'>{{.}}</p>
                 {{end}}
             </div>
+            {{if .Data.CanInviteAsCaptain}}
+            <div class="mb-4">
+                <label class="flex items-center gap-2 mb-2">
+                    <input type="checkbox" name="asCaptain" {{if .Form.AsCaptain}}checked{{end}}>
+                    <span>Invite this person as team captain</span>
+                </label>
+                <p class="text-sm text-gray-500">Only works with a single email address above.{{if .Data.Team.CaptainPlayerID.Valid}} This will replace the current captain once they accept.{{end}}</p>
+            </div>
+            {{end}}
             <div class="flex justify-between">
                 <input class="btn m-0" type='submit' value='Send Invites'>
                 <a class="btn m-0" href="/team/{{.Data.Team.ID}}">Cancel</a>
@@ -59,7 +68,7 @@
                 </tr>
                 {{range .Data.PendingInvites}}
                 <tr>
-                    <td>{{.Email}}</td>
+                    <td>{{.Email}}{{if .AsCaptain}} <span class="text-gray-500 text-sm">(as captain)</span>{{end}}</td>
                     <td>{{humanDate .CreatedAt}}</td>
                     <td>
                         <button class="text-red-600" data-delete-url="/team/{{$.Data.Team.ID}}/invite/{{.ID}}/cancel" data-confirm-message="Cancel the invite to {{.Email}}?" data-redirect-url="/team/{{$.Data.Team.ID}}/invite">Cancel</button>

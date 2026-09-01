@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"html"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -142,6 +144,8 @@ func newTestApplication(t *testing.T) *application {
 	inviteService := &services.InviteService{InviteModel: invites, DB: testDB}
 	joinRequests := &models.JoinRequestModel{DB: testDB}
 	joinRequestService := &services.JoinRequestService{JoinRequestModel: joinRequests, DB: testDB}
+	rosterExportService := &services.RosterExportService{DB: testDB}
+	rosterImportService := &services.RosterImportService{DB: testDB}
 
 	return &application{
 		errorLog:             log.New(io.Discard, "", 0),
@@ -158,6 +162,8 @@ func newTestApplication(t *testing.T) *application {
 		matchReminderService: matchReminderService,
 		inviteService:        inviteService,
 		joinRequestService:   joinRequestService,
+		rosterExportService:  rosterExportService,
+		rosterImportService:  rosterImportService,
 		templateCache:        templateCache,
 		sessionManager:       sessionManager,
 		useTemplateCache:     true,
@@ -225,6 +231,47 @@ func (ts *testServer) postForm(t *testing.T, urlPath string, form url.Values) (i
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Referer", ts.URL+urlPath)
+
+	rs, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Body.Close()
+	body, err := io.ReadAll(rs.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rs.StatusCode, rs.Header, string(body)
+}
+
+// postMultipart submits a same-origin multipart/form-data POST with a
+// single file field — the shape the CSV roster import form uses. Mirrors
+// postForm's Referer handling for nosurf's same-origin check.
+func (ts *testServer) postMultipart(t *testing.T, urlPath, csrfToken, fileFieldName, fileName string, fileContent []byte) (int, http.Header, string) {
+	t.Helper()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("csrf_token", csrfToken); err != nil {
+		t.Fatal(err)
+	}
+	fw, err := mw.CreateFormFile(fileFieldName, fileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(fileContent); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+urlPath, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Referer", ts.URL+urlPath)
 
 	rs, err := ts.Client().Do(req)

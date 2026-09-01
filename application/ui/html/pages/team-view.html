@@ -27,6 +27,8 @@
         <a class="btn-secondary text-center m-0" href="/team/{{.Data.Team.ID}}/joinRequests">
             Join Requests{{if .Data.PendingJoinRequestCount}}<span class="badge-count">{{.Data.PendingJoinRequestCount}}</span>{{end}}
         </a>
+        <a class="btn-secondary text-center m-0" href="/team/{{.Data.Team.ID}}/rosterExport">Export Roster</a>
+        <a class="btn-secondary text-center m-0" href="/team/{{.Data.Team.ID}}/rosterImport">Import Roster</a>
         {{if .Data.CanDelete}}
         <button class="btn-secondary text-red-600 m-0" data-delete-url="/admin/team/delete/{{.Data.Team.ID}}" data-confirm-message="Delete team {{.Data.Team.Name}}? The roster must be removed first." data-conflict-message="{{.Data.Team.Name}} still has players on its roster. Remove them first, then delete the team." data-redirect-url="/league/{{.Data.League.ID}}">Delete Team</button>
         {{end}}

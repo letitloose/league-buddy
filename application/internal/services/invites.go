@@ -16,7 +16,8 @@ import (
 )
 
 type InviteForm struct {
-	Emails string // raw textarea, newline/comma separated
+	Emails    string // raw textarea, newline/comma separated
+	AsCaptain bool
 	validator.Validator
 }
 
@@ -67,6 +68,9 @@ func (service *InviteService) SendInvites(teamID, createdByUserID int, actorEmai
 	if len(emails) == 0 {
 		form.AddFieldError("emails", "You must enter at least one email address.")
 	}
+	if form.AsCaptain && len(emails) > 1 {
+		form.AddFieldError("emails", "Only one person can be invited as team captain at a time.")
+	}
 
 	pm := &models.PlayerModel{DB: service.DB}
 	tmm := &models.TeamMemberModel{DB: service.DB}
@@ -112,14 +116,14 @@ func (service *InviteService) SendInvites(teamID, createdByUserID int, actorEmai
 			return invited, err
 		}
 		if err == nil {
-			if err := service.addExistingAccountToRoster(team, user, actorEmail); err != nil {
+			if err := service.addExistingAccountToRoster(team, user, actorEmail, form.AsCaptain); err != nil {
 				return invited, err
 			}
 			invited = append(invited, addr)
 			continue
 		}
 
-		if err := service.sendOneInvite(team, createdByUserID, addr, actorEmail); err != nil {
+		if err := service.sendOneInvite(team, createdByUserID, addr, actorEmail, form.AsCaptain); err != nil {
 			return invited, err
 		}
 		invited = append(invited, addr)
@@ -177,7 +181,7 @@ func (service *InviteService) InviteRosterPlayers(teamID int, playerIDs []int, c
 		}
 
 		addr := player.Email.String
-		if err := service.sendOneInvite(team, createdByUserID, addr, actorEmail); err != nil {
+		if err := service.sendOneInvite(team, createdByUserID, addr, actorEmail, false); err != nil {
 			return invited, err
 		}
 		invited = append(invited, addr)
@@ -189,7 +193,10 @@ func (service *InviteService) InviteRosterPlayers(teamID int, playerIDs []int, c
 // sendOneInvite generates a token, records the invite, sends (or logs) the
 // signup email, and audit-logs it — the part shared by SendInvites and
 // InviteRosterPlayers regardless of how the recipient's address was chosen.
-func (service *InviteService) sendOneInvite(team *models.Team, createdByUserID int, addr, actorEmail string) error {
+// asCaptain marks the invite so accepting it makes the recipient this
+// team's captain (see linkOrCreatePlayer in users.go) and changes the
+// email copy accordingly.
+func (service *InviteService) sendOneInvite(team *models.Team, createdByUserID int, addr, actorEmail string, asCaptain bool) error {
 	token, err := generateInviteToken()
 	if err != nil {
 		return err
@@ -200,9 +207,15 @@ func (service *InviteService) sendOneInvite(team *models.Team, createdByUserID i
 		TeamID:          team.ID,
 		Email:           addr,
 		CreatedByUserID: createdByUserID,
+		AsCaptain:       asCaptain,
 	})
 	if err != nil {
 		return err
+	}
+
+	invitationText := fmt.Sprintf("You've been invited to join %s on Blame the Ball.", team.Name)
+	if asCaptain {
+		invitationText = fmt.Sprintf("You've been invited to become the team captain of %s on Blame the Ball.", team.Name)
 	}
 
 	signupLink := fmt.Sprintf("https://%s/user/signup?invite=%s", os.Getenv("PUBLIC_HOST"), token)
@@ -210,9 +223,9 @@ func (service *InviteService) sendOneInvite(team *models.Team, createdByUserID i
 		body := fmt.Sprintf(
 			`<html>
 				<body>
-					<p>You've been invited to join %s on Blame the Ball. <a href="%s">Sign up here</a>.</p>
+					<p>%s <a href="%s">Sign up here</a>.</p>
 				</body>
-			</html>`, team.Name, signupLink)
+			</html>`, invitationText, signupLink)
 		if err := service.SendEmailV2(fmt.Sprintf("You're invited to join %s", team.Name), "", body, addr); err != nil {
 			return err
 		}
@@ -232,8 +245,10 @@ func (service *InviteService) sendOneInvite(team *models.Team, createdByUserID i
 // account somehow has none yet (e.g. an admin-created login that was never
 // linked). Skips the membership add (but still reports success and emails
 // nothing further) if the player already holds a team in this league,
-// mirroring linkOrCreatePlayer's identical one-team-per-league rule.
-func (service *InviteService) addExistingAccountToRoster(team *models.Team, user *models.User, actorEmail string) error {
+// mirroring linkOrCreatePlayer's identical one-team-per-league rule — for
+// the same reason, asCaptain is skipped along with it, since they were
+// never actually added to team.
+func (service *InviteService) addExistingAccountToRoster(team *models.Team, user *models.User, actorEmail string, asCaptain bool) error {
 	pm := &models.PlayerModel{DB: service.DB}
 	tmm := &models.TeamMemberModel{DB: service.DB}
 	um := &models.UserModel{DB: service.DB}
@@ -268,6 +283,13 @@ func (service *InviteService) addExistingAccountToRoster(team *models.Team, user
 
 	if err := tmm.AddMembership(playerID, team.ID); err != nil && !errors.Is(err, models.ErrDuplicateMembership) {
 		return err
+	}
+
+	if asCaptain {
+		tm := &models.TeamModel{DB: service.DB}
+		if err := tm.SetCaptain(team.ID, sql.NullInt32{Int32: int32(playerID), Valid: true}); err != nil {
+			return err
+		}
 	}
 
 	teamLink := fmt.Sprintf("https://%s/team/%d", os.Getenv("PUBLIC_HOST"), team.ID)

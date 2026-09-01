@@ -37,6 +37,80 @@ func TestSendInvitesRejectsExistingRosterMember(t *testing.T) {
 	}
 }
 
+func TestSendInvitesAsCaptainRejectsMultipleEmails(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	im := &models.InviteModel{DB: db}
+	inviteService := InviteService{InviteModel: im, DB: db}
+
+	form := &InviteForm{Emails: "one@example.com, two@example.com", AsCaptain: true}
+	_, err := inviteService.SendInvites(1, 1, "admin@example.com", form)
+	if err != models.ErrBadData {
+		t.Fatalf("expected ErrBadData, got %v", err)
+	}
+	if form.FieldErrors["emails"] == "" {
+		t.Fatal("expected a field error on emails")
+	}
+}
+
+func TestSendInvitesAsCaptainSetsFlagOnInvite(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	im := &models.InviteModel{DB: db}
+	inviteService := InviteService{InviteModel: im, DB: db}
+
+	form := &InviteForm{Emails: "future-captain@example.com", AsCaptain: true}
+	if _, err := inviteService.SendInvites(1, 1, "admin@example.com", form); err != nil {
+		t.Fatal(err)
+	}
+
+	pending, err := im.ListPendingByTeam(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].Email != "future-captain@example.com" {
+		t.Fatalf("expected one pending invite for future-captain@example.com, got %+v", pending)
+	}
+	if !pending[0].AsCaptain {
+		t.Fatal("expected the invite to be marked AsCaptain")
+	}
+}
+
+func TestSendInvitesAsCaptainSetsCaptainForExistingAccount(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	pm := &models.PlayerModel{DB: db}
+	um := &models.UserModel{DB: db}
+	tm := &models.TeamModel{DB: db}
+	im := &models.InviteModel{DB: db}
+	inviteService := InviteService{InviteModel: im, DB: db}
+
+	playerID, err := pm.Insert(&models.Player{FirstName: "Future", LastName: "Captain", Email: sql.NullString{String: "existing-captain@example.com", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, err := um.Insert("existing-captain@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetPlayerID(userID, playerID); err != nil {
+		t.Fatal(err)
+	}
+
+	form := &InviteForm{Emails: "existing-captain@example.com", AsCaptain: true}
+	if _, err := inviteService.SendInvites(1, 1, "admin@example.com", form); err != nil {
+		t.Fatal(err)
+	}
+
+	team, err := tm.Get(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !team.CaptainPlayerID.Valid || int(team.CaptainPlayerID.Int32) != playerID {
+		t.Fatalf("expected team 1's captain to be player %d, got %+v", playerID, team.CaptainPlayerID)
+	}
+}
+
 func TestSendInvitesAllowsNewEmail(t *testing.T) {
 	db := models.NewTestDB(t)
 

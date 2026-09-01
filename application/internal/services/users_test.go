@@ -221,6 +221,73 @@ func TestActivateUserWithInviteAutoJoinsTeam(t *testing.T) {
 	}
 }
 
+func TestActivateUserWithCaptainInviteSetsCaptain(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	tm := &models.TeamModel{DB: db}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Captain Invite Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	users := &models.UserModel{DB: db}
+	creator, err := users.GetUserByEmail("player@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	im := &models.InviteModel{DB: db}
+	if _, err := im.Insert(&models.Invite{
+		Token:           "captain-invite-token",
+		TeamID:          teamID,
+		Email:           "new-captain@example.com",
+		CreatedByUserID: creator.UserID,
+		AsCaptain:       true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	userService := UserService{UserModel: users}
+
+	form := &UserForm{
+		Email:           "new-captain@example.com",
+		Password:        "validpassword123",
+		ConfirmPassword: "validpassword123",
+		InviteToken:     "captain-invite-token",
+	}
+	if err := userService.InsertUser(form); err != nil {
+		t.Fatal(err)
+	}
+
+	hash, err := userService.GetVerificationHashByEmail("new-captain@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := userService.ActivateUser(hash); err != nil {
+		t.Fatal(err)
+	}
+
+	invitedUserSummary, err := users.GetUserByEmail("new-captain@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	activatedUser, err := users.GetUser(invitedUserSummary.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !activatedUser.PlayerID.Valid {
+		t.Fatal("expected a player to have been linked")
+	}
+
+	team, err := tm.Get(teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !team.CaptainPlayerID.Valid || int(team.CaptainPlayerID.Int32) != int(activatedUser.PlayerID.Int32) {
+		t.Fatalf("expected team %d's captain to be player %d, got %+v", teamID, activatedUser.PlayerID.Int32, team.CaptainPlayerID)
+	}
+}
+
 func TestActivateUserWithInviteSkipsAutoJoinOnLeagueConflict(t *testing.T) {
 	db := models.NewTestDB(t)
 

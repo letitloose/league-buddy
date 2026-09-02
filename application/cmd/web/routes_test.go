@@ -1136,6 +1136,68 @@ func TestRosterImportSample(t *testing.T) {
 	}
 }
 
+func TestSeasonScheduleImportSubmit(t *testing.T) {
+	app := newTestApplication(t)
+
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: 1, Name: "Schedule Import Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Schedule Import Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Schedule Import Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testAdminEmail, testAdminPass)
+
+	_, _, getBody := ts.get(t, fmt.Sprintf("/season/%d/scheduleImport", seasonID))
+	csrfToken := extractCSRFToken(t, getBody)
+
+	csvBody := fmt.Sprintf("Date,Time,Home,Away,Location\n9/13/2026,9:30 AM,%s,%s,\n", "Schedule Import Home FC", "Schedule Import Away FC")
+	code, _, body := ts.postMultipart(t, fmt.Sprintf("/season/%d/scheduleImport", seasonID), csrfToken, "file", "schedule.csv", []byte(csvBody))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if !strings.Contains(body, "1") || !strings.Contains(body, "match(es) added") {
+		t.Fatalf("expected the result page to report 1 match added, got body: %s", body)
+	}
+
+	mm := &models.MatchModel{DB: testDB}
+	matches, err := mm.GetBySeason(seasonID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].HomeTeamID != homeID || matches[0].AwayTeamID != awayID {
+		t.Fatalf("expected 1 match between the imported teams, got %+v", matches)
+	}
+}
+
+// The sample CSV template is downloadable by any active user, not just team
+// managers — it's just a static format reference.
+func TestScheduleImportSample(t *testing.T) {
+	app := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	code, headers, body := ts.get(t, "/scheduleImport/sample.csv")
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if ct := headers.Get("Content-Type"); ct != "text/csv" {
+		t.Errorf("want Content-Type text/csv; got %q", ct)
+	}
+	if !strings.Contains(body, "Date,Time,Home,Away,Location") {
+		t.Fatalf("expected the sample CSV header row, got body: %s", body)
+	}
+}
+
 // A canceled invite's signup link no longer auto-joins the team — the
 // account can still be created, but linkOrCreatePlayer never sees a valid
 // pending invite to act on.
@@ -1296,6 +1358,9 @@ func TestLeagueAdminCanManageSeasonsAndMatches(t *testing.T) {
 	var matchID int
 	t.Run("match create allowed for own league's season", func(t *testing.T) {
 		_, _, formBody := ts.get(t, fmt.Sprintf("/admin/match/create?seasonID=%d", seasonID))
+		if !strings.Contains(formBody, `name='matchtime' value='09:30'`) {
+			t.Error("expected the fresh create form's time field to default to 09:30")
+		}
 		matchCSRF := extractCSRFToken(t, formBody)
 
 		code, headers, _ := ts.postForm(t, "/admin/match/create", url.Values{
@@ -1303,6 +1368,7 @@ func TestLeagueAdminCanManageSeasonsAndMatches(t *testing.T) {
 			"hometeamid": {fmt.Sprintf("%d", homeTeamID)},
 			"awayteamid": {fmt.Sprintf("%d", awayTeamID)},
 			"matchdate":  {"2024-05-05"},
+			"matchtime":  {"09:30"},
 			"csrf_token": {matchCSRF},
 		})
 		if code != http.StatusSeeOther {
@@ -1343,6 +1409,52 @@ func TestLeagueAdminCanManageSeasonsAndMatches(t *testing.T) {
 			t.Errorf("want %d; got %d", http.StatusOK, code)
 		}
 	})
+}
+
+// Deleting a season is a bulk delete — its matches (and everything
+// attached to them) don't need to be removed by hand first.
+func TestSeasonDeleteBulkDeletesMatches(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Season Bulk Delete League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Season Bulk Delete Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Season Bulk Delete Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Season Bulk Delete Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testAdminEmail, testAdminPass)
+
+	code, _, _ := ts.delete(t, fmt.Sprintf("/admin/season/delete/%d", seasonID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+
+	if _, err := sm.Get(seasonID); err != models.ErrNoRecord {
+		t.Fatalf("expected the season to be gone, got %v", err)
+	}
+	if _, err := mm.Get(matchID); err != models.ErrNoRecord {
+		t.Fatalf("expected the match to be gone too (bulk deleted), not left dangling or blocking the season delete, got %v", err)
+	}
 }
 
 // A plain captain (no league-admin rights) is redirected from every
@@ -1643,6 +1755,7 @@ func TestMatchViewAndCaptainEditAccess(t *testing.T) {
 		postCode, headers, _ := ts.postForm(t, "/admin/match/update", url.Values{
 			"match-id":   {fmt.Sprintf("%d", matchID)},
 			"matchdate":  {"2024-05-05"},
+			"matchtime":  {"09:30"},
 			"homescore":  {"2"},
 			"awayscore":  {"0"},
 			"csrf_token": {csrfToken},
@@ -1779,6 +1892,7 @@ func TestMatchUpdateSavesGoalsAndCards(t *testing.T) {
 	t.Run("saves a scored goal, an unattributed goal, and a card", func(t *testing.T) {
 		form := url.Values{
 			"matchdate":  {"2024-05-05"},
+			"matchtime":  {"09:30"},
 			"homescore":  {"2"},
 			"awayscore":  {"1"},
 			"goalTeamID": {fmt.Sprintf("%d", homeTeamID), fmt.Sprintf("%d", awayTeamID)},
@@ -1846,6 +1960,7 @@ func TestMatchUpdateSavesGoalsAndCards(t *testing.T) {
 	t.Run("an own goal can be credited to a team with a scorer from the other roster", func(t *testing.T) {
 		form := url.Values{
 			"matchdate":    {"2024-05-05"},
+			"matchtime":    {"09:30"},
 			"homescore":    {"2"},
 			"awayscore":    {"0"},
 			"goalTeamID":   {fmt.Sprintf("%d", homeTeamID)},
@@ -1887,6 +2002,7 @@ func TestMatchUpdateSavesGoalsAndCards(t *testing.T) {
 	t.Run("resubmitting with fewer rows replaces rather than accumulates", func(t *testing.T) {
 		form := url.Values{
 			"matchdate":    {"2024-05-05"},
+			"matchtime":    {"09:30"},
 			"homescore":    {"2"},
 			"awayscore":    {"0"},
 			"goalTeamID":   {fmt.Sprintf("%d", homeTeamID)},
@@ -2692,6 +2808,7 @@ func TestScorekeeperTier(t *testing.T) {
 		postCode, _, _ := ts.postForm(t, "/admin/match/update", url.Values{
 			"match-id":   {fmt.Sprintf("%d", matchID)},
 			"matchdate":  {"2024-05-05"},
+			"matchtime":  {"09:30"},
 			"homescore":  {"1"},
 			"awayscore":  {"0"},
 			"csrf_token": {csrfToken},

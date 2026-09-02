@@ -1,0 +1,23 @@
+{{define "title"}}Import Schedule{{end}}
+
+{{define "main"}}
+<div class="flex items-center flex-col">
+    <h2>Import Schedule for {{.Data.Season.Name}}</h2>
+    <div class="w-full max-w-md">
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <p class="text-sm text-gray-600 mb-4">Upload a CSV with this season's matches. Date, Home, and Away are required per row &mdash; Time and Location are optional. Team and location names are matched against what's already on file (case/punctuation-insensitive) rather than created automatically. Re-uploading later (to fix a typo or add a location) is safe: rows are matched by home team, away team, and date, so existing matches are updated rather than duplicated.</p>
+            <p class="text-center mb-4"><a href="/scheduleImport/sample.csv">Download a sample CSV</a></p>
+            <form class="text-center" action="/season/{{.Data.Season.ID}}/scheduleImport" method="POST" enctype="multipart/form-data">
+                <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                <div class="mb-4">
+                    <input class="form-field" type="file" name="file" accept=".csv" required>
+                </div>
+                <div class="flex justify-between">
+                    <input class="btn m-0" type='submit' value='Import Schedule'>
+                    <a class="btn m-0" href="/season/{{.Data.Season.ID}}">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{{end}}

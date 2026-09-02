@@ -35,6 +35,7 @@ type application struct {
 	joinRequestService            *services.JoinRequestService
 	rosterExportService           *services.RosterExportService
 	rosterImportService           *services.RosterImportService
+	scheduleImportService         *services.ScheduleImportService
 	notificationPreferenceService *services.NotificationPreferenceService
 	emailService                  *services.Email
 	smsService                    *services.SMS
@@ -121,6 +122,7 @@ func main() {
 	joinRequestService := &services.JoinRequestService{JoinRequestModel: joinRequests, DB: db, Email: email, InfoLog: infoLog}
 	rosterExportService := &services.RosterExportService{DB: db}
 	rosterImportService := &services.RosterImportService{DB: db}
+	scheduleImportService := &services.ScheduleImportService{DB: db}
 	notificationPreferences := &models.NotificationPreferenceModel{DB: db}
 	notificationPreferenceService := &services.NotificationPreferenceService{NotificationPreferenceModel: notificationPreferences, DB: db}
 
@@ -145,6 +147,7 @@ func main() {
 		joinRequestService:            joinRequestService,
 		rosterExportService:           rosterExportService,
 		rosterImportService:           rosterImportService,
+		scheduleImportService:         scheduleImportService,
 		notificationPreferenceService: notificationPreferenceService,
 		emailService:                  email,
 		smsService:                    sms,

@@ -152,6 +152,7 @@ func newTestApplication(t *testing.T) *application {
 	joinRequestService := &services.JoinRequestService{JoinRequestModel: joinRequests, DB: testDB}
 	rosterExportService := &services.RosterExportService{DB: testDB}
 	rosterImportService := &services.RosterImportService{DB: testDB}
+	scheduleImportService := &services.ScheduleImportService{DB: testDB}
 	notificationPreferences := &models.NotificationPreferenceModel{DB: testDB}
 	notificationPreferenceService := &services.NotificationPreferenceService{NotificationPreferenceModel: notificationPreferences, DB: testDB}
 
@@ -172,6 +173,7 @@ func newTestApplication(t *testing.T) *application {
 		joinRequestService:            joinRequestService,
 		rosterExportService:           rosterExportService,
 		rosterImportService:           rosterImportService,
+		scheduleImportService:         scheduleImportService,
 		notificationPreferenceService: notificationPreferenceService,
 		templateCache:                 templateCache,
 		sessionManager:                sessionManager,

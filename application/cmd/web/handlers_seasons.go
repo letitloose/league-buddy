@@ -505,22 +505,121 @@ func (app *application) seasonDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = app.seasonService.DeleteSeason(id, app.getUserName(r))
-	if err != nil {
-		if errors.Is(err, models.ErrHasDependents) {
-			mm := &models.MatchModel{DB: app.playerService.DB}
-			matches, merr := mm.GetBySeason(id)
-			if merr != nil {
-				app.serverError(w, merr)
-				return
-			}
-			w.WriteHeader(http.StatusConflict)
-			fmt.Fprintf(w, "%s still has %d match(es) scheduled. Delete them first.", season.Name, len(matches))
-			return
-		}
+	if _, err := app.seasonService.DeleteSeason(id, app.getUserName(r)); err != nil {
 		app.serverError(w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// getRouteSeason resolves the :id route param and fetches that season —
+// shared by the three schedule-import handlers below.
+func (app *application) getRouteSeason(w http.ResponseWriter, r *http.Request) (*models.Season, bool) {
+	params := httprouter.ParamsFromContext(r.Context())
+	id, err := strconv.Atoi(params.ByName("id"))
+	if err != nil || id < 1 {
+		app.notFound(w)
+		return nil, false
+	}
+
+	sm := &models.SeasonModel{DB: app.playerService.DB}
+	season, err := sm.Get(id)
+	if err != nil {
+		if errors.Is(err, models.ErrNoRecord) {
+			app.notFound(w)
+		} else {
+			app.serverError(w, err)
+		}
+		return nil, false
+	}
+	return season, true
+}
+
+// seasonScheduleImportFormData wraps the season a CSV will be imported
+// onto.
+type seasonScheduleImportFormData struct {
+	Season *models.Season
+	League *models.League
+}
+
+func (app *application) seasonScheduleImportForm(w http.ResponseWriter, r *http.Request) {
+	season, ok := app.getRouteSeason(w, r)
+	if !ok {
+		return
+	}
+	if !app.canManageLeague(r, season.LeagueID) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	lm := &models.LeagueModel{DB: app.playerService.DB}
+	league, err := lm.Get(season.LeagueID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	data := app.newTemplateData(r)
+	data.Data = &seasonScheduleImportFormData{Season: season, League: league}
+	data.Breadcrumbs = []Breadcrumb{
+		{Label: "Leagues", URL: "/league"},
+		{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)},
+		{Label: season.Name, URL: fmt.Sprintf("/season/%d", season.ID)},
+		{Label: "Import Schedule"},
+	}
+
+	app.render(w, http.StatusOK, "season-schedule-import.html", data)
+}
+
+// seasonScheduleImportResultData wraps the season and the full per-row
+// report from ImportCSV.
+type seasonScheduleImportResultData struct {
+	Season *models.Season
+	Result *services.ScheduleImportResult
+}
+
+func (app *application) seasonScheduleImportSubmit(w http.ResponseWriter, r *http.Request) {
+	season, ok := app.getRouteSeason(w, r)
+	if !ok {
+		return
+	}
+	if !app.canManageLeague(r, season.LeagueID) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	if err := r.ParseMultipartForm(5 << 20); err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		app.sessionManager.Put(r.Context(), "flash", "You must choose a CSV file to upload.")
+		http.Redirect(w, r, fmt.Sprintf("/season/%d/scheduleImport", season.ID), http.StatusSeeOther)
+		return
+	}
+	defer file.Close()
+
+	result, err := app.scheduleImportService.ImportCSV(season.ID, file, app.getUserName(r))
+	if err != nil {
+		app.sessionManager.Put(r.Context(), "flash", "Couldn't import that file: "+err.Error())
+		http.Redirect(w, r, fmt.Sprintf("/season/%d/scheduleImport", season.ID), http.StatusSeeOther)
+		return
+	}
+
+	data := app.newTemplateData(r)
+	data.Data = &seasonScheduleImportResultData{Season: season, Result: result}
+
+	app.render(w, http.StatusOK, "season-schedule-import-result.html", data)
+}
+
+// scheduleImportSample serves the downloadable CSV template shown on the
+// Import Schedule page — not season-scoped, since the format is identical
+// for every season.
+func (app *application) scheduleImportSample(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", `attachment; filename="schedule-import-sample.csv"`)
+	w.Write([]byte(services.SampleScheduleCSV))
 }

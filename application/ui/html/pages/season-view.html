@@ -16,7 +16,8 @@
     <div class="flex flex-wrap justify-center gap-2 mb-6">
         <a class="btn-secondary m-0" href="/admin/season/update/{{.Data.Season.ID}}">Edit Season</a>
         <a class="btn-secondary m-0" href="/admin/match/create?seasonID={{.Data.Season.ID}}">Add Match</a>
-        <button class="btn-secondary text-red-600 m-0" data-delete-url="/admin/season/delete/{{.Data.Season.ID}}" data-confirm-message="Delete season {{.Data.Season.Name}}? Its matches must be removed first." data-conflict-message="{{.Data.Season.Name}} still has matches scheduled. Remove them first, then delete the season." data-redirect-url="/league/{{.Data.League.ID}}">Delete Season</button>
+        <a class="btn-secondary m-0" href="/season/{{.Data.Season.ID}}/scheduleImport">Import Schedule</a>
+        <button class="btn-secondary text-red-600 m-0" data-delete-url="/admin/season/delete/{{.Data.Season.ID}}" data-confirm-message="{{if .Data.Matches}}Delete season {{.Data.Season.Name}} and permanently remove all {{len .Data.Matches}} scheduled match(es), including any recorded goals/cards/RSVPs? This cannot be undone.{{else}}Delete season {{.Data.Season.Name}}?{{end}}" data-redirect-url="/league/{{.Data.League.ID}}">Delete Season</button>
     </div>
     {{end}}
 
@@ -34,7 +35,7 @@
         </tr>
         {{range .Data.Matches}}
         <tr>
-            <td><a href="/match/{{.Match.ID}}">{{humanDate .Match.MatchDate}}</a></td>
+            <td><a href="/match/{{.Match.ID}}">{{matchDateTime .Match.MatchDate}}</a></td>
             <td><a href="/match/{{.Match.ID}}">{{.HomeTeamName}}</a> <span class="text-xs text-gray-500">({{.HomeIn}} in / {{.HomeOut}} out)</span></td>
             <td><a href="/match/{{.Match.ID}}">{{.AwayTeamName}}</a> <span class="text-xs text-gray-500">({{.AwayIn}} in / {{.AwayOut}} out)</span></td>
             <td>

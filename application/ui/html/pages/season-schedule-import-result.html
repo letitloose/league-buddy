@@ -1,0 +1,59 @@
+{{define "title"}}Import Schedule{{end}}
+
+{{define "main"}}
+<div class="flex items-center flex-col">
+    <h2>Import Results for {{.Data.Season.Name}}</h2>
+    <div class="w-full max-w-2xl">
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4 text-center">
+            <p class="mb-2"><span class="text-green-700 font-semibold">{{len .Data.Result.Added}}</span> match(es) added, <span class="text-blue-700 font-semibold">{{len .Data.Result.Updated}}</span> match(es) updated.</p>
+            {{if .Data.Result.Skipped}}<p class="mb-2 text-red-600">{{len .Data.Result.Skipped}} row(s) skipped &mdash; see below.</p>{{end}}
+            {{if .Data.Result.Warnings}}<p class="mb-2 text-amber-600">{{len .Data.Result.Warnings}} row(s) imported with a field left blank &mdash; see below.</p>{{end}}
+            <a class="btn m-0" href="/season/{{.Data.Season.ID}}">Back to Season</a>
+        </div>
+
+        {{if .Data.Result.Skipped}}
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <h3 class="pt-0 text-center">Skipped Rows</h3>
+            <div class="overflow-x-auto">
+            <table class="text-left w-full">
+                <tr>
+                    <th>Row</th>
+                    <th>Matchup</th>
+                    <th>Reason</th>
+                </tr>
+                {{range .Data.Result.Skipped}}
+                <tr>
+                    <td>{{.RowNumber}}</td>
+                    <td>{{.Matchup}}</td>
+                    <td>{{.Reason}}</td>
+                </tr>
+                {{end}}
+            </table>
+            </div>
+        </div>
+        {{end}}
+
+        {{if .Data.Result.Warnings}}
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <h3 class="pt-0 text-center">Warnings</h3>
+            <div class="overflow-x-auto">
+            <table class="text-left w-full">
+                <tr>
+                    <th>Row</th>
+                    <th>Matchup</th>
+                    <th>Reason</th>
+                </tr>
+                {{range .Data.Result.Warnings}}
+                <tr>
+                    <td>{{.RowNumber}}</td>
+                    <td>{{.Matchup}}</td>
+                    <td>{{.Reason}}</td>
+                </tr>
+                {{end}}
+            </table>
+            </div>
+        </div>
+        {{end}}
+    </div>
+</div>
+{{end}}

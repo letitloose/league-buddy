@@ -2,6 +2,7 @@ package services
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/letitloose/league-buddy/internal/models"
@@ -85,16 +86,38 @@ func (service *SeasonService) UpdateSeason(form *SeasonForm, actorEmail string) 
 	return cs.InsertAuditLog(actorEmail, time.Now(), "season updated: "+form.Name)
 }
 
-func (service *SeasonService) DeleteSeason(id int, actorEmail string) error {
+// DeleteSeason deletes id along with every match scheduled in it — a
+// bulk delete, not a "remove the matches first yourself" block, since a
+// season with even a handful of matches (each carrying goals, cards,
+// RSVPs, etc.) would otherwise mean deleting every one of them by hand
+// first. MatchModel.Delete already cleans up everything attached to each
+// match, so this just needs to do that once per match before deleting
+// the season row itself. Returns how many matches were removed, so the
+// caller can report that back to the user.
+func (service *SeasonService) DeleteSeason(id int, actorEmail string) (int, error) {
 	season, err := service.Get(id)
 	if err != nil {
-		return err
+		return 0, err
+	}
+
+	mm := &models.MatchModel{DB: service.DB}
+	matches, err := mm.GetBySeason(id)
+	if err != nil {
+		return 0, err
+	}
+	for _, match := range matches {
+		if err := mm.Delete(match.ID); err != nil {
+			return 0, err
+		}
 	}
 
 	if err := service.Delete(id); err != nil {
-		return err
+		return 0, err
 	}
 
 	cs := &CommonService{DB: service.DB}
-	return cs.InsertAuditLog(actorEmail, time.Now(), "season deleted: "+season.Name)
+	if err := cs.InsertAuditLog(actorEmail, time.Now(), fmt.Sprintf("season deleted (with %d match(es)): %s", len(matches), season.Name)); err != nil {
+		return 0, err
+	}
+	return len(matches), nil
 }

@@ -18,7 +18,7 @@
                     {{range .Data.Teams}}
                         {{if .NextMatch}}
                         <tr>
-                            <td><a href="/match/{{.NextMatch.ID}}">{{humanDateShort .NextMatch.MatchDate}}</a></td>
+                            <td><a href="/match/{{.NextMatch.ID}}">{{matchDateTimeShort .NextMatch.MatchDate}}</a></td>
                             <td>
                                 <a href="/team/{{.NextMatchOpponentID}}">{{if not .NextMatchIsHome}}@ {{end}}{{.NextMatchOpponent}}</a>
                                 {{if gt $.Data.UpcomingMatchTeamCount 1}}<span class="text-xs text-gray-500">({{.Team.Name}})</span>{{end}}

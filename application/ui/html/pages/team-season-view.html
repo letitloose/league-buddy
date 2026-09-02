@@ -33,7 +33,7 @@
             </tr>
             {{range .Data.Matches}}
             <tr>
-                <td><a href="/match/{{.Match.ID}}">{{humanDate .Match.MatchDate}}</a></td>
+                <td><a href="/match/{{.Match.ID}}">{{matchDateTime .Match.MatchDate}}</a></td>
                 <td><a href="/match/{{.Match.ID}}">{{.Opponent}}</a></td>
                 <td>{{if .IsHome}}Home{{else}}Away{{end}}</td>
                 <td>

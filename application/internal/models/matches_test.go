@@ -167,33 +167,55 @@ func TestGetBySeasonAndGetByTeamAndSeason(t *testing.T) {
 	}
 }
 
+// testEasternLocation loads America/New_York independently of the
+// services/cmd-web packages' own copies (models can't import either) —
+// used only to build realistic Eastern-zoned match times for this test.
+func testEasternLocation(t *testing.T) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loc
+}
+
+// GetByDate now does a half-open range query against a real kickoff time
+// (matchDate widened from DATE to DATETIME), anchored on an Eastern
+// calendar day — this proves both the range logic and that a match late
+// in the Eastern evening isn't miscounted into the next UTC day.
 func TestGetByDate(t *testing.T) {
 	db := NewTestDB(t)
+	eastern := testEasternLocation(t)
 
 	seasonID := newTestSeason(t, db, 1)
 	opponentID := newTestOpponentTeam(t, db, 1, "Rival FC")
 	otherTeamID := newTestOpponentTeam(t, db, 1, "Third FC")
 	mm := MatchModel{DB: db}
 
-	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: time.Date(2024, 5, 5, 0, 0, 0, 0, time.UTC)}); err != nil {
+	// 9:30am Eastern on the 5th.
+	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: time.Date(2024, 5, 5, 9, 30, 0, 0, eastern)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: opponentID, AwayTeamID: otherTeamID, MatchDate: time.Date(2024, 5, 5, 0, 0, 0, 0, time.UTC)}); err != nil {
+	// 11:30pm Eastern, still the 5th in Eastern time even though it's
+	// already the 6th in UTC.
+	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: opponentID, AwayTeamID: otherTeamID, MatchDate: time.Date(2024, 5, 5, 23, 30, 0, 0, eastern)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: otherTeamID, MatchDate: time.Date(2024, 5, 6, 0, 0, 0, 0, time.UTC)}); err != nil {
+	// 9:30am Eastern on the 6th — a genuinely different day.
+	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: otherTeamID, MatchDate: time.Date(2024, 5, 6, 9, 30, 0, 0, eastern)}); err != nil {
 		t.Fatal(err)
 	}
 
-	matches, err := mm.GetByDate(time.Date(2024, 5, 5, 0, 0, 0, 0, time.UTC))
+	dayStart := time.Date(2024, 5, 5, 0, 0, 0, 0, eastern)
+	matches, err := mm.GetByDate(dayStart)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(matches) != 2 {
-		t.Fatalf("expected 2 matches on 2024-05-05, got %d", len(matches))
+		t.Fatalf("expected 2 matches on the Eastern calendar day of 2024-05-05 (9:30am and 11:30pm), got %d", len(matches))
 	}
 
-	noMatches, err := mm.GetByDate(time.Date(2024, 5, 7, 0, 0, 0, 0, time.UTC))
+	noMatches, err := mm.GetByDate(time.Date(2024, 5, 7, 0, 0, 0, 0, eastern))
 	if err != nil {
 		t.Fatal(err)
 	}

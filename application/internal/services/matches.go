@@ -37,6 +37,7 @@ type MatchForm struct {
 	AwayTeamID int
 	LocationID int    // 0 = no location set
 	MatchDate  string // "2006-01-02" from <input type=date>
+	MatchTime  string // "15:04" from <input type=time>
 	HomeScore  string // blank = not recorded
 	AwayScore  string
 	Notes      string
@@ -50,11 +51,15 @@ type MatchService struct {
 	DB *sql.DB
 }
 
-// parseRequiredDate parses a "2006-01-02" value, returning ok=false for a
-// blank or unparseable input — unlike parseOptionalDate (players.go), a
-// match must have a date.
-func parseRequiredDate(value string) (time.Time, bool) {
-	t, err := time.Parse("2006-01-02", strings.TrimSpace(value))
+// parseRequiredMatchDateTime combines a "2006-01-02" date and "15:04" time
+// into a single Eastern-zoned time.Time. The Eastern location (not UTC)
+// matters here: it's what makes "9:30" actually mean 9:30am Eastern,
+// correctly offset for whichever DST rule applies on that specific date,
+// once this value is written to the DB. easternLocation is
+// matchReminders.go's package-level var, shared here since both live in
+// package services.
+func parseRequiredMatchDateTime(dateValue, timeValue string) (time.Time, bool) {
+	t, err := time.ParseInLocation("2006-01-02 15:04", strings.TrimSpace(dateValue)+" "+strings.TrimSpace(timeValue), easternLocation)
 	if err != nil {
 		return time.Time{}, false
 	}
@@ -62,8 +67,25 @@ func parseRequiredDate(value string) (time.Time, bool) {
 }
 
 func validateMatchForm(form *MatchForm, db *sql.DB) (time.Time, sql.NullInt32, sql.NullInt32) {
-	matchDate, dateOK := parseRequiredDate(form.MatchDate)
-	form.CheckField(dateOK, "matchdate", "You must enter a valid date.")
+	_, dateErr := time.Parse("2006-01-02", strings.TrimSpace(form.MatchDate))
+	form.CheckField(dateErr == nil, "matchdate", "You must enter a valid date.")
+
+	// The kickoff time is optional — a captain/admin may not know it yet,
+	// or a historical match may genuinely have none on file. Blank stores
+	// a bare date (UTC midnight, no zone conversion), matching exactly how
+	// every match created before this feature is already stored — the
+	// "no time recorded" sentinel every display/edit helper checks for
+	// (see hasMatchTime in cmd/web/templates.go).
+	var matchDate time.Time
+	if dateErr == nil {
+		if strings.TrimSpace(form.MatchTime) == "" {
+			matchDate, _ = time.Parse("2006-01-02", strings.TrimSpace(form.MatchDate))
+		} else {
+			var timeOK bool
+			matchDate, timeOK = parseRequiredMatchDateTime(form.MatchDate, form.MatchTime)
+			form.CheckField(timeOK, "matchtime", "Enter a valid time, or leave it blank if unknown.")
+		}
+	}
 
 	if form.HomeTeamID <= 0 || form.AwayTeamID <= 0 {
 		form.AddFieldError("hometeamid", "You must choose both teams.")

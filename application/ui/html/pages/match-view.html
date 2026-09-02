@@ -3,11 +3,7 @@
 {{define "main"}}
 <div class="flex flex-col items-center">
     <h2>{{.Data.HomeTeam.Name}} vs {{.Data.AwayTeam.Name}}</h2>
-    <p class="mb-1">
-        <a href="/season/{{.Data.Season.ID}}">{{.Data.Season.Name}}</a>
-        &middot; <a href="/league/{{.Data.League.ID}}">{{.Data.League.Name}}</a>
-    </p>
-    <p class="mb-1 text-sm text-gray-500">{{humanDate .Data.Match.MatchDate}}</p>
+    <p class="mb-1 text-sm text-gray-500">{{matchDateTime .Data.Match.MatchDate}}</p>
     {{if .Data.Location}}
         <p class="mb-4 text-sm text-gray-500">
             <a href="{{mapsURL .Data.LocationAddress}}" target="_blank" rel="noopener noreferrer">{{.Data.Location.Name}}</a>

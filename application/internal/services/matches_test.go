@@ -27,9 +27,9 @@ func TestCreateMatch(t *testing.T) {
 		SeasonID:   seasonID,
 		HomeTeamID: 1,
 		AwayTeamID: opponentID,
-		MatchDate:  "2024-05-05",
-		HomeScore:  "3",
-		AwayScore:  "1",
+		MatchDate:  "2024-05-05", MatchTime: "09:30",
+		HomeScore: "3",
+		AwayScore: "1",
 	}
 
 	id, err := matchService.CreateMatch(form, "admin@example.com")
@@ -44,6 +44,58 @@ func TestCreateMatch(t *testing.T) {
 	if !match.HomeScore.Valid || match.HomeScore.Int32 != 3 {
 		t.Fatalf("expected homeScore 3, got %+v", match.HomeScore)
 	}
+
+	e := match.MatchDate.In(easternLocation)
+	if e.Hour() != 9 || e.Minute() != 30 {
+		t.Fatalf("expected the stored kickoff to be 9:30 AM Eastern, got %s", e.Format("15:04 MST"))
+	}
+}
+
+func TestCreateMatchTimeIsOptional(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	seasons := &models.SeasonModel{DB: db}
+	teams := &models.TeamModel{DB: db}
+	matches := &models.MatchModel{DB: db}
+	matchService := MatchService{MatchModel: matches, DB: db}
+
+	seasonID, err := seasons.Insert(&models.Season{LeagueID: 1, Name: "Spring 2024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := teams.Insert(&models.Team{LeagueID: 1, Name: "Rival FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Blank time is valid — a captain/admin may not know the kickoff time
+	// yet — and stores the "no time recorded" sentinel: a bare UTC
+	// midnight, matching how every match created before this feature is
+	// already stored (see hasMatchTime in cmd/web/templates.go).
+	t.Run("blank time is accepted and stores the no-time sentinel", func(t *testing.T) {
+		form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05"}
+		id, err := matchService.CreateMatch(form, "admin@example.com")
+		if err != nil {
+			t.Fatal(err)
+		}
+		match, err := matches.Get(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if match.MatchDate.Hour() != 0 || match.MatchDate.Minute() != 0 {
+			t.Fatalf("expected the stored matchDate to be bare midnight (no time recorded), got %s", match.MatchDate)
+		}
+	})
+
+	t.Run("malformed time", func(t *testing.T) {
+		form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "not-a-time"}
+		if _, err := matchService.CreateMatch(form, "admin@example.com"); err != models.ErrBadData {
+			t.Fatalf("expected ErrBadData, got %v", err)
+		}
+		if form.FieldErrors["matchtime"] == "" {
+			t.Fatal("expected a field error on matchtime")
+		}
+	})
 }
 
 func TestCreateMatchSameHomeAndAwayTeamFails(t *testing.T) {
@@ -58,7 +110,7 @@ func TestCreateMatchSameHomeAndAwayTeamFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: 1, MatchDate: "2024-05-05"}
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: 1, MatchDate: "2024-05-05", MatchTime: "09:30"}
 	_, err = matchService.CreateMatch(form, "admin@example.com")
 	if err != models.ErrBadData {
 		t.Fatalf("expected ErrBadData, got %v", err)
@@ -87,7 +139,7 @@ func TestCreateMatchTeamOutsideSeasonLeagueFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: outsiderID, MatchDate: "2024-05-05"}
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: outsiderID, MatchDate: "2024-05-05", MatchTime: "09:30"}
 	_, err = matchService.CreateMatch(form, "admin@example.com")
 	if err != models.ErrBadData {
 		t.Fatalf("expected ErrBadData, got %v", err)
@@ -114,7 +166,7 @@ func TestCreateMatchOneSidedScoreDefaultsOtherToZero(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", HomeScore: "3"}
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30", HomeScore: "3"}
 	id, err := matchService.CreateMatch(form, "admin@example.com")
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +211,7 @@ func TestUpdateMatchSavesGoalsAndCards(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05"}
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30"}
 	id, err := matchService.CreateMatch(form, "admin@example.com")
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +221,7 @@ func TestUpdateMatchSavesGoalsAndCards(t *testing.T) {
 	// exercise both tallies at once) and one yellow card, all for playerID.
 	// The second goal's earlier minute means it should sort first.
 	updateForm := &MatchForm{
-		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
+		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30",
 		HomeScore: "2", AwayScore: "0",
 		Goals: []GoalInput{
 			{TeamID: 1, ScorerPlayerID: playerID, Minute: 70},
@@ -222,14 +274,14 @@ func TestUpdateMatchRejectsUnreasonableMinute(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05"}
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30"}
 	id, err := matchService.CreateMatch(form, "admin@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	updateForm := &MatchForm{
-		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
+		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30",
 		Goals: []GoalInput{{TeamID: 1, Minute: 999}},
 	}
 	err = matchService.UpdateMatch(updateForm, "admin@example.com")
@@ -268,14 +320,14 @@ func TestUpdateMatchResubmitReplacesStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05"}
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30"}
 	id, err := matchService.CreateMatch(form, "admin@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	first := &MatchForm{
-		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
+		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30",
 		HomeScore: "2", AwayScore: "0",
 		Goals: []GoalInput{{TeamID: 1, ScorerPlayerID: playerID}, {TeamID: 1, ScorerPlayerID: playerID}},
 	}
@@ -284,7 +336,7 @@ func TestUpdateMatchResubmitReplacesStats(t *testing.T) {
 	}
 
 	second := &MatchForm{
-		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
+		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30",
 		HomeScore: "1", AwayScore: "0",
 		Goals: []GoalInput{{TeamID: 1, ScorerPlayerID: playerID}},
 	}
@@ -329,7 +381,7 @@ func TestUpdateMatchGoalRowsExceedingScoreFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05"}
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30"}
 	id, err := matchService.CreateMatch(form, "admin@example.com")
 	if err != nil {
 		t.Fatal(err)
@@ -337,7 +389,7 @@ func TestUpdateMatchGoalRowsExceedingScoreFails(t *testing.T) {
 
 	// Home team recorded a 2-0 win, but 3 goal rows are recorded for them.
 	updateForm := &MatchForm{
-		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
+		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30",
 		HomeScore: "2", AwayScore: "0",
 		Goals: []GoalInput{
 			{TeamID: 1, ScorerPlayerID: scorer1},
@@ -379,14 +431,14 @@ func TestUpdateMatchRejectsPlayerNotOnEitherRoster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05"}
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30"}
 	id, err := matchService.CreateMatch(form, "admin@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	updateForm := &MatchForm{
-		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
+		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30",
 		Goals: []GoalInput{{TeamID: 1, ScorerPlayerID: outsiderID}},
 	}
 	err = matchService.UpdateMatch(updateForm, "admin@example.com")
@@ -429,7 +481,7 @@ func TestUpdateMatchAllowsOwnGoalScorerFromOtherRoster(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05"}
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30"}
 	id, err := matchService.CreateMatch(form, "admin@example.com")
 	if err != nil {
 		t.Fatal(err)
@@ -437,7 +489,7 @@ func TestUpdateMatchAllowsOwnGoalScorerFromOtherRoster(t *testing.T) {
 
 	// Credited to home (TeamID: 1), scored by an away-roster player.
 	updateForm := &MatchForm{
-		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05",
+		ID: id, SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30",
 		HomeScore: "1", AwayScore: "0",
 		Goals: []GoalInput{{TeamID: 1, ScorerPlayerID: awayPlayerID, Minute: 42}},
 	}
@@ -480,7 +532,7 @@ func TestDeleteMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05"}
+	form := &MatchForm{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: "2024-05-05", MatchTime: "09:30"}
 	id, err := matchService.CreateMatch(form, "admin@example.com")
 	if err != nil {
 		t.Fatal(err)

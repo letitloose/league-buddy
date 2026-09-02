@@ -87,7 +87,7 @@ func (app *application) matchForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app.renderMatchCreateForm(w, r, &services.MatchForm{SeasonID: seasonID}, season, http.StatusOK)
+	app.renderMatchCreateForm(w, r, &services.MatchForm{SeasonID: seasonID, MatchTime: "09:30"}, season, http.StatusOK)
 }
 
 func (app *application) matchCreate(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +124,7 @@ func (app *application) matchCreate(w http.ResponseWriter, r *http.Request) {
 		AwayTeamID: awayTeamID,
 		LocationID: locationID,
 		MatchDate:  r.PostForm.Get("matchdate"),
+		MatchTime:  r.PostForm.Get("matchtime"),
 		HomeScore:  r.PostForm.Get("homescore"),
 		AwayScore:  r.PostForm.Get("awayscore"),
 		Notes:      r.PostForm.Get("notes"),
@@ -1032,7 +1033,8 @@ func (app *application) matchUpdate(w http.ResponseWriter, r *http.Request) {
 		HomeTeamID: match.HomeTeamID,
 		AwayTeamID: match.AwayTeamID,
 		LocationID: int(match.LocationID.Int32),
-		MatchDate:  pickerDate(match.MatchDate),
+		MatchDate:  matchPickerDate(match.MatchDate),
+		MatchTime:  matchPickerTime(match.MatchDate),
 		Notes:      match.Notes.String,
 	}
 	if match.HomeScore.Valid {
@@ -1139,6 +1141,7 @@ func (app *application) matchUpdatePost(w http.ResponseWriter, r *http.Request) 
 		AwayTeamID: existing.AwayTeamID,
 		LocationID: locationID,
 		MatchDate:  r.PostForm.Get("matchdate"),
+		MatchTime:  r.PostForm.Get("matchtime"),
 		HomeScore:  r.PostForm.Get("homescore"),
 		AwayScore:  r.PostForm.Get("awayscore"),
 		Notes:      r.PostForm.Get("notes"),

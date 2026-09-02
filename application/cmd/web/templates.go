@@ -59,6 +59,44 @@ func pickerDate(t time.Time) string {
 	return t.Format("2006-01-02")
 }
 
+// hasMatchTime reports whether t carries a real kickoff time, as opposed
+// to the "no time recorded" sentinel: exactly midnight in whatever zone
+// the value was actually stored in (UTC, both for a fresh DB read and for
+// every match created before this feature or seeded via time.Parse's
+// implicit UTC). Deliberately checked on the raw value, NOT converted to
+// Eastern first — a bare historical date widened from DATE to DATETIME
+// really is UTC midnight, and converting it to Eastern first would land
+// on ~7-8pm the *previous* day (whichever DST offset applies) and look
+// like a bogus real time rather than "no time recorded". A genuine
+// Eastern kickoff time (from parseRequiredMatchDateTime) only collides
+// with this sentinel in the rare case of a match scheduled for exactly
+// 7pm/8pm Eastern (whichever is UTC midnight that day) — an accepted,
+// narrow edge case, far better than every historical match display being
+// wrong.
+func hasMatchTime(t time.Time) bool {
+	return !(t.Hour() == 0 && t.Minute() == 0)
+}
+
+// matchPickerDate/matchPickerTime split a match's stored kickoff instant
+// back into the two <input type=date>/<input type=time> values the edit
+// form needs. Only converted to Eastern when a real time is on file (see
+// hasMatchTime) — a sentinel value is shown/left exactly as stored
+// (matchPickerTime blank), so re-saving an old match without touching the
+// time field never accidentally invents a fake kickoff time for it.
+func matchPickerDate(t time.Time) string {
+	if !hasMatchTime(t) {
+		return t.Format("2006-01-02")
+	}
+	return t.In(easternLocation).Format("2006-01-02")
+}
+
+func matchPickerTime(t time.Time) string {
+	if !hasMatchTime(t) {
+		return ""
+	}
+	return t.In(easternLocation).Format("15:04")
+}
+
 // Create a humanDate function which returns a nicely formatted string
 // representation of a time.Time object.
 func humanDate(t time.Time) string {
@@ -92,6 +130,29 @@ var easternLocation = func() *time.Location {
 // date-only formatting for everything else.
 func humanDateTime(t time.Time) string {
 	return t.In(easternLocation).Format("01/02/2006 3:04 PM MST")
+}
+
+// matchDateTime/matchDateTimeShort format a match's own date for display,
+// appending the Eastern kickoff time when one's on file (see
+// hasMatchTime) — used specifically for a match's own date, not other
+// unrelated dates on the same page. The date and time are always derived
+// from the *same* converted instant, never mixing a raw-UTC date with an
+// Eastern-converted time (that mismatch is exactly what produced a wrong
+// date and a fabricated time for historical matches during development).
+func matchDateTime(t time.Time) string {
+	if !hasMatchTime(t) {
+		return humanDate(t)
+	}
+	e := t.In(easternLocation)
+	return e.Format("01/02/2006") + " " + e.Format("3:04 PM")
+}
+
+func matchDateTimeShort(t time.Time) string {
+	if !hasMatchTime(t) {
+		return humanDateShort(t)
+	}
+	e := t.In(easternLocation)
+	return e.Format("01/02") + " " + e.Format("3:04 PM")
 }
 
 // templateRowWrapper bundles the root template data alongside one row for
@@ -144,14 +205,16 @@ func mapsURL(a *models.Address) string {
 }
 
 var functions = template.FuncMap{
-	"pickerDate":       pickerDate,
-	"humanDate":        humanDate,
-	"humanDateShort":   humanDateShort,
-	"humanDateTime":    humanDateTime,
-	"mapsURL":          mapsURL,
-	"goalRowData":      goalRowData,
-	"cardRowData":      cardRowData,
-	"teamNoteSideData": teamNoteSideData,
+	"pickerDate":         pickerDate,
+	"humanDate":          humanDate,
+	"humanDateShort":     humanDateShort,
+	"humanDateTime":      humanDateTime,
+	"matchDateTime":      matchDateTime,
+	"matchDateTimeShort": matchDateTimeShort,
+	"mapsURL":            mapsURL,
+	"goalRowData":        goalRowData,
+	"cardRowData":        cardRowData,
+	"teamNoteSideData":   teamNoteSideData,
 }
 
 func newTemplateCache() (map[string]*template.Template, error) {

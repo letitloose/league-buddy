@@ -95,16 +95,19 @@ func (service *MatchReminderService) notify(category string, recipient *models.P
 	return sent, nil
 }
 
-// dateNDaysOut returns the UTC-midnight date (matching how matches.matchDate
-// is stored — see parseRequiredDate in matches.go) that is days days after
-// asOf's Eastern calendar date. Anchoring on Eastern time, rather than the
-// server's local time, matches how every other human-facing date in this
-// app is displayed (cmd/web/templates.go's humanDateTime), so "3 days
-// before a Saturday match" means what a player in this league would
-// expect regardless of the server's own timezone.
+// dateNDaysOut returns the start of the Eastern calendar day that is days
+// days after asOf's Eastern calendar date — genuinely Eastern-zoned (not
+// UTC-midnight standing in for a bare date), since MatchModel.GetByDate
+// now does a real range query against matches with a real kickoff time.
+// Anchoring on Eastern time, rather than the server's local time, matches
+// how every other human-facing date in this app is displayed
+// (cmd/web/templates.go's humanDateTime), so "3 days before a Saturday
+// match" means what a player in this league would expect regardless of
+// the server's own timezone — and, now, so that an evening match never
+// gets attributed to the wrong day across a DST boundary.
 func dateNDaysOut(asOf time.Time, days int) time.Time {
 	e := asOf.In(easternLocation)
-	today := time.Date(e.Year(), e.Month(), e.Day(), 0, 0, 0, 0, time.UTC)
+	today := time.Date(e.Year(), e.Month(), e.Day(), 0, 0, 0, 0, easternLocation)
 	return today.AddDate(0, 0, days)
 }
 
@@ -236,6 +239,26 @@ func captainNameForTeam(teamID int, homeTeam, awayTeam *models.Team, roster []*m
 	return ""
 }
 
+// matchDateTimeLabel formats a match's date for reminder subject
+// lines/bodies, appending the kickoff time unless t's Eastern
+// time-of-day is exactly midnight — the "no time recorded" sentinel for
+// a historical match widened from a date-only column (see GetByDate's
+// doc comment in internal/models/matches.go). Duplicated from
+// cmd/web/templates.go's matchTimeSuffix/matchDateTime for the same
+// reason easternLocation itself is already duplicated in this file —
+// internal/services can't import cmd/web.
+func matchDateTimeLabel(t time.Time) string {
+	// Checked on the raw (UTC) value, not converted to Eastern first — a
+	// bare historical/seeded date really is UTC midnight, and converting
+	// it to Eastern before checking would land on ~7-8pm the *previous*
+	// day and look like a real (wrong) time rather than "none on file".
+	if t.Hour() == 0 && t.Minute() == 0 {
+		return t.Format("01/02/2006")
+	}
+	e := t.In(easternLocation)
+	return e.Format("01/02/2006") + " " + e.Format("3:04 PM")
+}
+
 // buildRSVPReminderContent builds the subject/body shared by every RSVP
 // reminder send — the real scheduled ones (sendRSVPReminder) and the
 // on-demand preview (SendTestReminder): their team's captain's message (if
@@ -243,7 +266,7 @@ func captainNameForTeam(teamID int, homeTeam, awayTeam *models.Team, roster []*m
 // (with messages).
 func buildRSVPReminderContent(match *models.Match, homeTeam, awayTeam *models.Team, roster []*models.Player, respondedByPlayer map[int]*models.RSVP, note *models.MatchTeamNote) (subject, body string) {
 	matchURL := fmt.Sprintf("https://%s/match/%d", os.Getenv("PUBLIC_HOST"), match.ID)
-	dateStr := match.MatchDate.Format("01/02/2006")
+	dateStr := matchDateTimeLabel(match.MatchDate)
 	subject = fmt.Sprintf("RSVP for %s vs %s — %s", homeTeam.Name, awayTeam.Name, dateStr)
 
 	var b strings.Builder
@@ -296,7 +319,7 @@ func buildRSVPReminderContent(match *models.Match, homeTeam, awayTeam *models.Te
 // in-app, consistent with texting being one-way).
 func buildRSVPReminderSMSBody(match *models.Match, homeTeam, awayTeam *models.Team) string {
 	matchURL := fmt.Sprintf("https://%s/match/%d", os.Getenv("PUBLIC_HOST"), match.ID)
-	dateStr := match.MatchDate.Format("01/02/2006")
+	dateStr := matchDateTimeLabel(match.MatchDate)
 	return fmt.Sprintf("RSVP for %s vs %s on %s: %s", homeTeam.Name, awayTeam.Name, dateStr, matchURL)
 }
 
@@ -515,7 +538,7 @@ func (service *MatchReminderService) SendDueCaptainMessageReminders(asOf time.Ti
 // (false if the captain's preference is off) — see notify.
 func (service *MatchReminderService) sendCaptainMessageReminder(match *models.Match, team, opponent *models.Team, captain *models.Player) (bool, error) {
 	matchURL := fmt.Sprintf("https://%s/match/%d", os.Getenv("PUBLIC_HOST"), match.ID)
-	dateStr := match.MatchDate.Format("01/02/2006")
+	dateStr := matchDateTimeLabel(match.MatchDate)
 	subject := fmt.Sprintf("Add a message for %s's match vs %s — %s", team.Name, opponent.Name, dateStr)
 	body := fmt.Sprintf(
 		`<html><body><p>Your team plays %s on %s. <a href="%s">Add a message for your team</a> to include in their RSVP reminder emails.</p></body></html>`,

@@ -64,6 +64,18 @@
         {{end}}
     </div>
     <div class="mb-4">
+        <label class="field-label">Time (optional)</label>
+        <p class="text-xs text-gray-500 mb-1">Leave blank if the kickoff time isn't known yet.</p>
+        {{$errorClass := ""}}
+        {{if .Form.FieldErrors.matchtime }}
+            {{$errorClass = "error-border"}}
+        {{end}}
+        <input class="form-field {{$errorClass}}" type='time' name='matchtime' value='{{.Form.MatchTime}}'>
+        {{with .Form.FieldErrors.matchtime}}
+            <p class='error-message'>{{.}}</p>
+        {{end}}
+    </div>
+    <div class="mb-4">
         <label class="field-label">Location</label>
         {{$errorClass := ""}}
         {{if .Form.FieldErrors.locationid }}

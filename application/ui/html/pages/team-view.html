@@ -50,7 +50,7 @@
             </tr>
             {{range .Data.Schedule}}
             <tr>
-                <td><a href="/match/{{.Match.ID}}">{{humanDateShort .Match.MatchDate}}</a></td>
+                <td><a href="/match/{{.Match.ID}}">{{matchDateTimeShort .Match.MatchDate}}</a></td>
                 <td>
                     {{if eq .Match.HomeTeamID $.Data.Team.ID}}
                     <a href="/match/{{.Match.ID}}">{{.AwayTeamName}}</a>

@@ -68,13 +68,27 @@ func (m *MatchModel) Update(match *Match) error {
 	return err
 }
 
-// Delete removes match id along with any playerMatchStats rows attached to
-// it — stats have no life outside their match, unlike teams/locations,
-// which are independently referenced elsewhere and so block deletion
-// instead (see ErrHasDependents).
+// Delete removes match id along with every row in every table that
+// exists only in relation to it — stats, goals, cards, RSVPs, captain's
+// notes, and reminder-tracking rows have no life outside their match,
+// unlike teams/locations, which are independently referenced elsewhere
+// and so block deletion instead (see ErrHasDependents). Each of these
+// tables has a foreign key on matchID with no ON DELETE CASCADE, so
+// leaving any of them out here would surface as an opaque FK-constraint
+// error instead of a clean delete.
 func (m *MatchModel) Delete(id int) error {
-	if _, err := m.DB.Exec(`DELETE FROM playerMatchStats WHERE matchID = ?`, id); err != nil {
-		return err
+	for _, table := range []string{
+		"playerMatchStats",
+		"matchGoals",
+		"matchCards",
+		"rsvps",
+		"matchTeamNotes",
+		"matchRSVPReminders",
+		"matchCaptainMessageReminders",
+	} {
+		if _, err := m.DB.Exec(`DELETE FROM `+table+` WHERE matchID = ?`, id); err != nil {
+			return err
+		}
 	}
 
 	_, err := m.DB.Exec(`DELETE FROM matches WHERE id = ?`, id)
@@ -98,14 +112,19 @@ func (m *MatchModel) GetByTeamAndSeason(teamID, seasonID int) ([]*Match, error) 
 	return m.queryMatches(stmt, seasonID, teamID, teamID)
 }
 
-// GetByDate returns every match scheduled on exactly date (a plain
-// year/month/day match against the DATE column) — used by
-// MatchReminderService to find matches N days out.
+// GetByDate returns every match scheduled anywhere within the calendar
+// day starting at date — a half-open range, not exact equality, since
+// matchDate now carries a real kickoff time. date must already be the
+// start of that day in the caller's intended time zone (dateNDaysOut in
+// internal/services/matchReminders.go anchors this in Eastern, so a
+// match late in the evening still lands on its own calendar day rather
+// than rolling into the next) — used by MatchReminderService to find
+// matches N days out.
 func (m *MatchModel) GetByDate(date time.Time) ([]*Match, error) {
 	stmt := `SELECT id, seasonID, homeTeamID, awayTeamID, matchDate, locationID, homeScore, awayScore, notes, created
-		FROM matches WHERE matchDate = ? ORDER BY id ASC`
+		FROM matches WHERE matchDate >= ? AND matchDate < ? ORDER BY id ASC`
 
-	return m.queryMatches(stmt, date)
+	return m.queryMatches(stmt, date, date.AddDate(0, 0, 1))
 }
 
 // TeamMatchAggregate is one team's win/loss/draw/goal tally across a

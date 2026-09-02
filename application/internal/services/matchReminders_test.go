@@ -258,6 +258,63 @@ func TestSendTestReminderSMSOnlyTextsVerifiedRosterMembers(t *testing.T) {
 	}
 }
 
+// A match scheduled late in the Eastern evening must still be found on
+// its own Eastern calendar day — proves dateNDaysOut/GetByDate's range
+// query end to end through the real reminder pipeline, not just the
+// model-level range logic (see TestGetByDate in internal/models).
+func TestSendDueRSVPRemindersFindsLateEveningMatch(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	seasons := &models.SeasonModel{DB: db}
+	teams := &models.TeamModel{DB: db}
+	mm := &models.MatchModel{DB: db}
+	pm := &models.PlayerModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+	mrrm := &models.MatchRSVPReminderModel{DB: db}
+	reminderService := MatchReminderService{DB: db}
+
+	seasonID, err := seasons.Insert(&models.Season{LeagueID: 1, Name: "Spring 2024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := teams.Insert(&models.Team{LeagueID: 1, Name: "Rival FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A fixed, DST-uneventful date so the test is deterministic.
+	asOf := time.Date(2024, 7, 1, 12, 0, 0, 0, easternLocation)
+	lateEvening := dateNDaysOut(asOf, 3).Add(23*time.Hour + 30*time.Minute)
+	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: lateEvening})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	playerID, err := pm.Insert(&models.Player{FirstName: "Some", LastName: "Player", Email: sql.NullString{String: "player@example.com", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	sent, err := reminderService.SendDueRSVPReminders(asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent != 1 {
+		t.Fatalf("expected the 11:30pm Eastern match to still be found 3 days out, got %d sent", sent)
+	}
+
+	wasSent, err := mrrm.WasSent(matchID, playerID, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wasSent {
+		t.Fatal("expected the late-evening match's reminder to be recorded")
+	}
+}
+
 func TestSendDueRSVPRemindersSkipsMatchesOutsideTheSchedule(t *testing.T) {
 	db := models.NewTestDB(t)
 

@@ -62,7 +62,7 @@ func normalizeName(s string) string {
 }
 
 var scheduleDateLayouts = []string{"1/2/2006", "2006-01-02"}
-var scheduleTimeLayouts = []string{"3:04 PM", "15:04"}
+var scheduleTimeLayouts = []string{"3:04:05 PM", "3:04 PM", "15:04:05", "15:04"}
 
 func parseScheduleDate(raw string) (string, bool) {
 	raw = strings.TrimSpace(raw)

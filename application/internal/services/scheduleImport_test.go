@@ -71,7 +71,7 @@ func TestImportScheduleCSVHandlesRealWorldMismatches(t *testing.T) {
 
 	csvBody := `Date,Time,Home,Away,Location
 9/8/2026,,Chatham - SOMA,Colonial FC,"Crellin Park, Chatham"
-9/15/2026,9:30 AM,Colonial FC,Bethlehem FC,"Clifton Commons, Clifton Park"
+9/15/2026,09:30:00 AM,Colonial FC,Bethlehem FC,"Clifton Commons, Clifton Park"
 9/22/2026,9:30 AM,Nonexistent FC,Colonial FC,
 9/29/2026,9:30 AM,Colonial FC,Bethlehem FC,"Somewhere Nobody Has Heard Of"`
 
@@ -125,6 +125,11 @@ func TestImportScheduleCSVHandlesRealWorldMismatches(t *testing.T) {
 
 	if bethlehemMatch == nil || bethlehemMatch.HomeTeamID != colonialID || bethlehemMatch.AwayTeamID != bethlehemID {
 		t.Fatalf("expected the 9/15 Colonial vs Bethlehem match to exist, got %+v", bethlehemMatch)
+	}
+	// 09:30 AM Eastern (EDT, UTC-4 in September) stored as its UTC-equivalent
+	// instant, same as parseRequiredMatchDateTime does for manual match entry.
+	if bethlehemMatch.MatchDate.Hour() != 13 || bethlehemMatch.MatchDate.Minute() != 30 {
+		t.Fatalf("expected the real-world '09:30:00 AM' time format (with seconds) to parse as 09:30 AM Eastern, got %s", bethlehemMatch.MatchDate)
 	}
 	if !bethlehemMatch.LocationID.Valid || int(bethlehemMatch.LocationID.Int32) != cliftonID {
 		t.Fatalf("expected the location to resolve via the text before the first comma, got %+v", bethlehemMatch.LocationID)

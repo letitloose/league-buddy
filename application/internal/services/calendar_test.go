@@ -170,8 +170,8 @@ func TestBuildFeedAcrossTeamsAndTimedVsAllDay(t *testing.T) {
 	}
 	timedEventStart := strings.Index(body, "UID:match-"+strconv.Itoa(timedID)+"@blametheball")
 	timedEventEnd := strings.Index(body[timedEventStart:], "END:VEVENT") + timedEventStart
-	if strings.Contains(body[timedEventStart:timedEventEnd], "DTEND") {
-		t.Fatalf("expected no DTEND on the timed match's own VEVENT (no stored duration), got:\n%s", body)
+	if !strings.Contains(body[timedEventStart:timedEventEnd], "DTEND:20990501T163000Z") {
+		t.Fatalf("expected the timed match's DTEND 2 hours after its DTSTART, got:\n%s", body)
 	}
 	if !strings.Contains(body, "UID:match-"+strconv.Itoa(allDayID)+"@blametheball") {
 		t.Fatalf("expected a stable UID for the all-day match, got:\n%s", body)

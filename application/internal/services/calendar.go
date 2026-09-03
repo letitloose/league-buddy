@@ -90,12 +90,16 @@ func formatICSAddress(location *models.Location, address *models.Address) string
 	return strings.Join(parts, ", ")
 }
 
+// assumedMatchDuration is used for a timed match's DTEND, since nothing
+// in the schema records how long a match actually lasts — long enough to
+// cover a full match plus stoppage time, short enough that the event
+// still reads as "this evening," not "most of the day."
+const assumedMatchDuration = 2 * time.Hour
+
 // writeVEvent appends one match's VEVENT block to b. A match with a real
-// kickoff time (hasMatchTime) gets a UTC DTSTART with no DTEND/DURATION —
-// RFC 5545 treats that as a valid zero-duration event, which is honest
-// given nothing in the schema records how long a match actually lasts (no
-// invented duration). A match with no real time becomes an all-day
-// VALUE=DATE event instead, spanning just its own calendar day.
+// kickoff time (hasMatchTime) gets a UTC DTSTART/DTEND assumedMatchDuration
+// apart. A match with no real time becomes an all-day VALUE=DATE event
+// instead, spanning just its own calendar day.
 func writeVEvent(b *strings.Builder, match *models.Match, homeTeam, awayTeam *models.Team, locationLine string, publicHost string) {
 	b.WriteString("BEGIN:VEVENT\r\n")
 	fmt.Fprintf(b, "UID:match-%d@blametheball\r\n", match.ID)
@@ -103,6 +107,7 @@ func writeVEvent(b *strings.Builder, match *models.Match, homeTeam, awayTeam *mo
 
 	if hasMatchTime(match.MatchDate) {
 		fmt.Fprintf(b, "DTSTART:%s\r\n", match.MatchDate.UTC().Format("20060102T150405Z"))
+		fmt.Fprintf(b, "DTEND:%s\r\n", match.MatchDate.Add(assumedMatchDuration).UTC().Format("20060102T150405Z"))
 	} else {
 		fmt.Fprintf(b, "DTSTART;VALUE=DATE:%s\r\n", match.MatchDate.Format("20060102"))
 		fmt.Fprintf(b, "DTEND;VALUE=DATE:%s\r\n", match.MatchDate.AddDate(0, 0, 1).Format("20060102"))

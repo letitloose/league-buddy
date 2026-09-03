@@ -5,6 +5,20 @@
     <h2>Notification Preferences</h2>
     <div class="w-full max-w-md">
         <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <h3 class="pt-0 text-center">Calendar</h3>
+            <p class="text-sm text-gray-500 text-center mb-4">See your upcoming matches, across every team, in your phone's own calendar app. On your phone, tap the link below to subscribe.</p>
+            <div class="text-center mb-4">
+                <a class="btn m-0" href="{{.Data.CalendarFeedURL}}">Add to Calendar</a>
+            </div>
+            <form action="/player/notifications/{{.Data.Player.ID}}/calendar/regenerate" method="POST">
+                <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                <p class="text-xs text-gray-500 text-center mb-2">If this link ever leaks, regenerate it — the old link stops working immediately, and you'll need to re-subscribe with the new one.</p>
+                <div class="text-center"><input class="btn-secondary m-0" type="submit" value="Regenerate Link"></div>
+            </form>
+        </div>
+
+        {{if .Data.SMSFeatureEnabled}}
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
             <h3 class="pt-0 text-center">Phone Number</h3>
             {{if .Data.PhoneVerified}}
             <p class="text-center mb-4"><span class="text-green-700">&check; Verified</span> &mdash; {{.Data.Player.PhoneNumber.String}}</p>
@@ -60,12 +74,12 @@
                 <p class="text-xs text-gray-500 mb-4">Verify your phone number above to choose Text or Both.</p>
                 {{end}}
 
-                <div class="flex justify-between">
-                    <input class="btn m-0" type='submit' value='Save'>
-                    <a class="btn m-0" href="/player/view/{{.Data.Player.ID}}">Back</a>
-                </div>
+                <div class="text-center"><input class="btn m-0" type='submit' value='Save'></div>
             </form>
         </div>
+        {{end}}
+
+        <div class="text-center"><a class="btn m-0" href="/player/view/{{.Data.Player.ID}}">Back</a></div>
     </div>
 </div>
 {{end}}

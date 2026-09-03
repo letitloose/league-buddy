@@ -265,6 +265,57 @@ func TestNextMatchForTeamNoneExist(t *testing.T) {
 	}
 }
 
+func TestGetUpcomingByTeamIDs(t *testing.T) {
+	db := NewTestDB(t)
+
+	seasonID := newTestSeason(t, db, 1)
+	opponentID := newTestOpponentTeam(t, db, 1, "Rival FC")
+	otherTeamID := newTestOpponentTeam(t, db, 1, "Third FC")
+	unrelatedTeamID := newTestOpponentTeam(t, db, 1, "Unrelated FC")
+	mm := MatchModel{DB: db}
+
+	past := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	future1 := time.Date(2099, 5, 1, 0, 0, 0, 0, time.UTC)
+	future2 := time.Date(2099, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	// Team 1's past match — must be excluded by the asOf cutoff.
+	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: past}); err != nil {
+		t.Fatal(err)
+	}
+	// Team 1 (home) vs opponentID, future.
+	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: future2}); err != nil {
+		t.Fatal(err)
+	}
+	// otherTeamID (home) vs Team 1 (away), future, earlier than the one above.
+	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: otherTeamID, AwayTeamID: 1, MatchDate: future1}); err != nil {
+		t.Fatal(err)
+	}
+	// Neither team 1 nor otherTeamID — must be excluded.
+	if _, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: opponentID, AwayTeamID: unrelatedTeamID, MatchDate: future1}); err != nil {
+		t.Fatal(err)
+	}
+
+	asOf := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	matches, err := mm.GetUpcomingByTeamIDs([]int{1, otherTeamID}, asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("expected 2 upcoming matches across team 1 and otherTeamID, got %d", len(matches))
+	}
+	if !matches[0].MatchDate.Equal(future1) || !matches[1].MatchDate.Equal(future2) {
+		t.Fatalf("expected matches ordered earliest first (future1, future2), got %v then %v", matches[0].MatchDate, matches[1].MatchDate)
+	}
+
+	none, err := mm.GetUpcomingByTeamIDs([]int{}, asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("expected 0 matches for an empty teamIDs, got %d", len(none))
+	}
+}
+
 func TestGetSeasonAggregatesByTeam(t *testing.T) {
 	db := NewTestDB(t)
 

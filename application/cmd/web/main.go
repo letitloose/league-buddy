@@ -36,6 +36,7 @@ type application struct {
 	rosterExportService           *services.RosterExportService
 	rosterImportService           *services.RosterImportService
 	scheduleImportService         *services.ScheduleImportService
+	calendarService               *services.CalendarService
 	notificationPreferenceService *services.NotificationPreferenceService
 	emailService                  *services.Email
 	smsService                    *services.SMS
@@ -123,6 +124,7 @@ func main() {
 	rosterExportService := &services.RosterExportService{DB: db}
 	rosterImportService := &services.RosterImportService{DB: db}
 	scheduleImportService := &services.ScheduleImportService{DB: db}
+	calendarService := &services.CalendarService{DB: db}
 	notificationPreferences := &models.NotificationPreferenceModel{DB: db}
 	notificationPreferenceService := &services.NotificationPreferenceService{NotificationPreferenceModel: notificationPreferences, DB: db}
 
@@ -148,6 +150,7 @@ func main() {
 		rosterExportService:           rosterExportService,
 		rosterImportService:           rosterImportService,
 		scheduleImportService:         scheduleImportService,
+		calendarService:               calendarService,
 		notificationPreferenceService: notificationPreferenceService,
 		emailService:                  email,
 		smsService:                    sms,

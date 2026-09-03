@@ -3,6 +3,8 @@ package models
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -196,6 +198,33 @@ func (m *MatchModel) NextMatchForTeam(teamID int, asOf time.Time) (*Match, error
 		return nil, err
 	}
 	return match, nil
+}
+
+// GetUpcomingByTeamIDs returns every match (home or away) for any of
+// teamIDs whose matchDate is on/after asOf, across every season, earliest
+// first — the multi-team version of NextMatchForTeam, used to build a
+// player's calendar feed across every team they belong to. Empty (not an
+// error) for an empty teamIDs.
+func (m *MatchModel) GetUpcomingByTeamIDs(teamIDs []int, asOf time.Time) ([]*Match, error) {
+	if len(teamIDs) == 0 {
+		return []*Match{}, nil
+	}
+
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(teamIDs)), ",")
+	stmt := fmt.Sprintf(`SELECT id, seasonID, homeTeamID, awayTeamID, matchDate, locationID, homeScore, awayScore, notes, created
+		FROM matches WHERE (homeTeamID IN (%s) OR awayTeamID IN (%s)) AND matchDate >= ? ORDER BY matchDate ASC, id ASC`,
+		placeholders, placeholders)
+
+	args := make([]any, 0, len(teamIDs)*2+1)
+	for _, id := range teamIDs {
+		args = append(args, id)
+	}
+	for _, id := range teamIDs {
+		args = append(args, id)
+	}
+	args = append(args, asOf)
+
+	return m.queryMatches(stmt, args...)
 }
 
 func (m *MatchModel) queryMatches(stmt string, args ...any) ([]*Match, error) {

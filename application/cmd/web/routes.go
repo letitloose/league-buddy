@@ -19,6 +19,18 @@ func (app *application) routes() http.Handler {
 	fileServer := http.FileServer(http.FS(ui.Files))
 	router.Handler(http.MethodGet, "/static/*filepath", fileServer)
 
+	// A player's calendar-feed URL is fetched by their phone's calendar
+	// app with no cookies at all, so it's registered directly here rather
+	// than on the dynamic (session/CSRF) chain below — the secret :token
+	// is its only access control (see handlers_calendar.go). Kept under
+	// its own /calendar/... prefix rather than nested under /player/...,
+	// since /player/view/:id, /player/update/:id, /player/notifications/:id,
+	// and /player/delete/:id are all static-segment-then-wildcard at that
+	// same path depth, and httprouter panics at startup if a wildcard
+	// segment is registered there too (the same conflict class the
+	// /admin/league/... comment below explains).
+	router.Handler(http.MethodGet, "/calendar/:token/schedule.ics", http.HandlerFunc(app.calendarFeed))
+
 	dynamic := alice.New(app.sessionManager.LoadAndSave, noSurf, app.authenticate)
 
 	// public routes
@@ -51,6 +63,7 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodPost, "/player/notifications/:id/phone", active.ThenFunc(app.playerPhoneVerificationRequest))
 	router.Handler(http.MethodPost, "/player/notifications/:id/phone/confirm", active.ThenFunc(app.playerPhoneVerificationConfirm))
 	router.Handler(http.MethodPost, "/player/notifications/:id/preferences", active.ThenFunc(app.playerNotificationPreferencesSave))
+	router.Handler(http.MethodPost, "/player/notifications/:id/calendar/regenerate", active.ThenFunc(app.playerCalendarRegenerate))
 	router.Handler(http.MethodGet, "/league", active.ThenFunc(app.leagueList))
 	router.Handler(http.MethodGet, "/league/:id", active.ThenFunc(app.leagueView))
 	router.Handler(http.MethodGet, "/team/:teamID", active.ThenFunc(app.teamView))

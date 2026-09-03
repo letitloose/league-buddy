@@ -28,7 +28,11 @@ type InviteService struct {
 	InfoLog *log.Logger
 }
 
-func generateInviteToken() (string, error) {
+// generateSecretToken returns a 64-character hex string from 32 bytes of
+// crypto/rand — shared by invite tokens and calendar-feed tokens
+// (see internal/services/calendar.go), anywhere a URL-embedded secret is
+// needed.
+func generateSecretToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -197,7 +201,7 @@ func (service *InviteService) InviteRosterPlayers(teamID int, playerIDs []int, c
 // team's captain (see linkOrCreatePlayer in users.go) and changes the
 // email copy accordingly.
 func (service *InviteService) sendOneInvite(team *models.Team, createdByUserID int, addr, actorEmail string, asCaptain bool) error {
-	token, err := generateInviteToken()
+	token, err := generateSecretToken()
 	if err != nil {
 		return err
 	}

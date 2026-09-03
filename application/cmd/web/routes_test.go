@@ -3960,11 +3960,12 @@ func TestMatchTestReminderSMSSubmit(t *testing.T) {
 // While SMS_FEATURE_ENABLED isn't set to "true" — deliberately a
 // different signal than whether SMS_ACCOUNT_SID/credentials exist, since
 // real credentials can sit in the environment for testing before a
-// number is actually carrier-approved — the whole notifications feature
-// (the link on a player's profile, and the page itself) is hidden rather
-// than offering a "verify your phone" flow that can't actually deliver
-// anything to real users yet.
-func TestPlayerNotificationsHiddenWithoutSMSConfigured(t *testing.T) {
+// number is actually carrier-approved — the Phone Number/Reminder
+// Delivery cards are hidden rather than offering a "verify your phone"
+// flow that can't actually deliver anything to real users yet. The page
+// itself (and its link from the player's profile) stays reachable
+// regardless, since the Calendar card underneath is useful either way.
+func TestPlayerNotificationsHidesSMSCardsWithoutSMSConfigured(t *testing.T) {
 	os.Setenv("SMS_FEATURE_ENABLED", "false")
 	defer os.Setenv("SMS_FEATURE_ENABLED", "true")
 
@@ -3981,13 +3982,19 @@ func TestPlayerNotificationsHiddenWithoutSMSConfigured(t *testing.T) {
 	ts.login(t, "sms-disabled-self@test.com", "validpassword123")
 
 	_, _, profileBody := ts.get(t, fmt.Sprintf("/player/view/%d", playerID))
-	if strings.Contains(profileBody, "Notification Preferences") {
-		t.Error("expected the Notification Preferences link to be hidden while SMS isn't configured")
+	if !strings.Contains(profileBody, "Notification Preferences") {
+		t.Error("expected the Notification Preferences link to still show even with SMS unconfigured")
 	}
 
-	code, _, _ := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
-	if code != http.StatusNotFound {
-		t.Errorf("want %d; got %d", http.StatusNotFound, code)
+	code, _, body := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if strings.Contains(body, "Phone Number") || strings.Contains(body, "Reminder Delivery") {
+		t.Error("expected the Phone Number/Reminder Delivery cards to be hidden while SMS isn't configured")
+	}
+	if !strings.Contains(body, "Add to Calendar") {
+		t.Error("expected the Calendar card to still show while SMS isn't configured")
 	}
 }
 
@@ -4223,6 +4230,71 @@ func TestPlayerNotificationsVerifyPhoneAndSetPreference(t *testing.T) {
 	}
 	if channel != models.ChannelSMS {
 		t.Fatalf("expected channel %q after verifying, got %q", models.ChannelSMS, channel)
+	}
+}
+
+// The calendar feed is deliberately unauthenticated — a phone's calendar
+// app fetches it with no session cookie at all — so it's tested against
+// a fresh client that never logs in, unlike every other route above.
+func TestCalendarFeedUnauthenticated(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Calendar Feed Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playerID := setupRosterMember(t, teamID, "calendar-feed-self@test.com", "validpassword123")
+
+	// Visiting the notifications page as the player (logged in) lazily
+	// generates their token — read straight from the DB rather than
+	// parsing it out of the page's webcal:// link, since that link's
+	// host segment depends on PUBLIC_HOST (unset in this test env).
+	loggedIn := newTestServer(t, app.routes())
+	loggedIn.login(t, "calendar-feed-self@test.com", "validpassword123")
+	_, _, body := loggedIn.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
+	if !strings.Contains(body, "Add to Calendar") {
+		t.Fatalf("expected an Add to Calendar link in the notifications page, got body: %s", body)
+	}
+	pm := &models.PlayerModel{DB: testDB}
+	tokenVal, err := pm.GetCalendarToken(playerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tokenVal.Valid {
+		t.Fatal("expected a calendar token to have been generated")
+	}
+	token := tokenVal.String
+
+	anon := newTestServer(t, app.routes())
+	code, headers, feedBody := anon.get(t, fmt.Sprintf("/calendar/%s/schedule.ics", token))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if ct := headers.Get("Content-Type"); ct != "text/calendar; charset=utf-8" {
+		t.Errorf("want Content-Type text/calendar; charset=utf-8; got %q", ct)
+	}
+	if !strings.Contains(feedBody, "BEGIN:VCALENDAR") {
+		t.Fatalf("expected a VCALENDAR body, got: %s", feedBody)
+	}
+
+	code, _, _ = anon.get(t, "/calendar/not-a-real-token/schedule.ics")
+	if code != http.StatusNotFound {
+		t.Errorf("want %d for an unknown token; got %d", http.StatusNotFound, code)
+	}
+
+	// Regenerating invalidates the old token.
+	_, _, notifBody := loggedIn.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
+	csrfToken := extractCSRFToken(t, notifBody)
+	regenCode, _, _ := loggedIn.postForm(t, fmt.Sprintf("/player/notifications/%d/calendar/regenerate", playerID), url.Values{
+		"csrf_token": {csrfToken},
+	})
+	if regenCode != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, regenCode)
+	}
+	code, _, _ = anon.get(t, fmt.Sprintf("/calendar/%s/schedule.ics", token))
+	if code != http.StatusNotFound {
+		t.Errorf("want %d for the now-regenerated old token; got %d", http.StatusNotFound, code)
 	}
 }
 

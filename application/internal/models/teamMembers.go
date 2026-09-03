@@ -126,3 +126,35 @@ func (m *TeamMemberModel) GetTeamsForPlayer(playerID int) ([]*Team, error) {
 	}
 	return teams, nil
 }
+
+// GetActiveTeamsForPlayer is GetTeamsForPlayer narrowed to teams where
+// playerID is an active roster member — excludes any team where they're
+// only a "Legend" (see SetLegendStatus). Used for the calendar feed,
+// where a defunct old team's ongoing matches would otherwise keep
+// showing up on a player's phone calendar forever after they've moved
+// on; GetTeamsForPlayer itself stays unfiltered everywhere else it's
+// already used.
+func (m *TeamMemberModel) GetActiveTeamsForPlayer(playerID int) ([]*Team, error) {
+	stmt := `SELECT t.id, t.leagueID, t.name, t.motto, t.establishedDate, t.captainPlayerID, t.locationID, t.created
+		FROM teams t
+		JOIN teamMembers tm ON tm.teamID = t.id
+		WHERE tm.playerID = ? AND tm.isLegend = 0
+		ORDER BY t.name ASC`
+
+	rows, err := m.DB.Query(stmt, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	teams := []*Team{}
+	for rows.Next() {
+		team := &Team{}
+		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.LocationID, &team.Created)
+		if err != nil {
+			return nil, err
+		}
+		teams = append(teams, team)
+	}
+	return teams, nil
+}

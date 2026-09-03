@@ -127,6 +127,57 @@ func (m *PlayerModel) HasDismissedCaptainGuideBanner(playerID int) (bool, error)
 	return dismissedAt.Valid, nil
 }
 
+// GetCalendarToken returns playerID's calendar-feed token, if one's been
+// generated yet — see CalendarService.EnsureToken. A dedicated
+// single-column lookup rather than adding this field to every
+// Player-fetching query below, since nothing else needs it (same
+// rationale as HasDismissedCaptainGuideBanner above).
+func (m *PlayerModel) GetCalendarToken(playerID int) (sql.NullString, error) {
+	var token sql.NullString
+	err := m.DB.QueryRow(`select calendarToken from players where id = ?`, playerID).Scan(&token)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return sql.NullString{}, ErrNoRecord
+		}
+		return sql.NullString{}, err
+	}
+	return token, nil
+}
+
+// SetCalendarToken stores playerID's newly (re)generated calendar-feed
+// token — see CalendarService.EnsureToken/RegenerateToken, which
+// generate the token itself; this just persists it.
+func (m *PlayerModel) SetCalendarToken(playerID int, token string) error {
+	statement := `update players set calendarToken = ? where id = ?`
+	_, err := m.DB.Exec(statement, token, playerID)
+	return err
+}
+
+// GetByCalendarToken resolves a calendar-feed URL's secret token back to
+// its player — the same full column list as Get/GetByEmail (just a
+// different WHERE clause), so it returns a fully-populated *Player like
+// every other Get* here. ErrNoRecord for an unknown or revoked token.
+func (m *PlayerModel) GetByCalendarToken(token string) (*Player, error) {
+
+	stmt := `select id, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created, phoneVerifiedAt, phoneVerificationCode, phoneVerificationExpiresAt
+		from players where calendarToken = ?`
+
+	result := m.DB.QueryRow(stmt, token)
+
+	player := &Player{}
+	err := result.Scan(&player.ID, &player.FirstName, &player.LastName,
+		&player.DateOfBirth, &player.AddressID, &player.Email, &player.PhoneNumber, &player.Created,
+		&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoRecord
+		} else {
+			return nil, err
+		}
+	}
+	return player, nil
+}
+
 func (m *PlayerModel) Delete(id int) error {
 	statement := "delete from players where id = ?"
 

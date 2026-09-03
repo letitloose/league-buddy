@@ -159,6 +159,7 @@ func newTestApplication(t *testing.T) *application {
 	rosterExportService := &services.RosterExportService{DB: testDB}
 	rosterImportService := &services.RosterImportService{DB: testDB}
 	scheduleImportService := &services.ScheduleImportService{DB: testDB}
+	calendarService := &services.CalendarService{DB: testDB}
 	notificationPreferences := &models.NotificationPreferenceModel{DB: testDB}
 	notificationPreferenceService := &services.NotificationPreferenceService{NotificationPreferenceModel: notificationPreferences, DB: testDB}
 
@@ -180,6 +181,7 @@ func newTestApplication(t *testing.T) *application {
 		rosterExportService:           rosterExportService,
 		rosterImportService:           rosterImportService,
 		scheduleImportService:         scheduleImportService,
+		calendarService:               calendarService,
 		notificationPreferenceService: notificationPreferenceService,
 		templateCache:                 templateCache,
 		sessionManager:                sessionManager,

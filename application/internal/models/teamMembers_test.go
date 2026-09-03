@@ -220,3 +220,46 @@ func TestGetTeamsForPlayer(t *testing.T) {
 		t.Fatalf("expected 2 teams, got %d", len(teams))
 	}
 }
+
+// GetActiveTeamsForPlayer must exclude a team where the player is only a
+// Legend — unlike GetTeamsForPlayer, which stays unfiltered.
+func TestGetActiveTeamsForPlayer(t *testing.T) {
+	db := NewTestDB(t)
+
+	pm := PlayerModel{DB: db}
+	lm := LeagueModel{DB: db}
+	tm := TeamModel{DB: db}
+	tmm := TeamMemberModel{DB: db}
+
+	playerID, err := pm.Insert(&Player{FirstName: "Lou", LastName: "Garwood"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	secondLeagueID, err := lm.Insert(&League{Name: "Second League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondTeamID, err := tm.Insert(&Team{LeagueID: secondLeagueID, Name: "Second Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := tmm.AddMembership(playerID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, secondTeamID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.SetLegendStatus(playerID, secondTeamID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	teams, err := tmm.GetActiveTeamsForPlayer(playerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(teams) != 1 || teams[0].ID != 1 {
+		t.Fatalf("expected only team 1 (the non-Legend membership), got %+v", teams)
+	}
+}

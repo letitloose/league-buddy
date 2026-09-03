@@ -120,6 +120,48 @@ func TestGetPlayersByTeam(t *testing.T) {
 	}
 }
 
+func TestCalendarToken(t *testing.T) {
+	db := NewTestDB(t)
+
+	pm := PlayerModel{DB: db}
+	id, err := pm.Insert(&Player{FirstName: "Lou", LastName: "Garwood"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token, err := pm.GetCalendarToken(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.Valid {
+		t.Fatalf("expected no calendar token yet, got %+v", token)
+	}
+
+	if err := pm.SetCalendarToken(id, "abc123"); err != nil {
+		t.Fatal(err)
+	}
+	token, err = pm.GetCalendarToken(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !token.Valid || token.String != "abc123" {
+		t.Fatalf("expected token abc123, got %+v", token)
+	}
+
+	got, err := pm.GetByCalendarToken("abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != id {
+		t.Fatalf("expected GetByCalendarToken to resolve player %d, got %d", id, got.ID)
+	}
+
+	_, err = pm.GetByCalendarToken("no-such-token")
+	if err != ErrNoRecord {
+		t.Fatalf("expected ErrNoRecord for an unknown token, got %v", err)
+	}
+}
+
 // Changing phonenumber via Update must clear any existing phone
 // verification — this is the one place every phone-number write in the
 // app funnels through, so it's the one place the "changing the number

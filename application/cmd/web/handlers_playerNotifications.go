@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/julienschmidt/httprouter"
@@ -11,15 +12,21 @@ import (
 )
 
 // playerNotificationsData is the shape player-notifications.html needs:
-// the player, their phone-verification status, and their current channel
-// for each notification category (defaulting to "email" — see
-// models.NotificationPreferenceModel.GetChannel).
+// the player, their phone-verification status, their current channel for
+// each notification category (defaulting to "email" — see
+// models.NotificationPreferenceModel.GetChannel), and their calendar-feed
+// link. SMSFeatureEnabled gates the template's Phone/Reminder-Delivery
+// cards specifically — unlike before, the page itself is always
+// reachable (see requireOwnPlayer) since the Calendar card underneath is
+// useful with no SMS provider configured at all.
 type playerNotificationsData struct {
 	Player                *models.Player
+	SMSFeatureEnabled     bool
 	PhoneVerified         bool
 	HasPendingCode        bool
 	RSVPChannel           string
 	CaptainMessageChannel string
+	CalendarFeedURL       string
 }
 
 // requireOwnPlayer resolves the :id route param and fetches that player,
@@ -27,18 +34,7 @@ type playerNotificationsData struct {
 // captain/league-admin of any team the player is on — only lets the
 // logged-in user's own linked player through. Notification consent isn't
 // something anyone else can grant on a player's behalf.
-//
-// Also 404s the whole notifications feature while no SMS provider is
-// configured (smsFeatureEnabled) — the page's whole point is choosing a
-// text-delivery channel, so there's nothing useful to show, and the link
-// to it is already hidden (see player-view.html), so a direct hit here
-// should look like the feature doesn't exist rather than half-work.
 func (app *application) requireOwnPlayer(w http.ResponseWriter, r *http.Request) (*models.Player, bool) {
-	if !app.smsFeatureEnabled() {
-		app.notFound(w)
-		return nil, false
-	}
-
 	params := httprouter.ParamsFromContext(r.Context())
 	id, err := strconv.Atoi(params.ByName("id"))
 	if err != nil || id < 1 {
@@ -68,31 +64,66 @@ func (app *application) playerNotifications(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	rsvpChannel, err := app.notificationPreferenceService.GetChannel(player.ID, models.CategoryRSVPReminder)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-	captainChannel, err := app.notificationPreferenceService.GetChannel(player.ID, models.CategoryCaptainMessageReminder)
-	if err != nil {
-		app.serverError(w, err)
-		return
+	pageData := &playerNotificationsData{
+		Player: player,
+		// TODO(sms): forced off regardless of app.smsFeatureEnabled() —
+		// phone verification/SMS reminders are hidden from this page
+		// until SMS development is finished. Restore
+		// `app.smsFeatureEnabled()` here (and drop this comment) once
+		// that's ready; nothing else needs to change.
+		SMSFeatureEnabled: false,
 	}
 
-	data := app.newTemplateData(r)
-	data.Data = &playerNotificationsData{
-		Player:                player,
-		PhoneVerified:         player.PhoneVerifiedAt.Valid,
-		HasPendingCode:        player.PhoneVerificationCode.Valid,
-		RSVPChannel:           rsvpChannel,
-		CaptainMessageChannel: captainChannel,
+	if pageData.SMSFeatureEnabled {
+		rsvpChannel, err := app.notificationPreferenceService.GetChannel(player.ID, models.CategoryRSVPReminder)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		captainChannel, err := app.notificationPreferenceService.GetChannel(player.ID, models.CategoryCaptainMessageReminder)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		pageData.PhoneVerified = player.PhoneVerifiedAt.Valid
+		pageData.HasPendingCode = player.PhoneVerificationCode.Valid
+		pageData.RSVPChannel = rsvpChannel
+		pageData.CaptainMessageChannel = captainChannel
 	}
+
+	token, err := app.calendarService.EnsureToken(player.ID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	pageData.CalendarFeedURL = fmt.Sprintf("webcal://%s/calendar/%s/schedule.ics", os.Getenv("PUBLIC_HOST"), token)
+
+	data := app.newTemplateData(r)
+	data.Data = pageData
 	data.Breadcrumbs = []Breadcrumb{
 		{Label: player.FirstName + " " + player.LastName, URL: fmt.Sprintf("/player/view/%d", player.ID)},
 		{Label: "Notification Preferences"},
 	}
 
 	app.render(w, http.StatusOK, "player-notifications.html", data)
+}
+
+// playerCalendarRegenerate reissues player's calendar-feed token,
+// invalidating whatever URL they'd previously subscribed with — the
+// revocation path if a link ever leaks.
+func (app *application) playerCalendarRegenerate(w http.ResponseWriter, r *http.Request) {
+	player, ok := app.requireOwnPlayer(w, r)
+	if !ok {
+		return
+	}
+
+	if _, err := app.calendarService.RegenerateToken(player.ID); err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", "Calendar link regenerated — you'll need to re-subscribe on your phone.")
+	http.Redirect(w, r, fmt.Sprintf("/player/notifications/%d", player.ID), http.StatusSeeOther)
 }
 
 func (app *application) playerPhoneVerificationRequest(w http.ResponseWriter, r *http.Request) {

@@ -13,10 +13,11 @@ import (
 	"github.com/letitloose/league-buddy/internal/models"
 )
 
-// rsvpDaysOutSchedule is the RSVP reminder countdown: 3 days before a
-// match, then 2, then 1 — each day only to roster players who still
-// haven't RSVP'd.
-var rsvpDaysOutSchedule = []int{3, 2, 1}
+// maxReminderDaysOut bounds how many days out SendDueRSVPReminders scans
+// for matches — matches services.TeamForm's own validation ceiling on
+// ReminderDaysOut, so no team's configured cascade can ever start beyond
+// what this function looks for.
+const maxReminderDaysOut = 14
 
 // captainMessageDaysOut is when a team's captain gets a one-time nudge to
 // add a captain's message for an upcoming match, if they haven't already.
@@ -111,12 +112,30 @@ func dateNDaysOut(asOf time.Time, days int) time.Time {
 	return today.AddDate(0, 0, days)
 }
 
+// reminderTimeReached reports whether asOf's Eastern time-of-day has
+// reached reminderTime (a team's ReminderTime, "15:04:05"-formatted) yet
+// today. A malformed value (shouldn't happen — services.TeamService
+// validates it on save) is treated as always-reached rather than
+// permanently blocking that team's reminders.
+func reminderTimeReached(asOf time.Time, reminderTime string) bool {
+	t, err := time.Parse("15:04:05", reminderTime)
+	if err != nil {
+		return true
+	}
+	e := asOf.In(easternLocation)
+	due := time.Date(e.Year(), e.Month(), e.Day(), t.Hour(), t.Minute(), 0, 0, easternLocation)
+	return !e.Before(due)
+}
+
 // SendDueRSVPReminders emails every roster player who hasn't RSVP'd yet for
-// a match 3/2/1 days out (from asOf's Eastern calendar date), skipping
-// anyone already reminded for that day (matchRSVPReminders) and anyone with
-// no email on file. Returns how many were sent. One player's send failure
-// is logged and skipped, not fatal to the whole run — a background/manual
-// job shouldn't abort partway through a day's matches over one bad address.
+// a match, once a day, starting each side's own team's configured
+// ReminderDaysOut and counting down to 1 (from asOf's Eastern calendar
+// date), skipping any team with RemindersEnabled false, any side whose
+// configured ReminderTime hasn't been reached yet today, anyone already
+// reminded for that day (matchRSVPReminders), and anyone with no email on
+// file. Returns how many were sent. One player's send failure is logged
+// and skipped, not fatal to the whole run — a background/manual job
+// shouldn't abort partway through a day's matches over one bad address.
 func (service *MatchReminderService) SendDueRSVPReminders(asOf time.Time) (int, error) {
 	mm := &models.MatchModel{DB: service.DB}
 	pm := &models.PlayerModel{DB: service.DB}
@@ -126,7 +145,7 @@ func (service *MatchReminderService) SendDueRSVPReminders(asOf time.Time) (int, 
 	mrrm := &models.MatchRSVPReminderModel{DB: service.DB}
 
 	sent := 0
-	for _, daysOut := range rsvpDaysOutSchedule {
+	for daysOut := 1; daysOut <= maxReminderDaysOut; daysOut++ {
 		matches, err := mm.GetByDate(dateNDaysOut(asOf, daysOut))
 		if err != nil {
 			return sent, err
@@ -152,11 +171,11 @@ func (service *MatchReminderService) SendDueRSVPReminders(asOf time.Time) (int, 
 			}
 
 			sides := []struct {
-				teamID   int
-				opponent *models.Team
+				teamID int
+				team   *models.Team
 			}{
-				{match.HomeTeamID, awayTeam},
-				{match.AwayTeamID, homeTeam},
+				{match.HomeTeamID, homeTeam},
+				{match.AwayTeamID, awayTeam},
 			}
 
 			// A player on both rosters (rare) gets one email per match, not
@@ -164,6 +183,10 @@ func (service *MatchReminderService) SendDueRSVPReminders(asOf time.Time) (int, 
 			remindedThisMatch := map[int]bool{}
 
 			for _, side := range sides {
+				if !side.team.RemindersEnabled || daysOut > side.team.ReminderDaysOut || !reminderTimeReached(asOf, side.team.ReminderTime) {
+					continue
+				}
+
 				roster, err := pm.GetByTeam(side.teamID)
 				if err != nil {
 					return sent, err
@@ -488,6 +511,11 @@ func (service *MatchReminderService) SendDueCaptainMessageReminders(asOf time.Ti
 
 		for _, side := range sides {
 			if !side.team.CaptainPlayerID.Valid {
+				continue
+			}
+			if !side.team.RemindersEnabled {
+				// Nudging a captain to write a message for RSVP reminders
+				// their team has turned off entirely doesn't make sense.
 				continue
 			}
 			wasSent, err := mcrm.WasSent(match.ID, side.team.ID)

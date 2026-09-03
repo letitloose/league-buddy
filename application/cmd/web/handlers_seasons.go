@@ -29,12 +29,23 @@ type seasonMatchRow struct {
 }
 
 type seasonViewData struct {
-	Season        *models.Season
-	League        *models.League
-	Matches       []*seasonMatchRow
-	CanManage     bool
-	GoalLeaders   []*models.LeagueLeaderLine
-	AssistLeaders []*models.LeagueLeaderLine
+	Season    *models.Season
+	League    *models.League
+	CanManage bool
+	ActiveTab string
+
+	// MatchCount is always populated (a cheap models.Match count, needed
+	// for the Delete Season button's confirmation regardless of which tab
+	// is active) — MatchDays is the expensive, fully-hydrated-per-match
+	// version, built only when ActiveTab is "matches" (see leagueView's
+	// identical MatchDays gating on the league page).
+	MatchCount int
+	MatchDays  []*matchDayGroup
+
+	Standings        []*standingRow
+	StandingsColumns []standingsColumn
+	GoalLeaders      []*models.LeagueLeaderLine
+	AssistLeaders    []*models.LeagueLeaderLine
 }
 
 func (app *application) buildSeasonMatchRows(matches []*models.Match) ([]*seasonMatchRow, error) {
@@ -124,11 +135,42 @@ func (app *application) seasonView(w http.ResponseWriter, r *http.Request) {
 		app.serverError(w, err)
 		return
 	}
-	rows, err := app.buildSeasonMatchRows(matches)
+
+	activeTab := r.URL.Query().Get("tab")
+	if activeTab != "standings" {
+		activeTab = "matches"
+	}
+
+	var matchDays []*matchDayGroup
+	if activeTab == "matches" {
+		rows, err := app.buildSeasonMatchRows(matches)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		matchDays = groupMatchesByDay(rows)
+	}
+
+	tm := &models.TeamModel{DB: app.playerService.DB}
+	teams, err := tm.GetByLeague(season.LeagueID)
 	if err != nil {
 		app.serverError(w, err)
 		return
 	}
+	standings, err := buildStandings(app.playerService.DB, teams, id)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	sortKey := r.URL.Query().Get("sort")
+	if !validStandingsSortKeys[sortKey] {
+		sortKey = "points"
+	}
+	dir := r.URL.Query().Get("dir")
+	if dir != "asc" {
+		dir = "desc"
+	}
+	sortStandings(standings, sortKey, dir)
 
 	pmsm := &models.PlayerMatchStatModel{DB: app.playerService.DB}
 	goalLeaders, err := pmsm.TopScorersForSeason(id, 5)
@@ -144,12 +186,16 @@ func (app *application) seasonView(w http.ResponseWriter, r *http.Request) {
 
 	data := app.newTemplateData(r)
 	data.Data = &seasonViewData{
-		Season:        season,
-		League:        league,
-		Matches:       rows,
-		CanManage:     app.canManageLeague(r, season.LeagueID),
-		GoalLeaders:   goalLeaders,
-		AssistLeaders: assistLeaders,
+		Season:           season,
+		League:           league,
+		CanManage:        app.canManageLeague(r, season.LeagueID),
+		ActiveTab:        activeTab,
+		MatchCount:       len(matches),
+		MatchDays:        matchDays,
+		Standings:        standings,
+		StandingsColumns: buildStandingsColumns(fmt.Sprintf("/season/%d", id), sortKey, dir),
+		GoalLeaders:      goalLeaders,
+		AssistLeaders:    assistLeaders,
 	}
 	data.Breadcrumbs = []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},

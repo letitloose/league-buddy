@@ -43,6 +43,7 @@ func (app *application) routes() http.Handler {
 	// active routes (logged in + active)
 	active := dynamic.Append(app.requireActive)
 	router.Handler(http.MethodPost, "/user/toggleViewAsPlayer", active.ThenFunc(app.toggleViewAsPlayer))
+	router.Handler(http.MethodPost, "/captains/dismiss", active.ThenFunc(app.captainGuideBannerDismiss))
 	router.Handler(http.MethodGet, "/player/view/:id", active.ThenFunc(app.playerView))
 	router.Handler(http.MethodGet, "/player/update/:id", active.ThenFunc(app.playerUpdate))
 	router.Handler(http.MethodPost, "/player/update", active.ThenFunc(app.playerUpdatePost))
@@ -63,6 +64,7 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodGet, "/match/:id", active.ThenFunc(app.matchView))
 	router.Handler(http.MethodPost, "/match/:id/rsvp", active.ThenFunc(app.matchRSVPSubmit))
 	router.Handler(http.MethodPost, "/match/:id/notes", active.ThenFunc(app.matchTeamNoteSubmit))
+	router.Handler(http.MethodPost, "/match/:id/attendance", active.ThenFunc(app.matchAttendanceSubmit))
 	router.Handler(http.MethodPost, "/match/:id/testReminder", active.ThenFunc(app.matchTestReminderSubmit))
 	router.Handler(http.MethodPost, "/match/:id/testReminderSMS", active.ThenFunc(app.matchTestReminderSMSSubmit))
 	router.Handler(http.MethodGet, "/rosterImport/sample.csv", active.ThenFunc(app.rosterImportSample))
@@ -105,6 +107,8 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodPost, "/admin/team/setCaptain", active.ThenFunc(app.teamSetCaptain))
 	router.Handler(http.MethodPost, "/admin/team/scorekeepers/add", active.ThenFunc(app.teamAddScorekeeper))
 	router.Handler(http.MethodPost, "/admin/team/scorekeepers/remove", active.ThenFunc(app.teamRemoveScorekeeper))
+	router.Handler(http.MethodPost, "/admin/team/legends/add", active.ThenFunc(app.teamAddLegend))
+	router.Handler(http.MethodPost, "/admin/team/legends/remove", active.ThenFunc(app.teamRemoveLegend))
 	// Season/match administration is scoped to "anyone who can administer the
 	// league" (canManageLeague — admin or league admin, captains excluded).
 	// All on the active tier with an in-handler check, same rationale as the

@@ -114,6 +114,75 @@ func TestHasTeamInLeague(t *testing.T) {
 	}
 }
 
+func TestSetLegendStatus(t *testing.T) {
+	db := NewTestDB(t)
+
+	pm := PlayerModel{DB: db}
+	tmm := TeamMemberModel{DB: db}
+
+	playerID, err := pm.Insert(&Player{FirstName: "Old", LastName: "Timer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := tmm.SetLegendStatus(playerID, 1, true); err != nil {
+		t.Fatal(err)
+	}
+	active, err := pm.GetActiveByTeam(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range active {
+		if p.ID == playerID {
+			t.Fatal("expected the player to no longer appear in the active roster after being made a Legend")
+		}
+	}
+	legends, err := pm.GetLegendsByTeam(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legends) != 1 || legends[0].ID != playerID {
+		t.Fatalf("expected the player to appear as the sole Legend, got %+v", legends)
+	}
+
+	// Reactivating moves them back.
+	if err := tmm.SetLegendStatus(playerID, 1, false); err != nil {
+		t.Fatal(err)
+	}
+	active, err = pm.GetActiveByTeam(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range active {
+		if p.ID == playerID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected the player to be back on the active roster after reactivation")
+	}
+	legends, err = pm.GetLegendsByTeam(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legends) != 0 {
+		t.Fatalf("expected no Legends left after reactivation, got %+v", legends)
+	}
+
+	// Membership itself (IsMember) is unaffected by Legend status either way.
+	isMember, err := tmm.IsMember(playerID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isMember {
+		t.Fatal("expected Legend status to never affect underlying team membership")
+	}
+}
+
 func TestGetTeamsForPlayer(t *testing.T) {
 	db := NewTestDB(t)
 

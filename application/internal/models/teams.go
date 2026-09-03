@@ -17,6 +17,21 @@ type Team struct {
 	CaptainPlayerID sql.NullInt32
 	LocationID      sql.NullInt32
 	Created         time.Time
+
+	// RemindersEnabled/ReminderDaysOut/ReminderTime configure this team's
+	// automated RSVP reminder cascade (see
+	// services.MatchReminderService.SendDueRSVPReminders) — reminders go
+	// out once a day, starting ReminderDaysOut days before a match and
+	// counting down to 1, to any roster player who hasn't RSVP'd yet,
+	// timed to ReminderTime (a "15:04:05" Eastern time-of-day). Defaults
+	// (true/3/"09:00:00") match the fixed global schedule every team used
+	// before this was made configurable. Does not affect the separate
+	// captain's-message nudge except via RemindersEnabled, which silences
+	// it too — a nudge to write a message for a reminder that will never
+	// be sent doesn't make sense either.
+	RemindersEnabled bool
+	ReminderDaysOut  int
+	ReminderTime     string
 }
 
 type TeamModel struct {
@@ -39,10 +54,10 @@ func (m *TeamModel) Insert(team *Team) (int, error) {
 }
 
 func (m *TeamModel) Get(id int) (*Team, error) {
-	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, locationID, created FROM teams WHERE id = ?`
+	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, locationID, created, remindersEnabled, reminderDaysOut, reminderTime FROM teams WHERE id = ?`
 
 	team := &Team{}
-	err := m.DB.QueryRow(stmt, id).Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.LocationID, &team.Created)
+	err := m.DB.QueryRow(stmt, id).Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.LocationID, &team.Created, &team.RemindersEnabled, &team.ReminderDaysOut, &team.ReminderTime)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -53,9 +68,9 @@ func (m *TeamModel) Get(id int) (*Team, error) {
 }
 
 func (m *TeamModel) Update(team *Team) error {
-	statement := `UPDATE teams SET leagueID = ?, name = ?, motto = ?, establishedDate = ?, locationID = ? WHERE id = ?`
+	statement := `UPDATE teams SET leagueID = ?, name = ?, motto = ?, establishedDate = ?, locationID = ?, remindersEnabled = ?, reminderDaysOut = ?, reminderTime = ? WHERE id = ?`
 
-	_, err := m.DB.Exec(statement, team.LeagueID, team.Name, team.Motto, team.EstablishedDate, team.LocationID, team.ID)
+	_, err := m.DB.Exec(statement, team.LeagueID, team.Name, team.Motto, team.EstablishedDate, team.LocationID, team.RemindersEnabled, team.ReminderDaysOut, team.ReminderTime, team.ID)
 	return err
 }
 
@@ -76,7 +91,7 @@ func (m *TeamModel) Delete(id int) error {
 }
 
 func (m *TeamModel) GetByLeague(leagueID int) ([]*Team, error) {
-	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, locationID, created FROM teams WHERE leagueID = ? ORDER BY name ASC`
+	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, locationID, created, remindersEnabled, reminderDaysOut, reminderTime FROM teams WHERE leagueID = ? ORDER BY name ASC`
 
 	rows, err := m.DB.Query(stmt, leagueID)
 	if err != nil {
@@ -87,7 +102,7 @@ func (m *TeamModel) GetByLeague(leagueID int) ([]*Team, error) {
 	teams := []*Team{}
 	for rows.Next() {
 		team := &Team{}
-		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.LocationID, &team.Created)
+		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.LocationID, &team.Created, &team.RemindersEnabled, &team.ReminderDaysOut, &team.ReminderTime)
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +114,7 @@ func (m *TeamModel) GetByLeague(leagueID int) ([]*Team, error) {
 // GetByLocation returns every team whose home field is locationID — used to
 // name the teams blocking a location delete (fk_teams_location).
 func (m *TeamModel) GetByLocation(locationID int) ([]*Team, error) {
-	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, locationID, created FROM teams WHERE locationID = ? ORDER BY name ASC`
+	stmt := `SELECT id, leagueID, name, motto, establishedDate, captainPlayerID, locationID, created, remindersEnabled, reminderDaysOut, reminderTime FROM teams WHERE locationID = ? ORDER BY name ASC`
 
 	rows, err := m.DB.Query(stmt, locationID)
 	if err != nil {
@@ -110,7 +125,7 @@ func (m *TeamModel) GetByLocation(locationID int) ([]*Team, error) {
 	teams := []*Team{}
 	for rows.Next() {
 		team := &Team{}
-		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.LocationID, &team.Created)
+		err := rows.Scan(&team.ID, &team.LeagueID, &team.Name, &team.Motto, &team.EstablishedDate, &team.CaptainPlayerID, &team.LocationID, &team.Created, &team.RemindersEnabled, &team.ReminderDaysOut, &team.ReminderTime)
 		if err != nil {
 			return nil, err
 		}

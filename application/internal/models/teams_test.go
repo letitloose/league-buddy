@@ -54,11 +54,14 @@ func TestUpdateTeamWithMottoAndEstablishedDate(t *testing.T) {
 	established := sql.NullTime{Time: time.Date(2001, 5, 6, 0, 0, 0, 0, time.UTC), Valid: true}
 
 	err := tm.Update(&Team{
-		ID:              1,
-		LeagueID:        1,
-		Name:            "Test Team",
-		Motto:           sql.NullString{String: "Go get 'em", Valid: true},
-		EstablishedDate: established,
+		ID:               1,
+		LeagueID:         1,
+		Name:             "Test Team",
+		Motto:            sql.NullString{String: "Go get 'em", Valid: true},
+		EstablishedDate:  established,
+		RemindersEnabled: true,
+		ReminderDaysOut:  3,
+		ReminderTime:     "09:00:00",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +150,7 @@ func TestGetByLocation(t *testing.T) {
 		t.Fatalf("expected 0 teams before assignment, got %d", len(teams))
 	}
 
-	if err := tm.Update(&Team{ID: 1, LeagueID: 1, Name: "Test Team", LocationID: sql.NullInt32{Int32: int32(locationID), Valid: true}}); err != nil {
+	if err := tm.Update(&Team{ID: 1, LeagueID: 1, Name: "Test Team", LocationID: sql.NullInt32{Int32: int32(locationID), Valid: true}, RemindersEnabled: true, ReminderDaysOut: 3, ReminderTime: "09:00:00"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tm.Insert(&Team{LeagueID: 1, Name: "Second Team", LocationID: sql.NullInt32{Int32: int32(locationID), Valid: true}}); err != nil {

@@ -77,30 +77,6 @@ func (m *SeasonModel) Delete(id int) error {
 	return nil
 }
 
-// GetMostRecentWithResults returns leagueID's most recently started season
-// that has at least one scored match — used to pick which season's
-// standings/leaders the league home page shows. ErrNoRecord if no season in
-// the league has any recorded result yet.
-func (m *SeasonModel) GetMostRecentWithResults(leagueID int) (*Season, error) {
-	stmt := `SELECT s.id, s.leagueID, s.name, s.startDate, s.endDate, s.created
-		FROM seasons s
-		JOIN matches m ON m.seasonID = s.id
-		WHERE s.leagueID = ? AND m.homeScore IS NOT NULL AND m.awayScore IS NOT NULL
-		GROUP BY s.id, s.leagueID, s.name, s.startDate, s.endDate, s.created
-		ORDER BY s.startDate DESC, s.created DESC
-		LIMIT 1`
-
-	season := &Season{}
-	err := m.DB.QueryRow(stmt, leagueID).Scan(&season.ID, &season.LeagueID, &season.Name, &season.StartDate, &season.EndDate, &season.Created)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNoRecord
-		}
-		return nil, err
-	}
-	return season, nil
-}
-
 // GetByLeague returns every season in leagueID, most recently started first.
 func (m *SeasonModel) GetByLeague(leagueID int) ([]*Season, error) {
 	stmt := `SELECT id, leagueID, name, startDate, endDate, created FROM seasons WHERE leagueID = ? ORDER BY startDate DESC, created DESC`

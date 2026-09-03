@@ -171,7 +171,7 @@ func TestDeleteLocationWithDependentsFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := tm.Update(&Team{ID: 1, LeagueID: 1, Name: "Test Team", LocationID: sql.NullInt32{Int32: int32(id), Valid: true}}); err != nil {
+	if err := tm.Update(&Team{ID: 1, LeagueID: 1, Name: "Test Team", LocationID: sql.NullInt32{Int32: int32(id), Valid: true}, RemindersEnabled: true, ReminderDaysOut: 3, ReminderTime: "09:00:00"}); err != nil {
 		t.Fatal(err)
 	}
 

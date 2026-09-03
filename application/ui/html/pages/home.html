@@ -4,12 +4,18 @@
 <div class="text-center py-8">
     <h2>Welcome to Blame the Ball</h2>
     {{if .IsActive}}
-        {{if .Data.IsCaptainOfAnyTeam}}
+        {{if .Data.ShowCaptainGuideBanner}}
         <div class="max-w-3xl mx-auto px-4">
-            <a href="/captains" class="block no-underline bg-orange-50 border border-orange-200 hover:border-orange-500 rounded-xl px-5 py-3 mb-2 text-center transition">
-                <span class="font-semibold text-orange-700">New captains start here!</span>
-                <span class="text-sm text-gray-600 block sm:inline sm:ml-2">See everything you can do as team captain &rarr;</span>
-            </a>
+            <div class="relative bg-orange-50 border border-orange-200 hover:border-orange-500 rounded-xl px-5 py-3 mb-2 transition">
+                <a href="/captains" class="block no-underline text-center pr-6">
+                    <span class="font-semibold text-orange-700">New captains start here!</span>
+                    <span class="text-sm text-gray-600 block sm:inline sm:ml-2">See everything you can do as team captain &rarr;</span>
+                </a>
+                <form action="/captains/dismiss" method="POST" class="absolute top-1.5 right-2">
+                    <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                    <button type="submit" class="text-gray-400 hover:text-gray-600 text-lg leading-none" aria-label="Dismiss" title="Don't show this again">&times;</button>
+                </form>
+            </div>
         </div>
         {{end}}
         {{if or .Data.Leagues .Data.Teams .IsAdmin}}

@@ -178,3 +178,72 @@ func TestTopScorersAndAssistersForSeason(t *testing.T) {
 		t.Fatalf("expected limit to cap results at 1, got %d", len(limited))
 	}
 }
+
+// SeasonTotalsByPlayer backs the season-by-season half of a player's
+// career stats — it must aggregate within each season separately (not
+// combine everything into one total) and reach across every team they've
+// ever played for, not just their current one.
+func TestSeasonTotalsByPlayer(t *testing.T) {
+	db := NewTestDB(t)
+
+	seasonID := newTestSeason(t, db, 1)
+	laterSeasonID := newTestSeason(t, db, 1)
+	opponentID := newTestOpponentTeam(t, db, 1, "Rival FC")
+	newTeamID := newTestOpponentTeam(t, db, 1, "New Team FC")
+	mm := MatchModel{DB: db}
+	pm := PlayerModel{DB: db}
+	pmsm := PlayerMatchStatModel{DB: db}
+
+	playerID, err := pm.Insert(&Player{FirstName: "Journeyman", LastName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Two matches in the earlier season, on the original team (id 1)...
+	matchOneID, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pmsm.Upsert(&PlayerMatchStat{MatchID: matchOneID, PlayerID: playerID, TeamID: 1, Goals: 2}); err != nil {
+		t.Fatal(err)
+	}
+	matchOneBID, err := mm.Insert(&Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pmsm.Upsert(&PlayerMatchStat{MatchID: matchOneBID, PlayerID: playerID, TeamID: 1, Goals: 1, YellowCards: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	// ...then one match in a later season, after transferring to a new team.
+	matchTwoID, err := mm.Insert(&Match{SeasonID: laterSeasonID, HomeTeamID: newTeamID, AwayTeamID: opponentID, MatchDate: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pmsm.Upsert(&PlayerMatchStat{MatchID: matchTwoID, PlayerID: playerID, TeamID: newTeamID, Assists: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A different player's stats on the same matches must not leak in.
+	otherPlayerID, err := pm.Insert(&Player{FirstName: "Other", LastName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pmsm.Upsert(&PlayerMatchStat{MatchID: matchOneID, PlayerID: otherPlayerID, TeamID: 1, Goals: 5}); err != nil {
+		t.Fatal(err)
+	}
+
+	totals, err := pmsm.SeasonTotalsByPlayer(playerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(totals) != 2 {
+		t.Fatalf("expected totals for 2 seasons, got %d: %+v", len(totals), totals)
+	}
+	if totals[seasonID].Goals != 3 || totals[seasonID].YellowCards != 1 {
+		t.Fatalf("expected the earlier season's 2 matches combined (goals=3, yc=1), got %+v", totals[seasonID])
+	}
+	if totals[laterSeasonID].Assists != 1 {
+		t.Fatalf("expected the later season's assists=1, got %+v", totals[laterSeasonID])
+	}
+}

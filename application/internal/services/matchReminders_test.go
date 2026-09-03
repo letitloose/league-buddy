@@ -29,7 +29,11 @@ func TestSendDueRSVPRemindersOnlyEmailsNonResponders(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	asOf := time.Now()
+	// Fixed, DST-uneventful, safely-after-any-default-ReminderTime moment —
+	// SendDueRSVPReminders now gates on each team's own ReminderTime
+	// (default 9am Eastern), so a bare time.Now() would make these tests
+	// flaky depending on what time of day they happen to run.
+	asOf := time.Date(2024, 7, 1, 12, 0, 0, 0, easternLocation)
 	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: dateNDaysOut(asOf, 3)})
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +134,11 @@ func TestSendDueRSVPRemindersRespectsChannelPreference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	asOf := time.Now()
+	// Fixed, DST-uneventful, safely-after-any-default-ReminderTime moment —
+	// SendDueRSVPReminders now gates on each team's own ReminderTime
+	// (default 9am Eastern), so a bare time.Now() would make these tests
+	// flaky depending on what time of day they happen to run.
+	asOf := time.Date(2024, 7, 1, 12, 0, 0, 0, easternLocation)
 	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: dateNDaysOut(asOf, 3)})
 	if err != nil {
 		t.Fatal(err)
@@ -334,8 +342,12 @@ func TestSendDueRSVPRemindersSkipsMatchesOutsideTheSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	asOf := time.Now()
-	// 4 days out isn't part of the RSVP schedule (3/2/1 only).
+	// Fixed, DST-uneventful, safely-after-any-default-ReminderTime moment —
+	// SendDueRSVPReminders now gates on each team's own ReminderTime
+	// (default 9am Eastern), so a bare time.Now() would make these tests
+	// flaky depending on what time of day they happen to run.
+	asOf := time.Date(2024, 7, 1, 12, 0, 0, 0, easternLocation)
+	// 4 days out exceeds team 1's default ReminderDaysOut of 3.
 	if _, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: dateNDaysOut(asOf, 4)}); err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +364,199 @@ func TestSendDueRSVPRemindersSkipsMatchesOutsideTheSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 	if sent != 0 {
-		t.Fatalf("expected 0 reminders for a match outside the 3/2/1-day schedule, got %d", sent)
+		t.Fatalf("expected 0 reminders for a match beyond the team's configured reminder cascade, got %d", sent)
+	}
+}
+
+// A team can opt out of RSVP reminders entirely via
+// models.Team.RemindersEnabled (set on the team's edit page) — proves the
+// opt-out actually suppresses a reminder that would otherwise be due.
+func TestSendDueRSVPRemindersRespectsPerTeamOptOut(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	seasons := &models.SeasonModel{DB: db}
+	teams := &models.TeamModel{DB: db}
+	mm := &models.MatchModel{DB: db}
+	pm := &models.PlayerModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+	mrrm := &models.MatchRSVPReminderModel{DB: db}
+	reminderService := MatchReminderService{DB: db}
+
+	team, err := teams.Get(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	team.RemindersEnabled = false
+	if err := teams.Update(team); err != nil {
+		t.Fatal(err)
+	}
+
+	seasonID, err := seasons.Insert(&models.Season{LeagueID: 1, Name: "Spring 2024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := teams.Insert(&models.Team{LeagueID: 1, Name: "Rival FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	asOf := time.Date(2024, 7, 1, 12, 0, 0, 0, easternLocation)
+	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: dateNDaysOut(asOf, 3)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playerID, err := pm.Insert(&models.Player{FirstName: "Some", LastName: "Player", Email: sql.NullString{String: "player@example.com", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	sent, err := reminderService.SendDueRSVPReminders(asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent != 0 {
+		t.Fatalf("expected 0 reminders for an opted-out team, got %d", sent)
+	}
+	wasSent, err := mrrm.WasSent(matchID, playerID, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wasSent {
+		t.Fatal("expected the opted-out team's player to never be marked reminded")
+	}
+}
+
+// A team's ReminderDaysOut shortens or lengthens the cascade — proves a
+// team configured for 1 day out doesn't get reminded 3 days out (the old
+// global default), while a match 1 day out for that same team still goes
+// through.
+func TestSendDueRSVPRemindersRespectsPerTeamDaysOut(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	seasons := &models.SeasonModel{DB: db}
+	teams := &models.TeamModel{DB: db}
+	mm := &models.MatchModel{DB: db}
+	pm := &models.PlayerModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+	mrrm := &models.MatchRSVPReminderModel{DB: db}
+	reminderService := MatchReminderService{DB: db}
+
+	team, err := teams.Get(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	team.ReminderDaysOut = 1
+	if err := teams.Update(team); err != nil {
+		t.Fatal(err)
+	}
+
+	seasonID, err := seasons.Insert(&models.Season{LeagueID: 1, Name: "Spring 2024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := teams.Insert(&models.Team{LeagueID: 1, Name: "Rival FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	asOf := time.Date(2024, 7, 1, 12, 0, 0, 0, easternLocation)
+	tooEarlyMatchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: dateNDaysOut(asOf, 3)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dueMatchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: dateNDaysOut(asOf, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playerID, err := pm.Insert(&models.Player{FirstName: "Some", LastName: "Player", Email: sql.NullString{String: "player@example.com", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	sent, err := reminderService.SendDueRSVPReminders(asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent != 1 {
+		t.Fatalf("expected exactly 1 reminder (the 1-day-out match only), got %d", sent)
+	}
+	if wasSent, _ := mrrm.WasSent(tooEarlyMatchID, playerID, 3); wasSent {
+		t.Fatal("expected the 3-day-out match to be skipped — beyond the team's configured 1-day cascade")
+	}
+	if wasSent, _ := mrrm.WasSent(dueMatchID, playerID, 1); !wasSent {
+		t.Fatal("expected the 1-day-out match to be reminded")
+	}
+}
+
+// A team's ReminderTime gates *when* today a due reminder actually goes
+// out — proves a team configured for a later time isn't reminded before
+// that time, but is once asOf reaches it.
+func TestSendDueRSVPRemindersRespectsPerTeamReminderTime(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	seasons := &models.SeasonModel{DB: db}
+	teams := &models.TeamModel{DB: db}
+	mm := &models.MatchModel{DB: db}
+	pm := &models.PlayerModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+	mrrm := &models.MatchRSVPReminderModel{DB: db}
+	reminderService := MatchReminderService{DB: db}
+
+	team, err := teams.Get(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	team.ReminderTime = "17:00:00"
+	if err := teams.Update(team); err != nil {
+		t.Fatal(err)
+	}
+
+	seasonID, err := seasons.Insert(&models.Season{LeagueID: 1, Name: "Spring 2024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := teams.Insert(&models.Team{LeagueID: 1, Name: "Rival FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	before := time.Date(2024, 7, 1, 12, 0, 0, 0, easternLocation)
+	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: dateNDaysOut(before, 3)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playerID, err := pm.Insert(&models.Player{FirstName: "Some", LastName: "Player", Email: sql.NullString{String: "player@example.com", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	sentBefore, err := reminderService.SendDueRSVPReminders(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sentBefore != 0 {
+		t.Fatalf("expected 0 reminders before the team's configured 5pm reminder time, got %d", sentBefore)
+	}
+
+	after := time.Date(2024, 7, 1, 17, 30, 0, 0, easternLocation)
+	sentAfter, err := reminderService.SendDueRSVPReminders(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sentAfter != 1 {
+		t.Fatalf("expected 1 reminder once asOf reaches the team's configured time, got %d", sentAfter)
+	}
+	if wasSent, _ := mrrm.WasSent(matchID, playerID, 3); !wasSent {
+		t.Fatal("expected the match to be marked reminded once sent")
 	}
 }
 
@@ -377,7 +581,11 @@ func TestSendDueCaptainMessageReminders(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	asOf := time.Now()
+	// Fixed, DST-uneventful, safely-after-any-default-ReminderTime moment —
+	// SendDueRSVPReminders now gates on each team's own ReminderTime
+	// (default 9am Eastern), so a bare time.Now() would make these tests
+	// flaky depending on what time of day they happen to run.
+	asOf := time.Date(2024, 7, 1, 12, 0, 0, 0, easternLocation)
 	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: dateNDaysOut(asOf, captainMessageDaysOut)})
 	if err != nil {
 		t.Fatal(err)
@@ -448,7 +656,11 @@ func TestSendDueCaptainMessageRemindersSkipsWhenMessageAlreadySet(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	asOf := time.Now()
+	// Fixed, DST-uneventful, safely-after-any-default-ReminderTime moment —
+	// SendDueRSVPReminders now gates on each team's own ReminderTime
+	// (default 9am Eastern), so a bare time.Now() would make these tests
+	// flaky depending on what time of day they happen to run.
+	asOf := time.Date(2024, 7, 1, 12, 0, 0, 0, easternLocation)
 	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: dateNDaysOut(asOf, captainMessageDaysOut)})
 	if err != nil {
 		t.Fatal(err)
@@ -475,6 +687,62 @@ func TestSendDueCaptainMessageRemindersSkipsWhenMessageAlreadySet(t *testing.T) 
 	}
 	if sent != 0 {
 		t.Fatalf("expected 0 reminders when the captain's message is already set, got %d", sent)
+	}
+}
+
+// A team that's opted out of RSVP reminders altogether (RemindersEnabled
+// false) shouldn't get nudged to write a message for reminders that will
+// never go out.
+func TestSendDueCaptainMessageRemindersSkipsWhenTeamOptedOut(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	seasons := &models.SeasonModel{DB: db}
+	teams := &models.TeamModel{DB: db}
+	mm := &models.MatchModel{DB: db}
+	pm := &models.PlayerModel{DB: db}
+	tmm := &models.TeamMemberModel{DB: db}
+	reminderService := MatchReminderService{DB: db}
+
+	team, err := teams.Get(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	team.RemindersEnabled = false
+	if err := teams.Update(team); err != nil {
+		t.Fatal(err)
+	}
+
+	seasonID, err := seasons.Insert(&models.Season{LeagueID: 1, Name: "Spring 2024"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := teams.Insert(&models.Team{LeagueID: 1, Name: "Rival FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	asOf := time.Date(2024, 7, 1, 12, 0, 0, 0, easternLocation)
+	if _, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: 1, AwayTeamID: opponentID, MatchDate: dateNDaysOut(asOf, captainMessageDaysOut)}); err != nil {
+		t.Fatal(err)
+	}
+
+	captainID, err := pm.Insert(&models.Player{FirstName: "Cap", LastName: "Tain", Email: sql.NullString{String: "captain@example.com", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(captainID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := teams.SetCaptain(1, sql.NullInt32{Int32: int32(captainID), Valid: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	sent, err := reminderService.SendDueCaptainMessageReminders(asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent != 0 {
+		t.Fatalf("expected 0 reminders for an opted-out team, got %d", sent)
 	}
 }
 

@@ -59,6 +59,16 @@ func pickerDate(t time.Time) string {
 	return t.Format("2006-01-02")
 }
 
+// reminderTimePickerValue trims a team's stored "15:04:05" ReminderTime
+// (MySQL TIME's round-trip format) down to the "15:04" an <input
+// type=time> value expects.
+func reminderTimePickerValue(dbTime string) string {
+	if len(dbTime) < 5 {
+		return "09:00"
+	}
+	return dbTime[:5]
+}
+
 // hasMatchTime reports whether t carries a real kickoff time, as opposed
 // to the "no time recorded" sentinel: exactly midnight in whatever zone
 // the value was actually stored in (UTC, both for a fresh DB read and for
@@ -183,6 +193,9 @@ func cardRowData(root, row any) templateRowWrapper { return templateRowWrapper{R
 func teamNoteSideData(root, row any) templateRowWrapper {
 	return templateRowWrapper{Root: root, Row: row}
 }
+func matchAttendanceSideData(root, row any) templateRowWrapper {
+	return templateRowWrapper{Root: root, Row: row}
+}
 
 // mapsURL builds a Google Maps search link for an address — no API key
 // needed, just the documented search-by-query URL scheme.
@@ -215,17 +228,18 @@ func mapsURL(a *models.Address) string {
 }
 
 var functions = template.FuncMap{
-	"pickerDate":         pickerDate,
-	"humanDate":          humanDate,
-	"humanDateShort":     humanDateShort,
-	"humanDateTime":      humanDateTime,
-	"matchDateTime":      matchDateTime,
-	"matchDateTimeShort": matchDateTimeShort,
-	"matchKickoffTime":   matchKickoffTime,
-	"mapsURL":            mapsURL,
-	"goalRowData":        goalRowData,
-	"cardRowData":        cardRowData,
-	"teamNoteSideData":   teamNoteSideData,
+	"pickerDate":              pickerDate,
+	"humanDate":               humanDate,
+	"humanDateShort":          humanDateShort,
+	"humanDateTime":           humanDateTime,
+	"matchDateTime":           matchDateTime,
+	"matchDateTimeShort":      matchDateTimeShort,
+	"matchKickoffTime":        matchKickoffTime,
+	"mapsURL":                 mapsURL,
+	"goalRowData":             goalRowData,
+	"cardRowData":             cardRowData,
+	"teamNoteSideData":        teamNoteSideData,
+	"matchAttendanceSideData": matchAttendanceSideData,
 }
 
 func newTemplateCache() (map[string]*template.Template, error) {

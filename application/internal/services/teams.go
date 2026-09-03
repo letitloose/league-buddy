@@ -18,6 +18,14 @@ type TeamForm struct {
 	EstablishedDate string // "2006-01-02" from <input type=date>
 	LocationID      int    // 0 = no home field set
 
+	// RemindersEnabled/ReminderDaysOut/ReminderTime — see models.Team's
+	// doc comment. ReminderTime is "15:04" from <input type=time>, unlike
+	// the model's "15:04:05" (MySQL TIME's round-trip format) — converted
+	// between the two in UpdateTeam/teamUpdate.
+	RemindersEnabled bool
+	ReminderDaysOut  int
+	ReminderTime     string
+
 	// New-location fields: redisplay-only on this form (validated and
 	// resolved to a LocationID separately, in the web layer, via
 	// LocationService.CreateLocation) — set here just so a failed
@@ -87,6 +95,9 @@ func (service *TeamService) UpdateTeam(form *TeamForm, actorEmail string) error 
 	if form.LeagueID <= 0 {
 		form.AddFieldError("leagueID", "You must choose a league.")
 	}
+	form.CheckField(form.ReminderDaysOut >= 1 && form.ReminderDaysOut <= 14, "reminderDaysOut", "Enter a number of days between 1 and 14.")
+	reminderTime, err := time.Parse("15:04", form.ReminderTime)
+	form.CheckField(err == nil, "reminderTime", "Enter a valid time.")
 
 	if !form.Valid() {
 		return models.ErrBadData
@@ -104,13 +115,16 @@ func (service *TeamService) UpdateTeam(form *TeamForm, actorEmail string) error 
 		}
 	}
 
-	err := service.Update(&models.Team{
-		ID:              form.ID,
-		LeagueID:        form.LeagueID,
-		Name:            form.Name,
-		Motto:           sql.NullString{String: form.Motto, Valid: form.Motto != ""},
-		EstablishedDate: parseOptionalDate(form.EstablishedDate),
-		LocationID:      sql.NullInt32{Int32: int32(form.LocationID), Valid: form.LocationID > 0},
+	err = service.Update(&models.Team{
+		ID:               form.ID,
+		LeagueID:         form.LeagueID,
+		Name:             form.Name,
+		Motto:            sql.NullString{String: form.Motto, Valid: form.Motto != ""},
+		EstablishedDate:  parseOptionalDate(form.EstablishedDate),
+		LocationID:       sql.NullInt32{Int32: int32(form.LocationID), Valid: form.LocationID > 0},
+		RemindersEnabled: form.RemindersEnabled,
+		ReminderDaysOut:  form.ReminderDaysOut,
+		ReminderTime:     reminderTime.Format("15:04:05"),
 	})
 	if err != nil {
 		return err
@@ -212,4 +226,44 @@ func (service *TeamService) RemoveScorekeeper(teamID, playerID int, actorEmail s
 
 	cs := &CommonService{DB: service.DB}
 	return cs.InsertAuditLog(actorEmail, time.Now(), fmt.Sprintf("scorekeeper removed: %s %s (team %d)", player.FirstName, player.LastName, teamID))
+}
+
+// SetPlayerLegendStatus moves playerID between teamID's active roster and
+// its Legends list (see models.TeamMemberModel.SetLegendStatus). The
+// target player must already be a member of that team. Moving someone to
+// Legends also revokes their scorekeeper designation, if they had one —
+// match-day editing rights don't make sense for a player who's just been
+// taken off the active roster.
+func (service *TeamService) SetPlayerLegendStatus(teamID, playerID int, isLegend bool, actorEmail string) error {
+	pm := &models.PlayerModel{DB: service.DB}
+	player, err := pm.Get(playerID)
+	if err != nil {
+		return err
+	}
+
+	tmm := &models.TeamMemberModel{DB: service.DB}
+	isMember, err := tmm.IsMember(playerID, teamID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
+		return models.ErrBadData
+	}
+
+	if err := tmm.SetLegendStatus(playerID, teamID, isLegend); err != nil {
+		return err
+	}
+
+	verb := "moved to Legends"
+	if isLegend {
+		tsm := &models.TeamScorekeeperModel{DB: service.DB}
+		if err := tsm.RemoveScorekeeper(playerID, teamID); err != nil {
+			return err
+		}
+	} else {
+		verb = "reactivated from Legends"
+	}
+
+	cs := &CommonService{DB: service.DB}
+	return cs.InsertAuditLog(actorEmail, time.Now(), fmt.Sprintf("player %s: %s %s (team %d)", verb, player.FirstName, player.LastName, teamID))
 }

@@ -38,10 +38,14 @@ type homeLeagueCard struct {
 // whether to show the system-admin-only quick links. A player who is both a
 // league admin and a team member sees both sections.
 type homeData struct {
-	Leagues            []*homeLeagueCard
-	Teams              []*homeTeamCard
-	HasUpcomingMatch   bool
-	IsCaptainOfAnyTeam bool
+	Leagues          []*homeLeagueCard
+	Teams            []*homeTeamCard
+	HasUpcomingMatch bool
+	// ShowCaptainGuideBanner is true for a team captain who hasn't
+	// dismissed the banner (see PlayerModel.DismissCaptainGuideBanner) —
+	// a non-captain never sees it, and a captain who dismisses it never
+	// sees it again regardless of role.
+	ShowCaptainGuideBanner bool
 	// UpcomingMatchTeamCount is how many of Teams actually have a
 	// NextMatch — the Upcoming Matches table only shows which of the
 	// player's teams a row belongs to when this is more than 1, since a
@@ -66,6 +70,22 @@ func (app *application) captainGuide(w http.ResponseWriter, r *http.Request) {
 	app.render(w, http.StatusOK, "captain-guide.html", app.newTemplateData(r))
 }
 
+// captainGuideBannerDismiss permanently hides the home page's captain
+// guide banner for the current player — no confirmation, since it's
+// trivially reversible by nobody (there's no "undo": the guide itself
+// stays linked from the captain guide page for anyone who wants it back).
+func (app *application) captainGuideBannerDismiss(w http.ResponseWriter, r *http.Request) {
+	playerID := app.getPlayerID(r)
+	if playerID > 0 {
+		pm := &models.PlayerModel{DB: app.playerService.DB}
+		if err := pm.DismissCaptainGuideBanner(playerID); err != nil {
+			app.serverError(w, err)
+			return
+		}
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
 func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		app.notFound(w)
@@ -75,7 +95,17 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	data := app.newTemplateData(r)
 
 	if app.isActive(r) {
-		hd := &homeData{IsCaptainOfAnyTeam: app.isCaptainOfAnyTeam(r)}
+		hd := &homeData{}
+
+		if app.isCaptainOfAnyTeam(r) {
+			pm := &models.PlayerModel{DB: app.playerService.DB}
+			dismissed, err := pm.HasDismissedCaptainGuideBanner(app.getPlayerID(r))
+			if err != nil {
+				app.serverError(w, err)
+				return
+			}
+			hd.ShowCaptainGuideBanner = !dismissed
+		}
 
 		for _, teamID := range app.getTeamIDs(r) {
 			card, err := app.buildHomeTeamCard(teamID)

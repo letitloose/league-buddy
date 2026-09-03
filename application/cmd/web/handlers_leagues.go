@@ -34,18 +34,19 @@ func (app *application) leagueList(w http.ResponseWriter, r *http.Request) {
 // panel where CanManage of the admin themselves does not — Admins is only
 // populated for system admins, who alone can assign/revoke league admins.
 type leagueViewData struct {
-	League           *models.League
-	Teams            []*models.Team
-	CanManage        bool
-	Admins           []*models.Player
-	Seasons          []*models.Season
-	ActiveTab        string
-	StandingsSeason  *models.Season
+	League    *models.League
+	Teams     []*models.Team
+	CanManage bool
+	Admins    []*models.Player
+	Seasons   []*models.Season
+	ActiveTab string
+	// CurrentSeason is the one season standings, its leader tables, and
+	// the Matches tab all show — see leagueView's currentSeason comment.
+	CurrentSeason    *models.Season
 	Standings        []*standingRow
 	StandingsColumns []standingsColumn
 	GoalLeaders      []*models.LeagueLeaderLine
 	AssistLeaders    []*models.LeagueLeaderLine
-	MatchesSeason    *models.Season
 	MatchDays        []*matchDayGroup
 }
 
@@ -179,8 +180,12 @@ func sortStandings(rows []*standingRow, sortKey, dir string) {
 
 // buildStandingsColumns builds the six sortable column headers — clicking
 // an inactive column sorts by it descending; clicking the already-active
-// column toggles direction.
-func buildStandingsColumns(leagueID int, currentSort, currentDir string) []standingsColumn {
+// column toggles direction. basePath is the page these standings live on
+// (e.g. "/league/5" or "/season/12") — always followed by &tab=standings
+// so a sort click on a page whose Matches tab defaults first (the season
+// page) doesn't inadvertently switch tabs on reload; harmless on the
+// league page, where standings is already the default tab.
+func buildStandingsColumns(basePath string, currentSort, currentDir string) []standingsColumn {
 	defs := []struct{ Label, Key string }{
 		{"Pts", "points"},
 		{"W", "wins"},
@@ -200,7 +205,7 @@ func buildStandingsColumns(leagueID int, currentSort, currentDir string) []stand
 		cols[i] = standingsColumn{
 			Label:  d.Label,
 			Key:    d.Key,
-			URL:    fmt.Sprintf("/league/%d?sort=%s&dir=%s", leagueID, d.Key, nextDir),
+			URL:    fmt.Sprintf("%s?sort=%s&dir=%s&tab=standings", basePath, d.Key, nextDir),
 			Active: active,
 		}
 	}
@@ -260,17 +265,25 @@ func (app *application) leagueView(w http.ResponseWriter, r *http.Request) {
 		dir = "desc"
 	}
 
-	var standingsSeason *models.Season
+	// currentSeason is shared by both tabs — standings, its leader tables,
+	// and the Matches tab all show the same season, picked the same
+	// date-based way (GetCurrentOrNext) the team page already uses for its
+	// own schedule/leaderboard. A newly created season is "current" (and
+	// shows zeroed standings/leaders) the moment it exists, rather than
+	// the page lingering on a previous season until the new one has
+	// recorded results — that staleness, and standings/Matches disagreeing
+	// with each other about which season was "current," were both bugs.
+	var currentSeason *models.Season
 	var standings []*standingRow
 	var goalLeaders, assistLeaders []*models.LeagueLeaderLine
 
-	standingsSeason, err = sm.GetMostRecentWithResults(id)
+	currentSeason, err = sm.GetCurrentOrNext(id, time.Now())
 	if err != nil && !errors.Is(err, models.ErrNoRecord) {
 		app.serverError(w, err)
 		return
 	}
-	if standingsSeason != nil {
-		standings, err = buildStandings(app.playerService.DB, teams, standingsSeason.ID)
+	if currentSeason != nil {
+		standings, err = buildStandings(app.playerService.DB, teams, currentSeason.ID)
 		if err != nil {
 			app.serverError(w, err)
 			return
@@ -278,12 +291,12 @@ func (app *application) leagueView(w http.ResponseWriter, r *http.Request) {
 		sortStandings(standings, sortKey, dir)
 
 		pmsm := &models.PlayerMatchStatModel{DB: app.playerService.DB}
-		goalLeaders, err = pmsm.TopScorersForSeason(standingsSeason.ID, 5)
+		goalLeaders, err = pmsm.TopScorersForSeason(currentSeason.ID, 5)
 		if err != nil {
 			app.serverError(w, err)
 			return
 		}
-		assistLeaders, err = pmsm.TopAssistersForSeason(standingsSeason.ID, 5)
+		assistLeaders, err = pmsm.TopAssistersForSeason(currentSeason.ID, 5)
 		if err != nil {
 			app.serverError(w, err)
 			return
@@ -295,28 +308,20 @@ func (app *application) leagueView(w http.ResponseWriter, r *http.Request) {
 		activeTab = "standings"
 	}
 
-	var matchesSeason *models.Season
 	var matchDays []*matchDayGroup
-	if activeTab == "matches" {
-		matchesSeason, err = sm.GetCurrentOrNext(id, time.Now())
-		if err != nil && !errors.Is(err, models.ErrNoRecord) {
+	if activeTab == "matches" && currentSeason != nil {
+		mm := &models.MatchModel{DB: app.playerService.DB}
+		matches, err := mm.GetBySeason(currentSeason.ID)
+		if err != nil {
 			app.serverError(w, err)
 			return
 		}
-		if matchesSeason != nil {
-			mm := &models.MatchModel{DB: app.playerService.DB}
-			matches, err := mm.GetBySeason(matchesSeason.ID)
-			if err != nil {
-				app.serverError(w, err)
-				return
-			}
-			rows, err := app.buildSeasonMatchRows(matches)
-			if err != nil {
-				app.serverError(w, err)
-				return
-			}
-			matchDays = groupMatchesByDay(rows)
+		rows, err := app.buildSeasonMatchRows(matches)
+		if err != nil {
+			app.serverError(w, err)
+			return
 		}
+		matchDays = groupMatchesByDay(rows)
 	}
 
 	data := app.newTemplateData(r)
@@ -327,12 +332,11 @@ func (app *application) leagueView(w http.ResponseWriter, r *http.Request) {
 		Admins:           admins,
 		Seasons:          seasons,
 		ActiveTab:        activeTab,
-		StandingsSeason:  standingsSeason,
+		CurrentSeason:    currentSeason,
 		Standings:        standings,
-		StandingsColumns: buildStandingsColumns(id, sortKey, dir),
+		StandingsColumns: buildStandingsColumns(fmt.Sprintf("/league/%d", id), sortKey, dir),
 		GoalLeaders:      goalLeaders,
 		AssistLeaders:    assistLeaders,
-		MatchesSeason:    matchesSeason,
 		MatchDays:        matchDays,
 	}
 	data.Breadcrumbs = []Breadcrumb{

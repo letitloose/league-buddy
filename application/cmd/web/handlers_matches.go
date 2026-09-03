@@ -421,8 +421,32 @@ type matchViewData struct {
 	AwayRSVPsOut    []*rsvpDisplayRow
 	HomeNote        *matchTeamNoteView
 	AwayNote        *matchTeamNoteView
+	HomeAttendance  *matchTeamAttendanceView
+	AwayAttendance  *matchTeamAttendanceView
 	ShowHomeBox     bool
 	ShowAwayBox     bool
+}
+
+// matchAttendanceRow is one roster player's resolved attendance for the
+// match view's attendance section. Attended is the resolved value — an
+// explicit models.MatchAttendance override if one exists, else RSVP "yes".
+// Overridden flags which one, so the template can show "captain-confirmed"
+// vs. "still following their RSVP."
+type matchAttendanceRow struct {
+	PlayerID   int
+	PlayerName string
+	Attended   bool
+	Overridden bool
+}
+
+// matchTeamAttendanceView is one team's attendance section — only built
+// (and only ever shown) once matchIsPast, since attendance isn't
+// meaningful until the match has actually happened.
+type matchTeamAttendanceView struct {
+	TeamID        int
+	CanManage     bool
+	Rows          []*matchAttendanceRow
+	AttendedCount int
 }
 
 // buildRSVPRows returns a row for every roster player who RSVP'd status
@@ -454,6 +478,15 @@ func matchIsPast(match *models.Match) bool {
 	now := time.Now().In(match.MatchDate.Location())
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, match.MatchDate.Location())
 	return match.MatchDate.Before(today)
+}
+
+// startOfTodayEastern returns midnight Eastern today — passed as the
+// as-of cutoff to MatchesPlayedByTeamSeason so a match happening later
+// today doesn't count toward MP until its calendar day has fully passed,
+// matching matchIsPast's day-granularity semantics.
+func startOfTodayEastern() time.Time {
+	now := time.Now().In(easternLocation)
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, easternLocation)
 }
 
 // buildMatchViewData assembles everything match-view.html needs. Split out
@@ -689,6 +722,42 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 		return nil, err
 	}
 
+	var homeAttendance, awayAttendance *matchTeamAttendanceView
+	if isPast {
+		mam := &models.MatchAttendanceModel{DB: app.playerService.DB}
+		overrides, err := mam.ListByMatch(match.ID)
+		if err != nil {
+			return nil, err
+		}
+		overrideByPlayer := make(map[int]*models.MatchAttendance, len(overrides))
+		for _, o := range overrides {
+			overrideByPlayer[o.PlayerID] = o
+		}
+		buildAttendanceView := func(teamID int, roster []*models.Player, canManageSide bool) *matchTeamAttendanceView {
+			view := &matchTeamAttendanceView{TeamID: teamID, CanManage: canManageSide}
+			for _, player := range roster {
+				attended := false
+				overridden := false
+				if override, ok := overrideByPlayer[player.ID]; ok {
+					attended = override.Attended
+					overridden = true
+				} else if rsvp, ok := rsvpsByPlayer[player.ID]; ok {
+					attended = rsvp.Status == "yes"
+				}
+				view.Rows = append(view.Rows, &matchAttendanceRow{
+					PlayerID: player.ID, PlayerName: player.FirstName + " " + player.LastName,
+					Attended: attended, Overridden: overridden,
+				})
+				if attended {
+					view.AttendedCount++
+				}
+			}
+			return view
+		}
+		homeAttendance = buildAttendanceView(match.HomeTeamID, homeRoster, app.canManageAttendanceSide(r, match.HomeTeamID) && !suppressHomeControls)
+		awayAttendance = buildAttendanceView(match.AwayTeamID, awayRoster, app.canManageAttendanceSide(r, match.AwayTeamID) && !suppressAwayControls)
+	}
+
 	return &matchViewData{
 		Match:           match,
 		Season:          season,
@@ -710,6 +779,8 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 		AwayRSVPsOut:    buildRSVPRows(awayRoster, rsvpsByPlayer, "no"),
 		HomeNote:        homeNote,
 		AwayNote:        awayNote,
+		HomeAttendance:  homeAttendance,
+		AwayAttendance:  awayAttendance,
 		ShowHomeBox:     showHomeBox,
 		ShowAwayBox:     showAwayBox,
 	}, nil
@@ -879,6 +950,95 @@ func (app *application) matchTeamNoteSubmit(w http.ResponseWriter, r *http.Reque
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", "Notes saved.")
+	http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
+}
+
+// matchAttendanceSubmit records teamID's roster attendance for a past
+// match — the submitted "attended" checkbox set (one playerID per checked
+// box) is compared against each player's currently *resolved* attendance
+// (an existing override, or their RSVP otherwise); only players whose
+// resolved value actually differs from what was submitted get a new
+// override written. This keeps matchAttendance holding only genuine
+// exceptions — a captain confirming the RSVP-derived roster unchanged
+// writes nothing at all.
+func (app *application) matchAttendanceSubmit(w http.ResponseWriter, r *http.Request) {
+	match, ok := app.getRouteMatch(w, r)
+	if !ok {
+		return
+	}
+
+	if !matchIsPast(match) {
+		http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	teamID, err := strconv.Atoi(r.PostForm.Get("teamID"))
+	if err != nil || (teamID != match.HomeTeamID && teamID != match.AwayTeamID) {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+	if !app.canManageAttendanceSide(r, teamID) {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	roster, err := app.playerService.GetByTeam(teamID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	rm := &models.RSVPModel{DB: app.playerService.DB}
+	rsvps, err := rm.ListByMatch(match.ID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	rsvpYesByPlayer := make(map[int]bool, len(rsvps))
+	for _, rsvp := range rsvps {
+		rsvpYesByPlayer[rsvp.PlayerID] = rsvp.Status == "yes"
+	}
+
+	mam := &models.MatchAttendanceModel{DB: app.playerService.DB}
+	overrides, err := mam.ListByMatch(match.ID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	overrideByPlayer := make(map[int]*models.MatchAttendance, len(overrides))
+	for _, o := range overrides {
+		overrideByPlayer[o.PlayerID] = o
+	}
+
+	checked := map[int]bool{}
+	for _, idStr := range r.PostForm["attended"] {
+		if id, err := strconv.Atoi(idStr); err == nil {
+			checked[id] = true
+		}
+	}
+
+	now := time.Now()
+	for _, player := range roster {
+		resolved := rsvpYesByPlayer[player.ID]
+		if override, ok := overrideByPlayer[player.ID]; ok {
+			resolved = override.Attended
+		}
+		submitted := checked[player.ID]
+		if submitted == resolved {
+			continue
+		}
+		if err := mam.Upsert(&models.MatchAttendance{MatchID: match.ID, PlayerID: player.ID, TeamID: teamID, Attended: submitted, UpdatedAt: now}); err != nil {
+			app.serverError(w, err)
+			return
+		}
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", "Attendance updated.")
 	http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
 }
 

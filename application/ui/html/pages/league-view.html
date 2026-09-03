@@ -24,10 +24,10 @@
 
     {{if eq .Data.ActiveTab "matches"}}
 
-    {{if .Data.MatchesSeason}}
+    {{if .Data.CurrentSeason}}
     <div class="w-full md:w-3/4 px-2 md:px-0">
         <h3 class="text-center mb-1">Matches</h3>
-        <p class="text-center text-sm text-gray-500 mb-4">{{.Data.MatchesSeason.Name}}</p>
+        <p class="text-center text-sm text-gray-500 mb-4">{{.Data.CurrentSeason.Name}}</p>
         {{if .Data.MatchDays}}
         <div class="space-y-6 mb-6">
             {{range .Data.MatchDays}}
@@ -94,10 +94,10 @@
 
     {{else}}
 
-    {{if .Data.StandingsSeason}}
+    {{if .Data.CurrentSeason}}
     <div class="w-full md:w-2/3 px-2 md:px-0">
         <h3 class="text-center mb-1">Standings</h3>
-        <p class="text-center text-sm text-gray-500 mb-3">{{.Data.StandingsSeason.Name}}</p>
+        <p class="text-center text-sm text-gray-500 mb-3">{{.Data.CurrentSeason.Name}}</p>
         <div class="overflow-x-auto">
         <table class="text-left w-full mb-6">
             <tr>

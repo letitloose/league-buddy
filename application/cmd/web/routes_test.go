@@ -220,7 +220,7 @@ func TestCaptainGuidePage(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("want %d; got %d", http.StatusOK, code)
 	}
-	for _, want := range []string{"New Captain's Guide", "Import Roster", "Send Test Reminder"} {
+	for _, want := range []string{"New Captain's Guide", "Import Roster", "Send Test Reminder", "RSVP Reminder Settings", "Attendance", "Legends"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected the captain guide to mention %q", want)
 		}
@@ -231,6 +231,36 @@ func TestCaptainGuidePage(t *testing.T) {
 		_, _, homeBody := ts.get(t, "/")
 		if !strings.Contains(homeBody, `href="/captains"`) {
 			t.Error("expected the home page to link to the captain guide for a team captain")
+		}
+	})
+
+	t.Run("a captain can dismiss the banner and it stays gone", func(t *testing.T) {
+		ts.login(t, "captain-guide-captain@test.com", "validpassword123")
+		_, _, homeBody := ts.get(t, "/")
+		csrfToken := extractCSRFToken(t, homeBody)
+
+		code, headers, _ := ts.postForm(t, "/captains/dismiss", url.Values{
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+
+		_, _, afterBody := ts.get(t, "/")
+		if strings.Contains(afterBody, `href="/captains"`) {
+			t.Error("expected the banner to stay hidden after being dismissed")
+		}
+
+		// Dismissal persists across sessions, not just for the one that
+		// dismissed it.
+		ts2 := newTestServer(t, app.routes())
+		ts2.login(t, "captain-guide-captain@test.com", "validpassword123")
+		_, _, freshSessionBody := ts2.get(t, "/")
+		if strings.Contains(freshSessionBody, `href="/captains"`) {
+			t.Error("expected the dismissal to persist for the player, not just the browser session that dismissed it")
 		}
 	})
 
@@ -528,6 +558,8 @@ func TestCaptainCanAddNewHomeField(t *testing.T) {
 		"newlocationname":     {"Test Field"},
 		"newlocationaddress1": {"5 Test Ln"},
 		"newlocationcity":     {"Troy"},
+		"reminderDaysOut":     {"3"},
+		"reminderTime":        {"09:00"},
 		"csrf_token":          {csrfToken},
 	})
 	if code != http.StatusSeeOther {
@@ -552,6 +584,56 @@ func TestCaptainCanAddNewHomeField(t *testing.T) {
 	}
 	if location.Name != "Test Field" {
 		t.Fatalf("expected location name Test Field, got %s", location.Name)
+	}
+}
+
+// A captain can opt their team out of RSVP reminders and customize the
+// cascade's days-out/time straight from the team edit form.
+func TestCaptainCanConfigureTeamReminderSettings(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Reminder Settings Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, teamID, "captain-reminders@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "captain-reminders@test.com", "validpassword123")
+
+	_, _, body := ts.get(t, fmt.Sprintf("/admin/team/update/%d", teamID))
+	csrfToken := extractCSRFToken(t, body)
+
+	code, headers, _ := ts.postForm(t, "/admin/team/update", url.Values{
+		"team-id":         {fmt.Sprintf("%d", teamID)},
+		"leagueID":        {"1"},
+		"name":            {"Reminder Settings Team"},
+		"reminderDaysOut": {"5"},
+		"reminderTime":    {"18:30"},
+		"csrf_token":      {csrfToken},
+		// remindersEnabled omitted — an unchecked checkbox, opting out.
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d", teamID) {
+		t.Fatalf("want Location %q; got %q", fmt.Sprintf("/team/%d", teamID), loc)
+	}
+
+	team, err := tm.Get(teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if team.RemindersEnabled {
+		t.Error("expected reminders to be disabled")
+	}
+	if team.ReminderDaysOut != 5 {
+		t.Errorf("expected reminderDaysOut 5, got %d", team.ReminderDaysOut)
+	}
+	if team.ReminderTime != "18:30:00" {
+		t.Errorf("expected reminderTime 18:30:00, got %s", team.ReminderTime)
 	}
 }
 
@@ -1708,7 +1790,9 @@ func TestLeagueStandingsSortingAndLeaderTables(t *testing.T) {
 	})
 
 	t.Run("season page shows the same leader tables", func(t *testing.T) {
-		code, _, body := ts.get(t, fmt.Sprintf("/season/%d", seasonID))
+		// Leader tables render on the season page's Standings tab (Matches
+		// is the default) — see season-view.html.
+		code, _, body := ts.get(t, fmt.Sprintf("/season/%d?tab=standings", seasonID))
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
@@ -1783,6 +1867,120 @@ func TestLeagueMatchesTabGroupsByDay(t *testing.T) {
 	}
 	if !strings.Contains(body, "Matches Tab Team A") || !strings.Contains(body, "Matches Tab Team B") || !strings.Contains(body, "Matches Tab Team C") {
 		t.Error("expected all three team names to appear across the two matchday cards")
+	}
+}
+
+// The season page shows its matches the same way the league page's Matches
+// tab does — grouped into matchday cards, not a flat table — and a manager
+// still gets per-match Edit/Delete controls on each card.
+func TestSeasonViewGroupsMatchesByDay(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Season View Cards Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamA, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Season Cards Team A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamB, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Season Cards Team B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Season Cards Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	day := time.Date(2026, 9, 13, 13, 30, 0, 0, time.UTC) // 9:30 AM Eastern (EDT)
+	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamA, AwayTeamID: teamB, MatchDate: day,
+		HomeScore: sql.NullInt32{Int32: 3, Valid: true}, AwayScore: sql.NullInt32{Int32: 2, Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testAdminEmail, testAdminPass)
+
+	code, _, body := ts.get(t, fmt.Sprintf("/season/%d", seasonID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if !strings.Contains(body, "Sunday, September 13, 2026") {
+		t.Error("expected a matchday heading, not a flat table, for the season's matches")
+	}
+	if !strings.Contains(body, "3&ndash;2") {
+		t.Error("expected the match's score to render on its card")
+	}
+	if !strings.Contains(body, "Season Cards Team A") || !strings.Contains(body, "Season Cards Team B") {
+		t.Error("expected both team names to appear on the matchday card")
+	}
+	if !strings.Contains(body, fmt.Sprintf(`href="/admin/match/update/%d"`, matchID)) {
+		t.Error("expected a manager to still get an Edit link on the match card")
+	}
+	if !strings.Contains(body, fmt.Sprintf(`data-delete-url="/admin/match/delete/%d"`, matchID)) {
+		t.Error("expected a manager to still get a Delete control on the match card")
+	}
+}
+
+// The season page's Standings tab shows that specific season's own
+// standings — not "whichever season is current" (the league page's
+// concept) — so a past season's page keeps showing its own final table
+// even once a newer season exists. Matches is the season page's default
+// tab; Standings only renders once selected via ?tab=standings.
+func TestSeasonViewStandingsTab(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Season Standings Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	winnerID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Season Standings Winner FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loserID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Season Standings Loser FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	pastSeasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Season Standings Past Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A newer season exists too — proves the page shows pastSeasonID's own
+	// standings, not whatever the league would currently consider "current".
+	if _, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Season Standings Newer Season"}); err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	if _, err := mm.Insert(&models.Match{
+		SeasonID: pastSeasonID, HomeTeamID: winnerID, AwayTeamID: loserID, MatchDate: time.Now(),
+		HomeScore: sql.NullInt32{Int32: 4, Valid: true}, AwayScore: sql.NullInt32{Int32: 1, Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	code, _, body := ts.get(t, fmt.Sprintf("/season/%d?tab=standings", pastSeasonID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if !strings.Contains(body, "tab-link-active\" href=\"/season/"+fmt.Sprint(pastSeasonID)+"?tab=standings\"") {
+		t.Error("expected the Standings tab link to render as active")
+	}
+	winnerIdx := strings.Index(body, "Season Standings Winner FC")
+	loserIdx := strings.Index(body, "Season Standings Loser FC")
+	if winnerIdx < 0 || loserIdx < 0 || winnerIdx > loserIdx {
+		t.Errorf("expected the 4-1 winner ranked above the loser in this season's standings, got positions %d/%d", winnerIdx, loserIdx)
 	}
 }
 
@@ -2187,8 +2385,8 @@ func TestMatchRSVP(t *testing.T) {
 	mm := &models.MatchModel{DB: testDB}
 	matchID, err := mm.Insert(&models.Match{
 		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now(),
-		// Scored so the team page's GetMostRecentWithResults picks up this
-		// season and renders the schedule table the last subtest checks.
+		// Scored, though that's incidental now — the team page picks its
+		// current season by date (GetCurrentOrNext) regardless of results.
 		HomeScore: sql.NullInt32{Int32: 1, Valid: true}, AwayScore: sql.NullInt32{Int32: 0, Valid: true},
 	})
 	if err != nil {
@@ -2981,6 +3179,136 @@ func TestScorekeeperTier(t *testing.T) {
 	})
 }
 
+// A captain can move a roster member to the team's Legends list and back —
+// moving someone to Legends also clears their scorekeeper designation,
+// since match-day editing rights don't make sense for someone just taken
+// off the active roster. A non-manager can't touch either route.
+func TestTeamLegendStatus(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Legends Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Legends Test FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, teamID, "legends-captain@test.com", "validpassword123")
+	veteranID := setupRosterMember(t, teamID, "legends-veteran@test.com", "validpassword123")
+	setupRosterMember(t, teamID, "legends-bystander@test.com", "validpassword123")
+
+	tsm := &models.TeamScorekeeperModel{DB: testDB}
+	if err := tsm.AddScorekeeper(veteranID, teamID); err != nil {
+		t.Fatal(err)
+	}
+
+	captainTS := newTestServer(t, app.routes())
+	captainTS.login(t, "legends-captain@test.com", "validpassword123")
+
+	t.Run("a bystander cannot move a player to Legends", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "legends-bystander@test.com", "validpassword123")
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/team/%d", teamID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := ts.postForm(t, "/admin/team/legends/add", url.Values{
+			"teamID":     {fmt.Sprintf("%d", teamID)},
+			"playerID":   {fmt.Sprintf("%d", veteranID)},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+	})
+
+	t.Run("captain moves the veteran to Legends, clearing scorekeeper status", func(t *testing.T) {
+		_, _, formBody := captainTS.get(t, fmt.Sprintf("/team/%d", teamID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := captainTS.postForm(t, "/admin/team/legends/add", url.Values{
+			"teamID":     {fmt.Sprintf("%d", teamID)},
+			"playerID":   {fmt.Sprintf("%d", veteranID)},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d?tab=legends", teamID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d?tab=legends", teamID), loc)
+		}
+
+		tsm := &models.TeamScorekeeperModel{DB: testDB}
+		isScorekeeper, err := tsm.IsScorekeeper(veteranID, teamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if isScorekeeper {
+			t.Error("expected moving to Legends to clear scorekeeper status")
+		}
+
+		pm := &models.PlayerModel{DB: testDB}
+		active, err := pm.GetActiveByTeam(teamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range active {
+			if p.ID == veteranID {
+				t.Error("expected the veteran to no longer be on the active roster")
+			}
+		}
+		legends, err := pm.GetLegendsByTeam(teamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(legends) != 1 || legends[0].ID != veteranID {
+			t.Fatalf("expected the veteran to be the sole Legend, got %+v", legends)
+		}
+
+		_, _, activeBody := captainTS.get(t, fmt.Sprintf("/team/%d?tab=active", teamID))
+		if strings.Contains(activeBody, fmt.Sprintf(`href="/player/view/%d"`, veteranID)) {
+			t.Error("expected the veteran to no longer appear on the Active tab")
+		}
+		_, _, legendsBody := captainTS.get(t, fmt.Sprintf("/team/%d?tab=legends", teamID))
+		if !strings.Contains(legendsBody, "Move to Active") {
+			t.Error("expected a Move to Active action on the Legends tab")
+		}
+	})
+
+	t.Run("captain moves the veteran back to the active roster", func(t *testing.T) {
+		_, _, formBody := captainTS.get(t, fmt.Sprintf("/team/%d?tab=legends", teamID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := captainTS.postForm(t, "/admin/team/legends/remove", url.Values{
+			"teamID":     {fmt.Sprintf("%d", teamID)},
+			"playerID":   {fmt.Sprintf("%d", veteranID)},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d", teamID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d", teamID), loc)
+		}
+
+		pm := &models.PlayerModel{DB: testDB}
+		legends, err := pm.GetLegendsByTeam(teamID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(legends) != 0 {
+			t.Fatalf("expected no Legends left after reactivation, got %+v", legends)
+		}
+	})
+}
+
 // Each team's own captain (or a scorekeeper they've designated) can set
 // that team's Player of the Match and captain's notes — but only for their
 // own side. Unlike score/goals/cards (either team's manager can edit the
@@ -3154,6 +3482,159 @@ func TestMatchTeamNotes(t *testing.T) {
 		}
 		if afterNote.Notes.String != beforeNote.Notes.String {
 			t.Errorf("expected the previously saved note to remain untouched, got %q", afterNote.Notes.String)
+		}
+	})
+}
+
+// Attendance overrides — recorded via /match/:id/attendance once a match
+// has already happened — feed the team page's MP (matches played) column
+// (see models.MatchAttendanceModel.MatchesPlayedByTeamSeason). A team's
+// captain, and a scorekeeper they've designated, can both record them for
+// their own side; a captain of the other team cannot.
+func TestMatchAttendanceSubmit(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Attendance Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Attendance Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Attendance Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Attendance Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	pastMatchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now().AddDate(0, 0, -3),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	futureMatchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now().AddDate(0, 0, 3),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	homeCaptainID := setupTeamCaptain(t, homeTeamID, "attendance-home-captain@test.com", "validpassword123")
+	setupTeamCaptain(t, awayTeamID, "attendance-away-captain@test.com", "validpassword123")
+	scorekeeperID := setupRosterMember(t, homeTeamID, "attendance-scorekeeper@test.com", "validpassword123")
+	tsm := &models.TeamScorekeeperModel{DB: testDB}
+	if err := tsm.AddScorekeeper(scorekeeperID, homeTeamID); err != nil {
+		t.Fatal(err)
+	}
+	walkOnID := setupRosterMember(t, homeTeamID, "attendance-walkon@test.com", "validpassword123")
+
+	rm := &models.RSVPModel{DB: testDB}
+	// The captain RSVP'd yes but is being corrected to a no-show below;
+	// the walk-on never RSVP'd at all.
+	if err := rm.Upsert(&models.RSVP{MatchID: pastMatchID, PlayerID: homeCaptainID, TeamID: homeTeamID, Status: "yes", RespondedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	mam := &models.MatchAttendanceModel{DB: testDB}
+
+	t.Run("a captain of the other team cannot edit this team's attendance", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "attendance-away-captain@test.com", "validpassword123")
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", pastMatchID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/attendance", pastMatchID), url.Values{
+			"teamID":     {fmt.Sprintf("%d", homeTeamID)},
+			"attended":   {fmt.Sprintf("%d", walkOnID)},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+		list, err := mam.ListByMatch(pastMatchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 0 {
+			t.Fatalf("expected no attendance rows written, got %+v", list)
+		}
+	})
+
+	t.Run("attendance can't be recorded for a match that hasn't happened yet", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "attendance-home-captain@test.com", "validpassword123")
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", futureMatchID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/attendance", futureMatchID), url.Values{
+			"teamID":     {fmt.Sprintf("%d", homeTeamID)},
+			"attended":   {fmt.Sprintf("%d", walkOnID)},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", futureMatchID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/match/%d", futureMatchID), loc)
+		}
+		list, err := mam.ListByMatch(futureMatchID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 0 {
+			t.Fatalf("expected no attendance rows written for an upcoming match, got %+v", list)
+		}
+	})
+
+	t.Run("a scorekeeper corrects a no-show and adds a walk-on for the home team", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "attendance-scorekeeper@test.com", "validpassword123")
+
+		_, _, formBody := ts.get(t, fmt.Sprintf("/match/%d", pastMatchID))
+		csrfToken := extractCSRFToken(t, formBody)
+
+		// Submits the whole roster's checkbox state: only the walk-on is
+		// checked ("attended"), so the RSVP'd-yes captain — not checked —
+		// resolves as a corrected no-show.
+		code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/attendance", pastMatchID), url.Values{
+			"teamID":     {fmt.Sprintf("%d", homeTeamID)},
+			"attended":   {fmt.Sprintf("%d", walkOnID)},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", pastMatchID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/match/%d", pastMatchID), loc)
+		}
+
+		played, err := mam.MatchesPlayedByTeamSeason(homeTeamID, seasonID, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := played[homeCaptainID]; ok {
+			t.Errorf("expected the corrected no-show captain to not count toward MP, got %d", played[homeCaptainID])
+		}
+		if played[walkOnID] != 1 {
+			t.Errorf("expected the walk-on to count toward MP, got %d", played[walkOnID])
+		}
+
+		_, _, teamBody := ts.get(t, fmt.Sprintf("/team/%d", homeTeamID))
+		if !strings.Contains(teamBody, ">MP<") {
+			t.Error("expected the team page's roster table to have an MP column header")
 		}
 	})
 }
@@ -3507,6 +3988,100 @@ func TestPlayerNotificationsHiddenWithoutSMSConfigured(t *testing.T) {
 	code, _, _ := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
 	if code != http.StatusNotFound {
 		t.Errorf("want %d; got %d", http.StatusNotFound, code)
+	}
+}
+
+// A player's profile page shows all-time totals (goals/assists/cards from
+// playerMatchStats, MP from RSVP/attendance) and a Career Stats table with
+// one row per season, linking to that season — matches where they're only
+// counted via attendance, with no playerMatchStats row at all, still count
+// toward that season's MP, proving the table isn't just a dump of
+// playerMatchStats.
+func TestPlayerProfileShowsCareerStats(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Career Stats Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Career Stats FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponentID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Career Stats Rival FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Career Stats Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	playerID := setupRosterMember(t, teamID, "career-stats-player@test.com", "validpassword123")
+
+	mm := &models.MatchModel{DB: testDB}
+	scoredMatchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamID, AwayTeamID: opponentID, MatchDate: time.Now().AddDate(0, 0, -10)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pmsm := &models.PlayerMatchStatModel{DB: testDB}
+	if err := pmsm.Upsert(&models.PlayerMatchStat{MatchID: scoredMatchID, PlayerID: playerID, TeamID: teamID, Goals: 2, Assists: 1, YellowCards: 1}); err != nil {
+		t.Fatal(err)
+	}
+	rm := &models.RSVPModel{DB: testDB}
+	if err := rm.Upsert(&models.RSVP{MatchID: scoredMatchID, PlayerID: playerID, TeamID: teamID, Status: "yes", RespondedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Attended (RSVP'd yes) but never scored/assisted/carded — no
+	// playerMatchStats row at all for this one. MP is independent of
+	// playerMatchStats (see buildPlayerCareerStats), so this proves the
+	// Career Matches table isn't just a dump of playerMatchStats rows.
+	attendedOnlyMatchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamID, AwayTeamID: opponentID, MatchDate: time.Now().AddDate(0, 0, -3)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rm.Upsert(&models.RSVP{MatchID: attendedOnlyMatchID, PlayerID: playerID, TeamID: teamID, Status: "yes", RespondedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	code, _, body := ts.get(t, fmt.Sprintf("/player/view/%d", playerID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+
+	if !strings.Contains(body, "All-Time Stats") {
+		t.Error("expected an All-Time Stats section")
+	}
+	// Each stat card renders as <p class="text-2xl font-bold">N</p><p
+	// class="...">Label</p> — matching that exact pairing (rather than a
+	// bare "2" or "1" substring, which could match almost anything else on
+	// the page) confirms the specific total, not just that a "2" exists
+	// somewhere.
+	statCard := func(value int, label string) string {
+		return fmt.Sprintf(`text-2xl font-bold">%d</p><p class="text-xs text-gray-500 uppercase tracking-wide">%s</p>`, value, label)
+	}
+	for _, want := range []struct {
+		value int
+		label string
+	}{
+		{2, "MP"}, {2, "Goals"}, {1, "Assists"}, {1, "Yellow Cards"}, {0, "Red Cards"},
+	} {
+		if !strings.Contains(body, statCard(want.value, want.label)) {
+			t.Errorf("expected the %s card to show %d", want.label, want.value)
+		}
+	}
+	if !strings.Contains(body, fmt.Sprintf(`href="/season/%d"`, seasonID)) {
+		t.Error("expected the Career Stats table's season to link to its season page")
+	}
+	if !strings.Contains(body, "Career Stats Season") {
+		t.Error("expected the season's name to appear in the Career Stats table")
 	}
 }
 

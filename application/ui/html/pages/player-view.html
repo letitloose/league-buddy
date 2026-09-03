@@ -26,6 +26,47 @@
             {{end}}
         </div>
     </div>
+    <div class="w-full md:w-5/12 bg-white shadow-md px-3 py-4 rounded text-center">
+        <h4 class="pt-0 mb-2">All-Time Stats</h4>
+        <div class="grid grid-cols-3 gap-y-3">
+            <div><p class="text-2xl font-bold">{{.CareerMP}}</p><p class="text-xs text-gray-500 uppercase tracking-wide">MP</p></div>
+            <div><p class="text-2xl font-bold">{{.CareerGoals}}</p><p class="text-xs text-gray-500 uppercase tracking-wide">Goals</p></div>
+            <div><p class="text-2xl font-bold">{{.CareerAssists}}</p><p class="text-xs text-gray-500 uppercase tracking-wide">Assists</p></div>
+            <div><p class="text-2xl font-bold">{{.CareerYellowCards}}</p><p class="text-xs text-gray-500 uppercase tracking-wide">Yellow Cards</p></div>
+            <div><p class="text-2xl font-bold">{{.CareerRedCards}}</p><p class="text-xs text-gray-500 uppercase tracking-wide">Red Cards</p></div>
+            {{if .CareerOwnGoals}}<div><p class="text-2xl font-bold">{{.CareerOwnGoals}}</p><p class="text-xs text-gray-500 uppercase tracking-wide">Own Goals</p></div>{{end}}
+        </div>
+    </div>
+</div>
+
+<div class="w-full md:w-2/3 mx-auto px-2 md:px-0 mb-6">
+    <h3 class="text-center mb-1">Career Stats</h3>
+    {{if .CareerSeasons}}
+    <div class="overflow-x-auto">
+    <table class="table-compact text-left w-full mb-4">
+        <tr>
+            <th>Season</th>
+            <th>G</th>
+            <th>A</th>
+            <th>YC</th>
+            <th>RC</th>
+            <th>MP</th>
+        </tr>
+        {{range .CareerSeasons}}
+        <tr>
+            <td><a href="/season/{{.Season.ID}}">{{.Season.Name}}</a></td>
+            <td>{{.Goals}}</td>
+            <td>{{.Assists}}</td>
+            <td>{{.YellowCards}}</td>
+            <td>{{.RedCards}}</td>
+            <td>{{.MP}}</td>
+        </tr>
+        {{end}}
+    </table>
+    </div>
+    {{else}}
+    <p class="text-center text-gray-600 mb-4">No seasons recorded yet.</p>
+    {{end}}
 </div>
 
 {{if .CanManage}}

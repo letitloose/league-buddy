@@ -370,6 +370,17 @@ func (app *application) canManageMatchSide(r *http.Request, teamID int) bool {
 	return app.canManageTeam(r, teamID)
 }
 
+// canManageAttendanceSide reports whether the current request's user may
+// record teamID's own side's match attendance overrides (see
+// models.MatchAttendance) — canManageMatchSide's tier plus scorekeepers,
+// since confirming who actually showed up is match-day operational data
+// (the same tier canManageMatch already trusts scorekeepers with for
+// score/goals/cards), not the narrower "captain's section" canManageMatchSide
+// otherwise gates.
+func (app *application) canManageAttendanceSide(r *http.Request, teamID int) bool {
+	return app.canManageMatchSide(r, teamID) || app.isScorekeeperOfTeam(r, teamID)
+}
+
 // canDeleteTeam reports whether the current request's user may delete
 // teamID: an Admin or a league admin of the team's league. Deliberately
 // excludes plain captains — deleting a team is too destructive to leave to a

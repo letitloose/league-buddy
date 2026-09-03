@@ -82,6 +82,7 @@ func (m *MatchModel) Delete(id int) error {
 		"matchGoals",
 		"matchCards",
 		"rsvps",
+		"matchAttendance",
 		"matchTeamNotes",
 		"matchRSVPReminders",
 		"matchCaptainMessageReminders",

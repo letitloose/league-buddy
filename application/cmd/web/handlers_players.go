@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 
 	"github.com/julienschmidt/httprouter"
@@ -146,6 +147,91 @@ type playerProfile struct {
 	Address   *models.Address
 	CanManage bool
 	IsSelf    bool
+
+	// All-time totals and the season-by-season table backing them — see
+	// buildPlayerCareerStats. CareerMP (RSVP/attendance-derived) and
+	// CareerGoals etc. (playerMatchStats-derived) come from independent
+	// sources, so they aren't guaranteed to move together — a season with a
+	// recorded goal but no RSVP/attendance signal at all still counts
+	// toward CareerGoals without counting toward CareerMP.
+	CareerGoals       int
+	CareerAssists     int
+	CareerYellowCards int
+	CareerRedCards    int
+	CareerOwnGoals    int
+	CareerMP          int
+	CareerSeasons     []*playerCareerSeasonRow
+}
+
+// playerCareerSeasonRow is one season on a player's career table — same
+// columns as the team page's roster table (see team-view.html), with the
+// season itself (linked) standing in for the player's name there.
+type playerCareerSeasonRow struct {
+	Season      *models.Season
+	Goals       int
+	Assists     int
+	YellowCards int
+	RedCards    int
+	MP          int
+}
+
+// buildPlayerCareerStats assembles a player's all-time totals and the
+// season-by-season table backing them: for every season they have either
+// a playerMatchStats line (goals/assists/cards, see
+// PlayerMatchStatModel.SeasonTotalsByPlayer) or an attended match (see
+// MatchAttendanceModel.MatchesPlayedByPlayerBySeason — RSVP by default, a
+// captain/scorekeeper's override otherwise) in, one row with both, sorted
+// most recent season first.
+func (app *application) buildPlayerCareerStats(playerID int) (*playerProfile, error) {
+	pmsm := &models.PlayerMatchStatModel{DB: app.playerService.DB}
+	statTotals, err := pmsm.SeasonTotalsByPlayer(playerID)
+	if err != nil {
+		return nil, err
+	}
+
+	mam := &models.MatchAttendanceModel{DB: app.playerService.DB}
+	mpBySeason, err := mam.MatchesPlayedByPlayerBySeason(playerID, startOfTodayEastern())
+	if err != nil {
+		return nil, err
+	}
+
+	seasonIDs := make(map[int]bool, len(statTotals)+len(mpBySeason))
+	for seasonID := range statTotals {
+		seasonIDs[seasonID] = true
+	}
+	for seasonID := range mpBySeason {
+		seasonIDs[seasonID] = true
+	}
+
+	profile := &playerProfile{}
+	sm := &models.SeasonModel{DB: app.playerService.DB}
+	for seasonID := range seasonIDs {
+		season, err := sm.Get(seasonID)
+		if err != nil {
+			return nil, err
+		}
+
+		row := &playerCareerSeasonRow{Season: season, MP: mpBySeason[seasonID]}
+		if s, ok := statTotals[seasonID]; ok {
+			row.Goals, row.Assists, row.YellowCards, row.RedCards = s.Goals, s.Assists, s.YellowCards, s.RedCards
+			profile.CareerOwnGoals += s.OwnGoals
+		}
+		profile.CareerGoals += row.Goals
+		profile.CareerAssists += row.Assists
+		profile.CareerYellowCards += row.YellowCards
+		profile.CareerRedCards += row.RedCards
+		profile.CareerMP += row.MP
+		profile.CareerSeasons = append(profile.CareerSeasons, row)
+	}
+	sort.Slice(profile.CareerSeasons, func(i, j int) bool {
+		a, b := profile.CareerSeasons[i].Season, profile.CareerSeasons[j].Season
+		if a.StartDate.Valid && b.StartDate.Valid && !a.StartDate.Time.Equal(b.StartDate.Time) {
+			return a.StartDate.Time.After(b.StartDate.Time)
+		}
+		return a.Created.After(b.Created)
+	})
+
+	return profile, nil
 }
 
 // getPlayerAddress fetches the address linked to a player, if any. Returns
@@ -218,8 +304,18 @@ func (app *application) playerView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	profile, err := app.buildPlayerCareerStats(player.ID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	profile.Player = player
+	profile.Address = address
+	profile.CanManage = app.canManagePlayer(r, player)
+	profile.IsSelf = app.getPlayerID(r) == player.ID
+
 	data := app.newTemplateData(r)
-	data.Data = &playerProfile{Player: player, Address: address, CanManage: app.canManagePlayer(r, player), IsSelf: app.getPlayerID(r) == player.ID}
+	data.Data = profile
 	if team != nil {
 		data.Breadcrumbs = append(app.teamBreadcrumbs(team, league, false),
 			Breadcrumb{Label: "Roster", URL: fmt.Sprintf("/team/%d", team.ID)},

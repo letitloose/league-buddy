@@ -33,6 +33,11 @@ type StatLine struct {
 	YellowCards int
 	RedCards    int
 	OwnGoals    int
+	// MP (matches played) comes from a separate source (RSVP/attendance,
+	// see MatchAttendanceModel.MatchesPlayedByTeamSeason) than the other
+	// fields (playerMatchStats) — merged onto the same StatLine in the
+	// handler layer rather than computed alongside the rest here.
+	MP int
 }
 
 // LeagueLeaderLine is one player's total for a single stat (goals or
@@ -73,6 +78,42 @@ func (m *PlayerMatchStatModel) Upsert(stat *PlayerMatchStat) error {
 func (m *PlayerMatchStatModel) DeleteByMatch(matchID int) error {
 	_, err := m.DB.Exec("DELETE FROM playerMatchStats WHERE matchID = ?", matchID)
 	return err
+}
+
+// SeasonTotalsByPlayer aggregates playerID's goals/assists/cards/own goals
+// per season, across every team and match they've played in — the
+// box-score half of the season-by-season career table on a player's
+// profile page (MP, the other half, comes from
+// MatchAttendanceModel.MatchesPlayedByPlayerBySeason — a different source,
+// merged onto these StatLines by the caller). Only PlayerID/Goals/Assists/
+// YellowCards/RedCards/OwnGoals are populated; Name and MP are left for the
+// caller to fill in.
+func (m *PlayerMatchStatModel) SeasonTotalsByPlayer(playerID int) (map[int]*StatLine, error) {
+	stmt := `SELECT mt.seasonID,
+			SUM(pms.goals) AS goals, SUM(pms.assists) AS assists,
+			SUM(pms.yellowCards) AS yellowCards, SUM(pms.redCards) AS redCards,
+			SUM(pms.ownGoals) AS ownGoals
+		FROM playerMatchStats pms
+		JOIN matches mt ON mt.id = pms.matchID
+		WHERE pms.playerID = ?
+		GROUP BY mt.seasonID`
+
+	rows, err := m.DB.Query(stmt, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	totals := map[int]*StatLine{}
+	for rows.Next() {
+		var seasonID int
+		line := &StatLine{PlayerID: playerID}
+		if err := rows.Scan(&seasonID, &line.Goals, &line.Assists, &line.YellowCards, &line.RedCards, &line.OwnGoals); err != nil {
+			return nil, err
+		}
+		totals[seasonID] = line
+	}
+	return totals, nil
 }
 
 // ListByMatch returns every stat line recorded for matchID.

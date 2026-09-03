@@ -13,6 +13,8 @@ type TeamMember struct {
 	PlayerID int
 	TeamID   int
 	JoinedAt time.Time
+	// IsLegend marks this membership inactive — see SetLegendStatus.
+	IsLegend bool
 }
 
 type TeamMemberModel struct {
@@ -43,6 +45,20 @@ func (m *TeamMemberModel) RemoveMembership(playerID, teamID int) error {
 	statement := `DELETE FROM teamMembers WHERE playerID = ? AND teamID = ?`
 
 	_, err := m.DB.Exec(statement, playerID, teamID)
+	return err
+}
+
+// SetLegendStatus marks playerID's existing membership on teamID as either
+// an active roster member (isLegend false) or a "Legend" (true) — an
+// inactive alumnus who stays linked to the team (still visible on its
+// page, still keeps their career stats) but drops off the active roster.
+// A status on the existing membership row, not a separate add/remove pair
+// like scorekeeper designation, since there's always exactly one of the
+// two states, never neither.
+func (m *TeamMemberModel) SetLegendStatus(playerID, teamID int, isLegend bool) error {
+	statement := `UPDATE teamMembers SET isLegend = ? WHERE playerID = ? AND teamID = ?`
+
+	_, err := m.DB.Exec(statement, isLegend, playerID, teamID)
 	return err
 }
 

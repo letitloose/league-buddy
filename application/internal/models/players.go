@@ -102,6 +102,31 @@ func (m *PlayerModel) ConfirmPhoneVerified(playerID int) error {
 	return err
 }
 
+// DismissCaptainGuideBanner permanently hides the home page's "New captains
+// start here!" banner for playerID.
+func (m *PlayerModel) DismissCaptainGuideBanner(playerID int) error {
+	statement := `update players set captainGuideDismissedAt = UTC_TIMESTAMP() where id = ?`
+	_, err := m.DB.Exec(statement, playerID)
+	return err
+}
+
+// HasDismissedCaptainGuideBanner reports whether playerID has already
+// dismissed the home page's captain guide banner (see
+// DismissCaptainGuideBanner) — a dedicated single-column lookup rather than
+// adding this field to every Player-fetching query below, since nothing
+// else needs it.
+func (m *PlayerModel) HasDismissedCaptainGuideBanner(playerID int) (bool, error) {
+	var dismissedAt sql.NullTime
+	err := m.DB.QueryRow(`select captainGuideDismissedAt from players where id = ?`, playerID).Scan(&dismissedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrNoRecord
+		}
+		return false, err
+	}
+	return dismissedAt.Valid, nil
+}
+
 func (m *PlayerModel) Delete(id int) error {
 	statement := "delete from players where id = ?"
 
@@ -160,6 +185,73 @@ func (m *PlayerModel) GetByTeam(teamID int) ([]*Player, error) {
 		from players p
 		join teamMembers tm on tm.playerID = p.id
 		where tm.teamID = ?
+		order by p.lastname asc, p.firstname asc`
+
+	rows, err := m.DB.Query(stmt, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	players := []*Player{}
+	for rows.Next() {
+		player := &Player{}
+		err := rows.Scan(&player.ID, &player.FirstName, &player.LastName,
+			&player.DateOfBirth, &player.AddressID, &player.Email, &player.PhoneNumber, &player.Created,
+			&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt)
+		if err != nil {
+			return nil, err
+		}
+		players = append(players, player)
+	}
+
+	return players, nil
+}
+
+// GetActiveByTeam is GetByTeam narrowed to the active roster — excludes
+// Legends (see TeamMemberModel.SetLegendStatus). Used only by the team
+// page's Active tab. GetByTeam itself is deliberately left unfiltered and
+// unchanged everywhere else it's already used (match-day rosters, RSVP
+// reminders, roster export, etc.) — a Legend is still meant to be able to
+// show up, RSVP, and get stats recorded like anyone else; "Legend" is a
+// roster-page organizing status, not a functional restriction.
+func (m *PlayerModel) GetActiveByTeam(teamID int) ([]*Player, error) {
+	stmt := `select p.id, p.firstname, p.lastname, p.dateOfBirth, p.addressID, p.email, p.phonenumber, p.created, p.phoneVerifiedAt, p.phoneVerificationCode, p.phoneVerificationExpiresAt
+		from players p
+		join teamMembers tm on tm.playerID = p.id
+		where tm.teamID = ? and tm.isLegend = 0
+		order by p.lastname asc, p.firstname asc`
+
+	rows, err := m.DB.Query(stmt, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	players := []*Player{}
+	for rows.Next() {
+		player := &Player{}
+		err := rows.Scan(&player.ID, &player.FirstName, &player.LastName,
+			&player.DateOfBirth, &player.AddressID, &player.Email, &player.PhoneNumber, &player.Created,
+			&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt)
+		if err != nil {
+			return nil, err
+		}
+		players = append(players, player)
+	}
+
+	return players, nil
+}
+
+// GetLegendsByTeam returns teamID's Legends — former roster members a
+// captain has moved off the active roster but who remain linked to the
+// team, still showing their career stats on their own profile (see
+// TeamMemberModel.SetLegendStatus).
+func (m *PlayerModel) GetLegendsByTeam(teamID int) ([]*Player, error) {
+	stmt := `select p.id, p.firstname, p.lastname, p.dateOfBirth, p.addressID, p.email, p.phonenumber, p.created, p.phoneVerifiedAt, p.phoneVerificationCode, p.phoneVerificationExpiresAt
+		from players p
+		join teamMembers tm on tm.playerID = p.id
+		where tm.teamID = ? and tm.isLegend = 1
 		order by p.lastname asc, p.firstname asc`
 
 	rows, err := m.DB.Query(stmt, teamID)

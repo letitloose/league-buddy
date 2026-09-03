@@ -54,6 +54,7 @@
             <h4 class="pt-0 text-center"><a href="/team/{{.Data.HomeTeam.ID}}">{{.Data.HomeTeam.Name}}</a></h4>
             {{template "team-note-panel" (teamNoteSideData $ .Data.HomeNote)}}
             {{template "team-test-reminder" (teamNoteSideData $ .Data.HomeNote)}}
+            {{if .Data.IsPast}}{{template "team-attendance" (matchAttendanceSideData $ .Data.HomeAttendance)}}{{end}}
             {{if .Data.HomeGoals}}
             <ul class="text-sm mb-3">
                 {{range .Data.HomeGoals}}
@@ -101,6 +102,7 @@
             <h4 class="pt-0 text-center"><a href="/team/{{.Data.AwayTeam.ID}}">{{.Data.AwayTeam.Name}}</a></h4>
             {{template "team-note-panel" (teamNoteSideData $ .Data.AwayNote)}}
             {{template "team-test-reminder" (teamNoteSideData $ .Data.AwayNote)}}
+            {{if .Data.IsPast}}{{template "team-attendance" (matchAttendanceSideData $ .Data.AwayAttendance)}}{{end}}
             {{if .Data.AwayGoals}}
             <ul class="text-sm mb-3">
                 {{range .Data.AwayGoals}}
@@ -269,6 +271,41 @@
             {{end}}
         </div>
     </details>
+</div>
+{{end}}
+{{end}}
+
+{{/* team-attendance shows one team's resolved match attendance (RSVP "yes"
+     by default, overridden per-player once a captain/scorekeeper has
+     confirmed who actually showed up) — only rendered once the match date
+     has passed (see match-view.html's IsPast guard around each call). A
+     manager gets an editable checklist; anyone else just sees the count. */}}
+{{define "team-attendance"}}
+{{if .Row}}
+<div class="mt-3 mb-4 text-sm text-center">
+    {{if .Row.CanManage}}
+    <details>
+        <summary class="cursor-pointer list-none">
+            <span class="font-semibold">Attendance:</span> {{.Row.AttendedCount}} of {{len .Row.Rows}}
+            <span class="text-blue-600">Edit</span>
+        </summary>
+        <div class="mt-2 text-left">
+            <form action="/match/{{.Root.Data.Match.ID}}/attendance" method="POST">
+                <input type='hidden' name='csrf_token' value='{{.Root.CSRFToken}}'>
+                <input type='hidden' name='teamID' value='{{.Row.TeamID}}'>
+                {{range .Row.Rows}}
+                <label class="flex items-center gap-2 mb-1">
+                    <input type="checkbox" name="attended" value="{{.PlayerID}}" {{if .Attended}}checked{{end}}>
+                    <span>{{.PlayerName}}{{if not .Overridden}}<span class="text-gray-400 text-xs"> (from RSVP)</span>{{end}}</span>
+                </label>
+                {{end}}
+                <div class="mt-2 text-center"><input class="btn m-0" type="submit" value="Save Attendance"></div>
+            </form>
+        </div>
+    </details>
+    {{else}}
+    <p><span class="font-semibold">Attendance:</span> {{.Row.AttendedCount}} of {{len .Row.Rows}}</p>
+    {{end}}
 </div>
 {{end}}
 {{end}}

@@ -35,10 +35,10 @@
     </div>
     {{end}}
 
-    {{if .Data.ScheduleSeason}}
+    {{if .Data.CurrentSeason}}
     <div class="w-full md:w-3/4 px-2 md:px-0">
         <h3 class="text-center mb-1">Schedule</h3>
-        <p class="text-center text-sm text-gray-500 mb-3">{{.Data.ScheduleSeason.Name}} &middot; <a href="/team/{{.Data.Team.ID}}/season/{{.Data.ScheduleSeason.ID}}">All Seasons</a></p>
+        <p class="text-center text-sm text-gray-500 mb-3">{{.Data.CurrentSeason.Name}} &middot; <a href="/team/{{.Data.Team.ID}}/season/{{.Data.CurrentSeason.ID}}">All Seasons</a></p>
         {{if .Data.Schedule}}
         <div class="overflow-x-auto">
         <table class="table-compact text-left w-full mb-4">
@@ -83,8 +83,7 @@
     <div class="w-full md:w-3/4 px-2 md:px-0 mt-6">
         <div class="text-center">
             <h3 class="mb-1">Roster</h3>
-            <p class="text-sm text-gray-500 mb-3">{{len .Data.Roster}} player{{if ne (len .Data.Roster) 1}}s{{end}}</p>
-            {{if .Data.LeadersSeason}}
+            {{if .Data.CurrentSeason}}
                 {{if or .Data.LeadingScorer .Data.LeadingAssister .Data.LeadingOwnGoals}}
                 {{$hasScorerOrAssister := or .Data.LeadingScorer .Data.LeadingAssister}}
                 <div class="flex flex-col sm:flex-row sm:justify-center sm:gap-2 text-sm text-gray-600 mb-3">
@@ -100,24 +99,33 @@
                 <a class="btn mb-3" href="/team/{{.Data.Team.ID}}/player/create">Add Player</a>
             {{end}}
         </div>
+
+        <div class="tab-bar">
+            <a class="{{if eq .Data.RosterTab "active"}}tab-link-active{{else}}tab-link{{end}}" href="/team/{{.Data.Team.ID}}?tab=active">Active ({{.Data.ActiveCount}})</a>
+            <a class="{{if eq .Data.RosterTab "legends"}}tab-link-active{{else}}tab-link{{end}}" href="/team/{{.Data.Team.ID}}?tab=legends">Legends ({{.Data.LegendsCount}})</a>
+        </div>
+
         <div class="overflow-x-auto">
         <table class="table-compact text-left w-full mb-4">
             <tr>
                 <th>
-                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?sort=name&order={{if and (eq .Data.RosterSort "name") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}">Name{{if eq .Data.RosterSort "name"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?sort=name&order={{if and (eq .Data.RosterSort "name") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&tab={{.Data.RosterTab}}">Name{{if eq .Data.RosterSort "name"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
                 </th>
-                {{if .Data.LeadersSeason}}
+                {{if .Data.CurrentSeason}}
                 <th>
-                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?sort=goals&order={{if and (eq .Data.RosterSort "goals") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}">G{{if eq .Data.RosterSort "goals"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
-                </th>
-                <th>
-                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?sort=assists&order={{if and (eq .Data.RosterSort "assists") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}">A{{if eq .Data.RosterSort "assists"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?sort=goals&order={{if and (eq .Data.RosterSort "goals") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&tab={{.Data.RosterTab}}">G{{if eq .Data.RosterSort "goals"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
                 </th>
                 <th>
-                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?sort=yellowcards&order={{if and (eq .Data.RosterSort "yellowcards") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}">YC{{if eq .Data.RosterSort "yellowcards"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?sort=assists&order={{if and (eq .Data.RosterSort "assists") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&tab={{.Data.RosterTab}}">A{{if eq .Data.RosterSort "assists"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
                 </th>
                 <th>
-                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?sort=redcards&order={{if and (eq .Data.RosterSort "redcards") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}">RC{{if eq .Data.RosterSort "redcards"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?sort=yellowcards&order={{if and (eq .Data.RosterSort "yellowcards") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&tab={{.Data.RosterTab}}">YC{{if eq .Data.RosterSort "yellowcards"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                </th>
+                <th>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?sort=redcards&order={{if and (eq .Data.RosterSort "redcards") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&tab={{.Data.RosterTab}}">RC{{if eq .Data.RosterSort "redcards"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                </th>
+                <th>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?sort=mp&order={{if and (eq .Data.RosterSort "mp") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&tab={{.Data.RosterTab}}">MP{{if eq .Data.RosterSort "mp"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
                 </th>
                 {{end}}
                 {{if .Data.CanManage}}<th>Account</th><th>Actions</th>{{end}}
@@ -125,13 +133,15 @@
             {{range .Data.Roster}}
             <tr>
                 <td><a href="/player/view/{{.ID}}">{{.FirstName}} {{.LastName}}</a></td>
-                {{if $.Data.LeadersSeason}}
+                {{if $.Data.CurrentSeason}}
                     {{with index $.Data.LeadersByPlayer .ID}}
                         <td>{{.Goals}}</td>
                         <td>{{.Assists}}</td>
                         <td>{{.YellowCards}}</td>
                         <td>{{.RedCards}}</td>
+                        <td>{{.MP}}</td>
                     {{else}}
+                        <td>0</td>
                         <td>0</td>
                         <td>0</td>
                         <td>0</td>
@@ -147,6 +157,14 @@
                     {{end}}
                 </td>
                 <td>
+                    {{if eq $.Data.RosterTab "legends"}}
+                    <form class="inline" action="/admin/team/legends/remove" method="POST">
+                        <input type='hidden' name='csrf_token' value='{{$.CSRFToken}}'>
+                        <input type='hidden' name='teamID' value='{{$.Data.Team.ID}}'>
+                        <input type='hidden' name='playerID' value='{{.ID}}'>
+                        <button class="text-green-700" type="submit">Move to Active</button>
+                    </form>
+                    {{else}}
                     {{if index $.Data.IsScorekeeper .ID}}
                     <form class="inline" action="/admin/team/scorekeepers/remove" method="POST">
                         <input type='hidden' name='csrf_token' value='{{$.CSRFToken}}'>
@@ -160,6 +178,13 @@
                         <input type='hidden' name='teamID' value='{{$.Data.Team.ID}}'>
                         <input type='hidden' name='playerID' value='{{.ID}}'>
                         <button class="text-blue-600" type="submit">Make Scorekeeper</button>
+                    </form>
+                    {{end}}
+                    <form class="inline" action="/admin/team/legends/add" method="POST">
+                        <input type='hidden' name='csrf_token' value='{{$.CSRFToken}}'>
+                        <input type='hidden' name='teamID' value='{{$.Data.Team.ID}}'>
+                        <input type='hidden' name='playerID' value='{{.ID}}'>
+                        <button class="text-purple-700" type="submit">Move to Legends</button>
                     </form>
                     {{end}}
                     <button class="text-red-600" data-delete-url="/team/{{$.Data.Team.ID}}/player/{{.ID}}/remove" data-confirm-message="Remove {{.FirstName}} {{.LastName}} from {{$.Data.Team.Name}}'s roster?" data-redirect-url="/team/{{$.Data.Team.ID}}">Remove from Team</button>

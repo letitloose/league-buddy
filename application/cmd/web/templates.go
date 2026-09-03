@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"html/template"
 	"io/fs"
 	"net/url"
@@ -122,6 +123,27 @@ func humanDateShort(t time.Time) string {
 	return t.Format("01/02")
 }
 
+// playerAge computes a player's current age from their date of birth,
+// calculated fresh on every call rather than stored — a stored value would
+// need a birthday-crossing update job to stay correct. Returns 0 for an
+// unknown date of birth, matching sortRoster's "no data sorts as zero"
+// convention for every other roster column; the template checks
+// .DateOfBirth.Valid itself to show "—" instead of a bogus age 0. Used by
+// both the roster table's Age column display (registered as "age" below)
+// and its sort (sortRoster calls this directly, same package).
+func playerAge(dob sql.NullTime) int {
+	if !dob.Valid {
+		return 0
+	}
+	now := time.Now()
+	age := now.Year() - dob.Time.Year()
+	hadBirthdayThisYear := now.Month() > dob.Time.Month() || (now.Month() == dob.Time.Month() && now.Day() >= dob.Time.Day())
+	if !hadBirthdayThisYear {
+		age--
+	}
+	return age
+}
+
 // easternLocation is loaded once at startup; falling back to UTC (rather
 // than failing to start) if the container's tzdata is ever missing, since
 // both this session's dev and production images already install it.
@@ -231,6 +253,7 @@ var functions = template.FuncMap{
 	"pickerDate":              pickerDate,
 	"humanDate":               humanDate,
 	"humanDateShort":          humanDateShort,
+	"age":                     playerAge,
 	"humanDateTime":           humanDateTime,
 	"matchDateTime":           matchDateTime,
 	"matchDateTimeShort":      matchDateTimeShort,

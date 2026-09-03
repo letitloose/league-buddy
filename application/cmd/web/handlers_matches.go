@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -447,6 +448,14 @@ type matchTeamAttendanceView struct {
 	CanManage     bool
 	Rows          []*matchAttendanceRow
 	AttendedCount int
+	// AverageAge is the mean playerAge of the players who actually
+	// attended (Attended == true), rounded to one decimal place —
+	// "gameday roster" for this match, as opposed to the team's full
+	// roster average shown on the team page. PlayersWithAge is how many
+	// attendees had a known date of birth, so the template can hide the
+	// stat when it's 0 rather than show a misleading average of zero.
+	AverageAge     float64
+	PlayersWithAge int
 }
 
 // buildRSVPRows returns a row for every roster player who RSVP'd status
@@ -735,6 +744,7 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 		}
 		buildAttendanceView := func(teamID int, roster []*models.Player, canManageSide bool) *matchTeamAttendanceView {
 			view := &matchTeamAttendanceView{TeamID: teamID, CanManage: canManageSide}
+			ageSum := 0
 			for _, player := range roster {
 				attended := false
 				overridden := false
@@ -750,7 +760,14 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 				})
 				if attended {
 					view.AttendedCount++
+					if player.DateOfBirth.Valid {
+						ageSum += playerAge(player.DateOfBirth)
+						view.PlayersWithAge++
+					}
 				}
+			}
+			if view.PlayersWithAge > 0 {
+				view.AverageAge = math.Round(float64(ageSum)/float64(view.PlayersWithAge)*10) / 10
 			}
 			return view
 		}

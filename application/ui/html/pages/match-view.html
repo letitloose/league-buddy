@@ -286,7 +286,7 @@
     {{if .Row.CanManage}}
     <details>
         <summary class="cursor-pointer list-none">
-            <span class="font-semibold">Attendance:</span> {{.Row.AttendedCount}} of {{len .Row.Rows}}
+            <span class="font-semibold">Attendance:</span> {{.Row.AttendedCount}} of {{len .Row.Rows}}{{if .Row.PlayersWithAge}} <span class="text-gray-500">&middot; Avg age: {{.Row.AverageAge}}</span>{{end}}
             <span class="text-blue-600">Edit</span>
         </summary>
         <div class="mt-2 text-left">
@@ -304,7 +304,14 @@
         </div>
     </details>
     {{else}}
-    <p><span class="font-semibold">Attendance:</span> {{.Row.AttendedCount}} of {{len .Row.Rows}}</p>
+    <p><span class="font-semibold">Attendance:</span> {{.Row.AttendedCount}} of {{len .Row.Rows}}{{if .Row.PlayersWithAge}} <span class="text-gray-500">&middot; Avg age: {{.Row.AverageAge}}</span>{{end}}</p>
+    {{if .Row.AttendedCount}}
+    <ul class="text-sm mt-1">
+        {{range .Row.Rows}}
+        {{if .Attended}}<li>{{.PlayerName}}</li>{{end}}
+        {{end}}
+    </ul>
+    {{end}}
     {{end}}
 </div>
 {{end}}

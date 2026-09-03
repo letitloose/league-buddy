@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -69,19 +70,29 @@ type teamViewData struct {
 	RosterSort      string
 	RosterOrder     string
 	IsScorekeeper   map[int]bool
+	// AverageAge is the mean of playerAge across Roster players with a
+	// known date of birth, rounded to one decimal place; PlayersWithAge is
+	// how many of them had one, so the template can hide the stat entirely
+	// (rather than show a misleading average of zero) when it's 0.
+	AverageAge     float64
+	PlayersWithAge int
 }
 
 // allowedRosterSorts are the roster table's sortable columns.
 var allowedRosterSorts = map[string]bool{
-	"name": true, "mp": true, "goals": true, "assists": true, "yellowcards": true, "redcards": true,
+	"name": true, "age": true, "mp": true, "goals": true, "assists": true, "yellowcards": true, "redcards": true,
 }
 
 // sortRoster reorders roster in place by sortKey/order (one of
 // allowedRosterSorts' keys, "ASC" or "DESC") — a player with no leaderboard
 // line sorts as zero for any stat column, matching the "0" the template
-// already shows for them.
+// already shows for them (age has its own zero-for-unknown case via
+// playerAge, computed fresh here rather than off a stored value).
 func sortRoster(roster []*models.Player, leadersByPlayer map[int]*models.StatLine, sortKey, order string) {
 	statValue := func(player *models.Player) int {
+		if sortKey == "age" {
+			return playerAge(player.DateOfBirth)
+		}
 		line := leadersByPlayer[player.ID]
 		if line == nil {
 			return 0
@@ -335,6 +346,21 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 	}
 	sortRoster(roster, leadersByPlayer, rosterSort, rosterOrder)
 
+	// Average age is computed over Roster (the currently-viewed tab, active
+	// or legends) rather than the whole team, since that's the set of
+	// players the page is actually showing.
+	var ageSum, playersWithAge int
+	for _, player := range roster {
+		if player.DateOfBirth.Valid {
+			ageSum += playerAge(player.DateOfBirth)
+			playersWithAge++
+		}
+	}
+	var averageAge float64
+	if playersWithAge > 0 {
+		averageAge = math.Round(float64(ageSum)/float64(playersWithAge)*10) / 10
+	}
+
 	// Who's a scorekeeper is only shown (and queried) for managers, same
 	// convention as hasAccount above — it drives the roster row's
 	// Make/Remove Scorekeeper action.
@@ -378,6 +404,8 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		RosterSort:              rosterSort,
 		RosterOrder:             rosterOrder,
 		IsScorekeeper:           isScorekeeper,
+		AverageAge:              averageAge,
+		PlayersWithAge:          playersWithAge,
 	}
 	data.Breadcrumbs = app.teamBreadcrumbs(team, league, true)
 

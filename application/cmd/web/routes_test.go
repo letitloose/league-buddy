@@ -4256,6 +4256,18 @@ func TestCalendarFeedUnauthenticated(t *testing.T) {
 	if !strings.Contains(body, "Add to Calendar") {
 		t.Fatalf("expected an Add to Calendar link in the notifications page, got body: %s", body)
 	}
+	// html/template's default safe-URL-scheme allowlist doesn't include
+	// "webcal" — a plain string in that href silently becomes the
+	// harmless-looking but functionally dead "#ZgotmplZ" sentinel (a
+	// same-page anchor that does nothing when tapped) unless it's marked
+	// template.URL. Asserting the real scheme survived catches that
+	// regression directly, rather than just checking the link exists.
+	if !strings.Contains(body, `href="webcal://`) {
+		t.Fatalf("expected the Add to Calendar link's href to actually use the webcal:// scheme, got body: %s", body)
+	}
+	if strings.Contains(body, "ZgotmplZ") {
+		t.Fatalf("href was neutralized by html/template's URL scheme filter, got body: %s", body)
+	}
 	pm := &models.PlayerModel{DB: testDB}
 	tokenVal, err := pm.GetCalendarToken(playerID)
 	if err != nil {

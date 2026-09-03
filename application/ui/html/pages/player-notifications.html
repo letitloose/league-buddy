@@ -10,6 +10,11 @@
             <div class="text-center mb-4">
                 <a class="btn m-0" href="{{.Data.CalendarFeedURL}}">Add to Calendar</a>
             </div>
+            <details class="mb-4">
+                <summary class="cursor-pointer text-xs text-gray-500 text-center list-none">Tapping the button do nothing? Add it manually instead</summary>
+                <p class="text-xs text-gray-500 mt-2 mb-1">Only Safari on iPhone opens Calendar directly from that button — in any other browser, copy this link and add it yourself: on iPhone, Settings &rarr; Calendar &rarr; Accounts &rarr; Add Subscribed Calendar; on Android, your calendar app's "Add calendar by URL" option.</p>
+                <input class="form-field text-xs" type="text" readonly value="{{.Data.CalendarFeedHTTPSURL}}">
+            </details>
             <form action="/player/notifications/{{.Data.Player.ID}}/calendar/regenerate" method="POST">
                 <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
                 <p class="text-xs text-gray-500 text-center mb-2">If this link ever leaks, regenerate it — the old link stops working immediately, and you'll need to re-subscribe with the new one.</p>

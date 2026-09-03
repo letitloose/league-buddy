@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
 	"strconv"
@@ -26,7 +27,18 @@ type playerNotificationsData struct {
 	HasPendingCode        bool
 	RSVPChannel           string
 	CaptainMessageChannel string
-	CalendarFeedURL       string
+	// CalendarFeedURL (webcal://) is the tap-to-subscribe link — template.URL,
+	// not a plain string, because html/template's default safe-URL-scheme
+	// allowlist doesn't include "webcal" and would otherwise silently
+	// replace the href with the harmless-but-broken "#ZgotmplZ" sentinel
+	// (a same-page anchor that does nothing when tapped). Safe to mark
+	// trusted here since it's built entirely from PUBLIC_HOST and a
+	// server-generated token, never user input. CalendarFeedHTTPSURL is
+	// the same feed as a plain https:// link (already an allowed scheme,
+	// so a plain string is fine), for copy-pasting into a calendar app's
+	// "Add calendar by URL" option as a fallback.
+	CalendarFeedURL      template.URL
+	CalendarFeedHTTPSURL string
 }
 
 // requireOwnPlayer resolves the :id route param and fetches that player,
@@ -96,7 +108,9 @@ func (app *application) playerNotifications(w http.ResponseWriter, r *http.Reque
 		app.serverError(w, err)
 		return
 	}
-	pageData.CalendarFeedURL = fmt.Sprintf("webcal://%s/calendar/%s/schedule.ics", os.Getenv("PUBLIC_HOST"), token)
+	feedPath := fmt.Sprintf("/calendar/%s/schedule.ics", token)
+	pageData.CalendarFeedURL = template.URL("webcal://" + os.Getenv("PUBLIC_HOST") + feedPath)
+	pageData.CalendarFeedHTTPSURL = "https://" + os.Getenv("PUBLIC_HOST") + feedPath
 
 	data := app.newTemplateData(r)
 	data.Data = pageData

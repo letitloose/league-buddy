@@ -4,6 +4,14 @@
 <div class="text-center py-8">
     <h2>Welcome to Blame the Ball</h2>
     {{if .IsActive}}
+        {{if .Data.IsCaptainOfAnyTeam}}
+        <div class="max-w-3xl mx-auto px-4">
+            <a href="/captains" class="block no-underline bg-orange-50 border border-orange-200 hover:border-orange-500 rounded-xl px-5 py-3 mb-2 text-center transition">
+                <span class="font-semibold text-orange-700">New captains start here!</span>
+                <span class="text-sm text-gray-600 block sm:inline sm:ml-2">See everything you can do as team captain &rarr;</span>
+            </a>
+        </div>
+        {{end}}
         {{if or .Data.Leagues .Data.Teams .IsAdmin}}
             <div class="max-w-3xl mx-auto px-4 pt-2 text-left">
                 {{if .Data.HasUpcomingMatch}}

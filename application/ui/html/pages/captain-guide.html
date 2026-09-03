@@ -1,0 +1,37 @@
+{{define "title"}}New Captain's Guide{{end}}
+
+{{define "main"}}
+<div class="flex flex-col items-center">
+    <div class="w-full max-w-2xl px-2 md:px-0">
+        <h2 class="text-center">New Captain's Guide</h2>
+        <p class="text-center text-gray-600 mb-6">Everything below shows up right on your team's page and on each match's page — there's no separate admin area to go find. If you don't see a button described here, either the game hasn't been recorded as one of your team's yet, or a league admin controls that one instead.</p>
+
+        <div class="bg-white shadow-md rounded px-6 py-6 mb-4 space-y-4">
+            <h3 class="pt-0">Team Admin</h3>
+            <p class="text-sm text-gray-500 -mt-2">On your team's page.</p>
+
+            <p><span class="font-semibold">Invite Players</span> — send an email invite to join your roster, or add someone already registered on another team via the roster picker.</p>
+            <p><span class="font-semibold">Join Requests</span> — approve or deny players who've asked to join your team on their own.</p>
+            <p><span class="font-semibold">Import Roster</span> — upload a CSV to add your whole roster at once instead of one player at a time. A sample file is linked right on that page.</p>
+            <p><span class="font-semibold">Export Roster</span> — download your current roster as a PDF.</p>
+            <p><span class="font-semibold">Remove from Team</span> — take a player off your roster.</p>
+            <p><span class="font-semibold">Make/Remove Scorekeeper</span> — hand match-day score entry to a trusted player, so someone can log goals and cards from the sideline even if you're playing yourself.</p>
+            <p><span class="font-semibold">Edit Team</span> — update your team's motto, home field, or established date.</p>
+        </div>
+
+        <div class="bg-white shadow-md rounded px-6 py-6 mb-4 space-y-4">
+            <h3 class="pt-0">Match Admin</h3>
+            <p class="text-sm text-gray-500 -mt-2">On any match involving your team.</p>
+
+            <p><span class="font-semibold">Edit Match</span> — set or correct the date, time, location, and final score.</p>
+            <p><span class="font-semibold">Goals &amp; Cards</span> — record who scored (and who assisted), own goals, and yellow/red cards.</p>
+            <p><span class="font-semibold">Player of the Match</span> — call out your standout performer.</p>
+            <p><span class="font-semibold">Captain's Notes</span> — a short note about the match, visible to anyone viewing it (short-handed, a rough pitch, whatever's worth recording).</p>
+            <p><span class="font-semibold">Message for RSVP Reminders</span> — a note that goes out with the automatic reminder your teammates get before the match (carpool plans, uniform color, anything time-sensitive). Use <span class="font-semibold">Send Test Reminder</span> to preview it before it goes out for real.</p>
+            <p><span class="font-semibold">RSVPs</span> — see who's in and who's out for the match at a glance, right next to your team's name.</p>
+        </div>
+
+        <p class="text-center text-gray-600 mb-4">Questions about something not covered here? <a href="mailto:league.buddy.site@gmail.com">Reach out</a> and we'll help you sort it out.</p>
+    </div>
+</div>
+{{end}}

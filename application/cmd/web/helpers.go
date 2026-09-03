@@ -272,6 +272,14 @@ func (app *application) isCaptainOfTeam(r *http.Request, teamID int) bool {
 	return false
 }
 
+// isCaptainOfAnyTeam reports whether the current request's user captains at
+// least one team — used to gate captain-only messaging (the home page's
+// "New captains start here" banner) that isn't tied to any specific team.
+func (app *application) isCaptainOfAnyTeam(r *http.Request) bool {
+	captainTeamIDs, ok := r.Context().Value(captainTeamIDsContextKey).([]int)
+	return ok && len(captainTeamIDs) > 0
+}
+
 // isScorekeeperOfTeam reports whether the current request's user has been
 // designated a scorekeeper of teamID — a narrower grant than captaincy,
 // checked only by canManageMatch (score/goals/cards), never by

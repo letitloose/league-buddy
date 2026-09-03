@@ -38,9 +38,10 @@ type homeLeagueCard struct {
 // whether to show the system-admin-only quick links. A player who is both a
 // league admin and a team member sees both sections.
 type homeData struct {
-	Leagues          []*homeLeagueCard
-	Teams            []*homeTeamCard
-	HasUpcomingMatch bool
+	Leagues            []*homeLeagueCard
+	Teams              []*homeTeamCard
+	HasUpcomingMatch   bool
+	IsCaptainOfAnyTeam bool
 	// UpcomingMatchTeamCount is how many of Teams actually have a
 	// NextMatch — the Upcoming Matches table only shows which of the
 	// player's teams a row belongs to when this is more than 1, since a
@@ -59,6 +60,12 @@ func (app *application) termsConditions(w http.ResponseWriter, r *http.Request) 
 	app.render(w, http.StatusOK, "terms-conditions.html", app.newTemplateData(r))
 }
 
+// captainGuide is a plain public page (no auth required) walking a newly
+// invited captain through what they can do — linked from the home page.
+func (app *application) captainGuide(w http.ResponseWriter, r *http.Request) {
+	app.render(w, http.StatusOK, "captain-guide.html", app.newTemplateData(r))
+}
+
 func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		app.notFound(w)
@@ -68,7 +75,7 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	data := app.newTemplateData(r)
 
 	if app.isActive(r) {
-		hd := &homeData{}
+		hd := &homeData{IsCaptainOfAnyTeam: app.isCaptainOfAnyTeam(r)}
 
 		for _, teamID := range app.getTeamIDs(r) {
 			card, err := app.buildHomeTeamCard(teamID)

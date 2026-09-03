@@ -2,6 +2,7 @@
 -- database (league_buddy_test, selected via the test DSN) so setup.sql can
 -- recreate them from scratch at the start of a test run.
 SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS matchAttendance;
 DROP TABLE IF EXISTS rsvps;
 DROP TABLE IF EXISTS matchTeamNotes;
 DROP TABLE IF EXISTS playerNotificationPreferences;

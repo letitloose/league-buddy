@@ -5,3 +5,9 @@ services:
         .env.testdb
     ports:
       - "3308:3306"
+    # This DB is disposable (fully rebuilt by every test run) and never
+    # needs to survive a crash, so durability fsyncs are pure waste here —
+    # each is real (containerized-disk) latency, and reset-test.sql's
+    # per-test TRUNCATE across ~30 tables pays it 30 times per test.
+    # Relaxing it is the single biggest lever on this suite's runtime.
+    command: --innodb-flush-log-at-trx-commit=0 --innodb-doublewrite=0 --sync-binlog=0

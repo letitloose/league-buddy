@@ -26,6 +26,11 @@ func NewTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 
 	schemaOnce.Do(func() {
+		// Real bcrypt cost is deliberately slow (~250-300ms/hash); every
+		// test that creates or logs in a user pays that, which dominates
+		// this suite's runtime. Fake test passwords need none of that.
+		BcryptCost = bcrypt.MinCost
+
 		db, err := sql.Open("mysql", testDSN)
 		if err != nil {
 			panic("NewTestDB open: " + err.Error())
@@ -78,9 +83,13 @@ func resetTestData(t *testing.T, db *sql.DB) {
 		testVerHash, _ = bcrypt.GenerateFromPassword([]byte("player@example.com"+"testpassword"), bcrypt.MinCost)
 	})
 
+	// Explicit id=1 — several tests hardcode userID 1 for this seed user,
+	// an invariant TRUNCATE's auto-increment reset used to provide for
+	// free (see reset-test.sql's DELETE-vs-TRUNCATE comment for why that
+	// reset is gone) but an explicit id restores just as well without it.
 	_, err = db.Exec(
-		`INSERT INTO users (email, hashed_password, created, active, verification_hash)
-		 VALUES (?, ?, UTC_TIMESTAMP(), 1, ?)`,
+		`INSERT INTO users (id, email, hashed_password, created, active, verification_hash)
+		 VALUES (1, ?, ?, UTC_TIMESTAMP(), 1, ?)`,
 		"player@example.com",
 		string(testUserHash),
 		string(testVerHash),

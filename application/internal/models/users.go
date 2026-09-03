@@ -11,6 +11,14 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// BcryptCost is the work factor for every password/verification hash this
+// package generates. Left at bcrypt's real cost (12) in production; test
+// setup (see NewTestDB) drops it to bcrypt.MinCost, since a real login's
+// deliberate ~250-300ms slowness serves no purpose against fake test
+// passwords and was, multiplied across every user this suite creates or
+// authenticates, the dominant cost of the whole test run.
+var BcryptCost = 12
+
 type User struct {
 	UserID           int `json:"userID,string"`
 	PlayerID         sql.NullInt32
@@ -43,12 +51,12 @@ type AuthContext struct {
 }
 
 func (m *UserModel) Insert(email, password string) (int, error) {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), BcryptCost)
 	if err != nil {
 		return 0, err
 	}
 
-	verificationHash, err := bcrypt.GenerateFromPassword([]byte(email+password), 12)
+	verificationHash, err := bcrypt.GenerateFromPassword([]byte(email+password), BcryptCost)
 	if err != nil {
 		return 0, err
 	}
@@ -104,7 +112,7 @@ func (m *UserModel) Delete(userID int) error {
 }
 
 func (m *UserModel) ResetPassword(email, password string) error {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), BcryptCost)
 	if err != nil {
 		return err
 	}

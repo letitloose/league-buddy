@@ -22,6 +22,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/letitloose/league-buddy/internal/models"
 	"github.com/letitloose/league-buddy/internal/services"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -40,6 +41,11 @@ func TestMain(m *testing.M) {
 	// (TestPlayerNotificationsHiddenWithoutSMSConfigured) temporarily
 	// unset this for their own duration.
 	os.Setenv("SMS_FEATURE_ENABLED", "true")
+
+	// Real bcrypt cost is deliberately slow (~250-300ms/hash); this
+	// package's route tests create and log in a lot of users, which
+	// dominates the runtime. Fake test passwords need none of that.
+	models.BcryptCost = bcrypt.MinCost
 
 	var err error
 	testDB, err = setupTestDB()

@@ -155,6 +155,16 @@ func matchDateTimeShort(t time.Time) string {
 	return e.Format("01/02") + " " + e.Format("3:04 PM")
 }
 
+// matchKickoffTime formats just the Eastern kickoff time, no date — for
+// display alongside a date that's already shown once elsewhere (a matchday
+// heading grouping several match cards under one date).
+func matchKickoffTime(t time.Time) string {
+	if !hasMatchTime(t) {
+		return ""
+	}
+	return t.In(easternLocation).Format("3:04 PM")
+}
+
 // templateRowWrapper bundles the root template data alongside one row for
 // match-update.html's goal-row/card-row sub-templates — Go's {{template}}
 // action only takes one pipeline argument, so goalRowData/cardRowData pack
@@ -211,6 +221,7 @@ var functions = template.FuncMap{
 	"humanDateTime":      humanDateTime,
 	"matchDateTime":      matchDateTime,
 	"matchDateTimeShort": matchDateTimeShort,
+	"matchKickoffTime":   matchKickoffTime,
 	"mapsURL":            mapsURL,
 	"goalRowData":        goalRowData,
 	"cardRowData":        cardRowData,

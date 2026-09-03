@@ -195,6 +195,54 @@ func TestActiveRoutes(t *testing.T) {
 	}
 }
 
+// The captain guide is a plain public page (same tier as /privacy and
+// /terms) — reachable with no login. The home page's link to it is gated
+// to actual team captains only — a plain active user (on no team, or on a
+// team as a regular player) shouldn't see it.
+func TestCaptainGuidePage(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Captain Guide Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Captain Guide Test Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupTeamCaptain(t, teamID, "captain-guide-captain@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+
+	code, _, body := ts.get(t, "/captains")
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	for _, want := range []string{"New Captain's Guide", "Import Roster", "Send Test Reminder"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected the captain guide to mention %q", want)
+		}
+	}
+
+	t.Run("shown to a team captain", func(t *testing.T) {
+		ts.login(t, "captain-guide-captain@test.com", "validpassword123")
+		_, _, homeBody := ts.get(t, "/")
+		if !strings.Contains(homeBody, `href="/captains"`) {
+			t.Error("expected the home page to link to the captain guide for a team captain")
+		}
+	})
+
+	t.Run("hidden from a plain active user", func(t *testing.T) {
+		ts.login(t, testActiveEmail, testActivePass)
+		_, _, homeBody := ts.get(t, "/")
+		if strings.Contains(homeBody, `href="/captains"`) {
+			t.Error("expected the home page not to link to the captain guide for a non-captain")
+		}
+	})
+}
+
 // Admin users can access admin-chain and team-manager-chain routes.
 func TestAdminRoutes(t *testing.T) {
 	app := newTestApplication(t)
@@ -1671,6 +1719,71 @@ func TestLeagueStandingsSortingAndLeaderTables(t *testing.T) {
 			t.Error("expected the seeded scorer/assister to appear in the leader tables")
 		}
 	})
+}
+
+// The league page's Matches tab groups a season's matches into per-day
+// cards (see groupMatchesByDay in handlers_leagues.go) instead of
+// season-view.html's flat table — this exercises that grouping end to end
+// rather than just unit-testing the grouping function in isolation.
+func TestLeagueMatchesTabGroupsByDay(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Matches Tab Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tm := &models.TeamModel{DB: testDB}
+	teamA, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Matches Tab Team A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamB, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Matches Tab Team B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamC, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Matches Tab Team C"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Matches Tab Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mm := &models.MatchModel{DB: testDB}
+	day1 := time.Date(2026, 9, 13, 13, 30, 0, 0, time.UTC) // 9:30 AM Eastern (EDT)
+	day2 := time.Date(2026, 9, 20, 13, 30, 0, 0, time.UTC)
+	if _, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamA, AwayTeamID: teamB, MatchDate: day1,
+		HomeScore: sql.NullInt32{Int32: 2, Valid: true}, AwayScore: sql.NullInt32{Int32: 1, Valid: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamA, AwayTeamID: teamC, MatchDate: day2}); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	code, _, body := ts.get(t, fmt.Sprintf("/league/%d?tab=matches", leagueID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if !strings.Contains(body, "Sunday, September 13, 2026") || !strings.Contains(body, "Sunday, September 20, 2026") {
+		t.Error("expected a matchday heading for each of the two match dates")
+	}
+	if !strings.Contains(body, "2&ndash;1") {
+		t.Error("expected the played match's score to render on its card")
+	}
+	if !strings.Contains(body, "9:30 AM") {
+		t.Error("expected the upcoming match's Eastern kickoff time to render on its card")
+	}
+	if !strings.Contains(body, "Matches Tab Team A") || !strings.Contains(body, "Matches Tab Team B") || !strings.Contains(body, "Matches Tab Team C") {
+		t.Error("expected all three team names to appear across the two matchday cards")
+	}
 }
 
 // The match view page is open to any active user, but the Edit Match link

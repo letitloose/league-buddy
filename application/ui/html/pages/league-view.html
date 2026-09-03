@@ -17,6 +17,83 @@
     </div>
     {{end}}
 
+    <div class="tab-bar">
+        <a class="{{if eq .Data.ActiveTab "standings"}}tab-link-active{{else}}tab-link{{end}}" href="/league/{{.Data.League.ID}}?tab=standings">Standings</a>
+        <a class="{{if eq .Data.ActiveTab "matches"}}tab-link-active{{else}}tab-link{{end}}" href="/league/{{.Data.League.ID}}?tab=matches">Matches</a>
+    </div>
+
+    {{if eq .Data.ActiveTab "matches"}}
+
+    {{if .Data.MatchesSeason}}
+    <div class="w-full md:w-3/4 px-2 md:px-0">
+        <h3 class="text-center mb-1">Matches</h3>
+        <p class="text-center text-sm text-gray-500 mb-4">{{.Data.MatchesSeason.Name}}</p>
+        {{if .Data.MatchDays}}
+        <div class="space-y-6 mb-6">
+            {{range .Data.MatchDays}}
+            <div>
+                <p class="matchday-heading">{{.Label}}</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {{range .Matches}}
+                    <a class="match-card" href="/match/{{.Match.ID}}">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="font-medium text-sm text-right flex-1">{{.HomeTeamName}}</span>
+                            <span class="text-base font-bold tabular-nums px-2 shrink-0">
+                                {{if and .Match.HomeScore.Valid .Match.AwayScore.Valid}}
+                                {{.Match.HomeScore.Int32}}&ndash;{{.Match.AwayScore.Int32}}
+                                {{else}}
+                                {{with matchKickoffTime .Match.MatchDate}}{{.}}{{else}}<span class="text-gray-400">vs</span>{{end}}
+                                {{end}}
+                            </span>
+                            <span class="font-medium text-sm text-left flex-1">{{.AwayTeamName}}</span>
+                        </div>
+                        {{if .Location}}<p class="text-center text-xs text-gray-500 mt-2">{{.Location.Name}}</p>{{end}}
+                        <div class="flex justify-between text-xs text-gray-400 mt-1">
+                            <span>{{.HomeIn}} in / {{.HomeOut}} out</span>
+                            <span>{{.AwayIn}} in / {{.AwayOut}} out</span>
+                        </div>
+                    </a>
+                    {{end}}
+                </div>
+            </div>
+            {{end}}
+        </div>
+        {{else}}
+        <p class="text-center text-gray-600 mb-6">No matches scheduled for this season yet.</p>
+        {{end}}
+    </div>
+    {{else}}
+    <p class="text-center text-gray-600 mb-6">No seasons yet.</p>
+    {{end}}
+
+    <div class="bg-white shadow-md rounded px-6 py-4 mt-2 mb-6 w-full md:w-2/3 mx-2 md:mx-0">
+        <h3 class="pt-0 text-center">Seasons</h3>
+        {{if .Data.Seasons}}
+        <table class="text-left w-full mb-4">
+            <tr><th>Name</th><th>Dates</th></tr>
+            {{range .Data.Seasons}}
+            <tr>
+                <td><a href="/season/{{.ID}}">{{.Name}}</a></td>
+                <td>
+                    {{if .StartDate.Valid}}{{humanDate .StartDate.Time}}{{end}}
+                    {{if or .StartDate.Valid .EndDate.Valid}} &ndash; {{end}}
+                    {{if .EndDate.Valid}}{{humanDate .EndDate.Time}}{{end}}
+                </td>
+            </tr>
+            {{end}}
+        </table>
+        {{else}}
+        <p class="text-center text-gray-600 mb-4">No seasons yet.</p>
+        {{end}}
+        {{if .Data.CanManage}}
+        <div class="text-center">
+            <a class="btn m-0" href="/admin/season/create?leagueID={{.Data.League.ID}}">Add Season</a>
+        </div>
+        {{end}}
+    </div>
+
+    {{else}}
+
     {{if .Data.StandingsSeason}}
     <div class="w-full md:w-2/3 px-2 md:px-0">
         <h3 class="text-center mb-1">Standings</h3>
@@ -74,31 +151,7 @@
     </div>
     {{end}}
 
-    <div class="bg-white shadow-md rounded px-6 py-4 mt-2 mb-6 w-full md:w-2/3 mx-2 md:mx-0">
-        <h3 class="pt-0 text-center">Seasons</h3>
-        {{if .Data.Seasons}}
-        <table class="text-left w-full mb-4">
-            <tr><th>Name</th><th>Dates</th></tr>
-            {{range .Data.Seasons}}
-            <tr>
-                <td><a href="/season/{{.ID}}">{{.Name}}</a></td>
-                <td>
-                    {{if .StartDate.Valid}}{{humanDate .StartDate.Time}}{{end}}
-                    {{if or .StartDate.Valid .EndDate.Valid}} &ndash; {{end}}
-                    {{if .EndDate.Valid}}{{humanDate .EndDate.Time}}{{end}}
-                </td>
-            </tr>
-            {{end}}
-        </table>
-        {{else}}
-        <p class="text-center text-gray-600 mb-4">No seasons yet.</p>
-        {{end}}
-        {{if .Data.CanManage}}
-        <div class="text-center">
-            <a class="btn m-0" href="/admin/season/create?leagueID={{.Data.League.ID}}">Add Season</a>
-        </div>
-        {{end}}
-    </div>
+    {{end}}
 
     {{if .IsAdmin}}
     <div class="bg-white shadow-md rounded px-6 py-4 mt-2 mb-6 w-full md:w-2/3 mx-2 md:mx-0">

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/letitloose/league-buddy/internal/models"
@@ -38,11 +39,59 @@ type leagueViewData struct {
 	CanManage        bool
 	Admins           []*models.Player
 	Seasons          []*models.Season
+	ActiveTab        string
 	StandingsSeason  *models.Season
 	Standings        []*standingRow
 	StandingsColumns []standingsColumn
 	GoalLeaders      []*models.LeagueLeaderLine
 	AssistLeaders    []*models.LeagueLeaderLine
+	MatchesSeason    *models.Season
+	MatchDays        []*matchDayGroup
+}
+
+// matchDayGroup buckets a season's matches by calendar date (Eastern, same
+// as every other match-date display — see matchDateTime) for the league
+// page's Matches tab, rendered as one heading plus a grid of match cards
+// per day rather than season-view.html's flat table.
+type matchDayGroup struct {
+	Label   string
+	Matches []*seasonMatchRow
+}
+
+// matchDayKey/matchDayLabel key and label a match's calendar day. Mirrors
+// matchDateTime's own branch exactly (raw date for a "no time recorded"
+// sentinel, Eastern-converted date once a real time is on file) — grouping
+// by a different rule than the date already shown on each card would let a
+// match's heading and its own card disagree about what day it's on.
+func matchDayKey(t time.Time) string {
+	if !hasMatchTime(t) {
+		return t.Format("2006-01-02")
+	}
+	return t.In(easternLocation).Format("2006-01-02")
+}
+
+func matchDayLabel(t time.Time) string {
+	if !hasMatchTime(t) {
+		return t.Format("Monday, January 2, 2006")
+	}
+	return t.In(easternLocation).Format("Monday, January 2, 2006")
+}
+
+// groupMatchesByDay buckets pre-sorted (by MatchModel.GetBySeason) match
+// rows into consecutive same-day groups, preserving row order within a day.
+func groupMatchesByDay(rows []*seasonMatchRow) []*matchDayGroup {
+	var groups []*matchDayGroup
+	var currentKey string
+	for _, row := range rows {
+		key := matchDayKey(row.Match.MatchDate)
+		if len(groups) == 0 || key != currentKey {
+			groups = append(groups, &matchDayGroup{Label: matchDayLabel(row.Match.MatchDate)})
+			currentKey = key
+		}
+		last := groups[len(groups)-1]
+		last.Matches = append(last.Matches, row)
+	}
+	return groups
 }
 
 // standingRow is one team's line in a season's standings table.
@@ -241,6 +290,35 @@ func (app *application) leagueView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	activeTab := r.URL.Query().Get("tab")
+	if activeTab != "matches" {
+		activeTab = "standings"
+	}
+
+	var matchesSeason *models.Season
+	var matchDays []*matchDayGroup
+	if activeTab == "matches" {
+		matchesSeason, err = sm.GetCurrentOrNext(id, time.Now())
+		if err != nil && !errors.Is(err, models.ErrNoRecord) {
+			app.serverError(w, err)
+			return
+		}
+		if matchesSeason != nil {
+			mm := &models.MatchModel{DB: app.playerService.DB}
+			matches, err := mm.GetBySeason(matchesSeason.ID)
+			if err != nil {
+				app.serverError(w, err)
+				return
+			}
+			rows, err := app.buildSeasonMatchRows(matches)
+			if err != nil {
+				app.serverError(w, err)
+				return
+			}
+			matchDays = groupMatchesByDay(rows)
+		}
+	}
+
 	data := app.newTemplateData(r)
 	data.Data = &leagueViewData{
 		League:           league,
@@ -248,11 +326,14 @@ func (app *application) leagueView(w http.ResponseWriter, r *http.Request) {
 		CanManage:        app.canManageLeague(r, id),
 		Admins:           admins,
 		Seasons:          seasons,
+		ActiveTab:        activeTab,
 		StandingsSeason:  standingsSeason,
 		Standings:        standings,
 		StandingsColumns: buildStandingsColumns(id, sortKey, dir),
 		GoalLeaders:      goalLeaders,
 		AssistLeaders:    assistLeaders,
+		MatchesSeason:    matchesSeason,
+		MatchDays:        matchDays,
 	}
 	data.Breadcrumbs = []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},

@@ -221,6 +221,113 @@ func TestActivateUserWithInviteAutoJoinsTeam(t *testing.T) {
 	}
 }
 
+// A captain typically invites an existing roster placeholder by the email
+// already on file, but the invitee often signs up with a different,
+// personal email. That must claim the existing placeholder (updating its
+// email to the one actually signed up with) rather than leaving it
+// orphaned and creating a second, duplicate player row for the same
+// person — the exact bug this test guards against.
+func TestActivateUserWithInviteClaimsPlaceholderByInviteEmailNotSignupEmail(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	tm := &models.TeamModel{DB: db}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Mismatched Email Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pm := &models.PlayerModel{DB: db}
+	placeholderID, err := pm.Insert(&models.Player{
+		FirstName: "Old",
+		LastName:  "Roster",
+		Email:     sql.NullString{String: "old-team-email@example.com", Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	users := &models.UserModel{DB: db}
+	creator, err := users.GetUserByEmail("player@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	im := &models.InviteModel{DB: db}
+	inviteID, err := im.Insert(&models.Invite{
+		Token:           "mismatched-email-token",
+		TeamID:          teamID,
+		Email:           "old-team-email@example.com",
+		CreatedByUserID: creator.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	userService := UserService{UserModel: users}
+	form := &UserForm{
+		Email:           "new-personal-email@example.com",
+		Password:        "validpassword123",
+		ConfirmPassword: "validpassword123",
+		InviteToken:     "mismatched-email-token",
+	}
+	if err := userService.InsertUser(form); err != nil {
+		t.Fatal(err)
+	}
+
+	hash, err := userService.GetVerificationHashByEmail("new-personal-email@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := userService.ActivateUser(hash); err != nil {
+		t.Fatal(err)
+	}
+
+	activatedUser, err := users.GetUserByEmail("new-personal-email@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !activatedUser.PlayerID.Valid || int(activatedUser.PlayerID.Int32) != placeholderID {
+		t.Fatalf("expected the existing placeholder player %d to be claimed, got %v", placeholderID, activatedUser.PlayerID)
+	}
+
+	claimedPlayer, err := pm.Get(placeholderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimedPlayer.Email.String != "new-personal-email@example.com" {
+		t.Fatalf("expected the claimed player's email to be updated to the signup email, got %q", claimedPlayer.Email.String)
+	}
+
+	tmm := &models.TeamMemberModel{DB: db}
+	isMember, err := tmm.IsMember(placeholderID, teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isMember {
+		t.Fatal("expected the claimed placeholder to be added to the invited team")
+	}
+
+	// No orphaned second player record for either email.
+	if _, err := pm.GetByEmail("old-team-email@example.com"); err != models.ErrNoRecord {
+		t.Fatalf("expected no player left under the stale invite email, got %v", err)
+	}
+	byNewEmail, err := pm.GetByEmail("new-personal-email@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byNewEmail.ID != placeholderID {
+		t.Fatalf("expected exactly one player record (the claimed placeholder), got a different one: %d", byNewEmail.ID)
+	}
+
+	invite, err := im.Get(inviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !invite.UsedAt.Valid {
+		t.Fatal("expected invite to be marked used")
+	}
+}
+
 func TestActivateUserWithCaptainInviteSetsCaptain(t *testing.T) {
 	db := models.NewTestDB(t)
 

@@ -271,6 +271,19 @@ func (service *UserService) ActivateUser(hash string) error {
 // an approved join request adds a membership. Safe to call more than once
 // for the same user — re-linking to the same player, or re-consuming an
 // already-used invite, is a no-op.
+//
+// The player match is looked up by the invite's own target email first,
+// falling back to the signup email only when that doesn't hit (or there's
+// no invite at all). A captain typically invites an existing roster
+// placeholder by the email they already have on file, but the person often
+// signs up with a different, personal email — matching on the signup email
+// alone would miss that placeholder entirely and create a second, orphaned
+// player row instead of claiming it (the roster would end up with two
+// entries for the same person: the old placeholder, untouched, and a new
+// one holding the actual team membership). Once a placeholder is claimed
+// this way, its stored email is updated to the one actually signed up
+// with, so reminder emails and future lookups follow the real account
+// rather than the stale invited address.
 func (service *UserService) linkOrCreatePlayer(userID int, email string) error {
 	pm := models.PlayerModel{DB: service.DB}
 	im := models.InviteModel{DB: service.DB}
@@ -289,7 +302,22 @@ func (service *UserService) linkOrCreatePlayer(userID int, email string) error {
 		}
 	}
 
-	if existing, err := pm.GetByEmail(email); err == nil {
+	lookupEmail := email
+	if invite != nil && invite.Email != "" {
+		if _, err := pm.GetByEmail(invite.Email); err == nil {
+			lookupEmail = invite.Email
+		} else if !errors.Is(err, models.ErrNoRecord) {
+			return err
+		}
+	}
+
+	if existing, err := pm.GetByEmail(lookupEmail); err == nil {
+		if existing.Email.String != email {
+			existing.Email = sql.NullString{String: email, Valid: true}
+			if err := pm.Update(existing); err != nil {
+				return err
+			}
+		}
 		if invite != nil {
 			team, err := (&models.TeamModel{DB: service.DB}).Get(invite.TeamID)
 			if err != nil {

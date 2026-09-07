@@ -183,6 +183,53 @@ func TestSetLegendStatus(t *testing.T) {
 	}
 }
 
+func TestIsLegend(t *testing.T) {
+	db := NewTestDB(t)
+
+	pm := PlayerModel{DB: db}
+	tmm := TeamMemberModel{DB: db}
+
+	playerID, err := pm.Insert(&Player{FirstName: "Old", LastName: "Timer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	isLegend, err := tmm.IsLegend(playerID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isLegend {
+		t.Fatal("expected a freshly-added member to not be a Legend")
+	}
+
+	if err := tmm.SetLegendStatus(playerID, 1, true); err != nil {
+		t.Fatal(err)
+	}
+	isLegend, err = tmm.IsLegend(playerID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isLegend {
+		t.Fatal("expected IsLegend to reflect SetLegendStatus(true)")
+	}
+
+	// No membership row at all reports false, not an error.
+	otherPlayerID, err := pm.Insert(&Player{FirstName: "Never", LastName: "Joined"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	isLegend, err = tmm.IsLegend(otherPlayerID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isLegend {
+		t.Fatal("expected false for a player with no membership row at all")
+	}
+}
+
 func TestGetTeamsForPlayer(t *testing.T) {
 	db := NewTestDB(t)
 

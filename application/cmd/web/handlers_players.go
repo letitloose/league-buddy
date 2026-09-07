@@ -147,6 +147,11 @@ type playerProfile struct {
 	Address   *models.Address
 	CanManage bool
 	IsSelf    bool
+	// CanViewPrivateInfo gates the bio card (email/phone/date of
+	// birth/address) — true for everyone CanManage already covers, plus a
+	// plain teammate (see isTeammateOfPlayer). Name and stats stay visible
+	// to any viewer regardless.
+	CanViewPrivateInfo bool
 
 	// All-time totals and the season-by-season table backing them — see
 	// buildPlayerCareerStats. CareerMP (RSVP/attendance-derived) and
@@ -314,6 +319,16 @@ func (app *application) playerView(w http.ResponseWriter, r *http.Request) {
 	profile.CanManage = app.canManagePlayer(r, player)
 	profile.IsSelf = app.getPlayerID(r) == player.ID
 
+	profile.CanViewPrivateInfo = profile.CanManage
+	if !profile.CanViewPrivateInfo {
+		isTeammate, err := app.isTeammateOfPlayer(r, player)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		profile.CanViewPrivateInfo = isTeammate
+	}
+
 	data := app.newTemplateData(r)
 	data.Data = profile
 	if team != nil {
@@ -350,6 +365,26 @@ func (app *application) canManagePlayer(r *http.Request, player *models.Player) 
 		}
 	}
 	return false
+}
+
+// isTeammateOfPlayer reports whether the current request's user shares
+// any team membership with player — Legend status on either side doesn't
+// matter, same as every other plain membership check in this codebase
+// (e.g. IsMember, GetTeamsForPlayer). Used to decide whether a viewer who
+// isn't already covered by canManagePlayer still gets to see player's
+// private bio info (email/phone/date of birth/address).
+func (app *application) isTeammateOfPlayer(r *http.Request, player *models.Player) (bool, error) {
+	tmm := &models.TeamMemberModel{DB: app.playerService.DB}
+	teams, err := tmm.GetTeamsForPlayer(player.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, team := range teams {
+		if app.isMemberOfTeam(r, team.ID) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (app *application) playerUpdate(w http.ResponseWriter, r *http.Request) {

@@ -259,6 +259,23 @@ func (app *application) isMemberOfTeam(r *http.Request, teamID int) bool {
 	return false
 }
 
+// canRSVPAsTeam reports whether playerID may RSVP for teamID on a given
+// match — a member of that team, excluding a Legend (see
+// models.TeamMemberModel.SetLegendStatus): a Legend stays linked to their
+// old team for career stats, but shouldn't be prompted to commit to
+// showing up for games they're no longer actually rostered to play.
+func (app *application) canRSVPAsTeam(r *http.Request, playerID, teamID int) (bool, error) {
+	if !app.isMemberOfTeam(r, teamID) {
+		return false, nil
+	}
+	tmm := &models.TeamMemberModel{DB: app.playerService.DB}
+	isLegend, err := tmm.IsLegend(playerID, teamID)
+	if err != nil {
+		return false, err
+	}
+	return !isLegend, nil
+}
+
 func (app *application) isCaptainOfTeam(r *http.Request, teamID int) bool {
 	captainTeamIDs, ok := r.Context().Value(captainTeamIDsContextKey).([]int)
 	if !ok {

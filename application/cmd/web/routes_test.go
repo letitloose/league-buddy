@@ -2485,6 +2485,81 @@ func TestMatchRSVP(t *testing.T) {
 	})
 }
 
+// A Legend (see TeamMemberModel.SetLegendStatus) stays on the roster for
+// career stats but shouldn't be prompted to commit to showing up — the
+// widget doesn't render, and a direct POST is redirected away without
+// recording a response, the same "in-handler eligibility check enforced
+// server-side, not just hidden in the UI" pattern as a past match.
+func TestMatchRSVPClosedForLegends(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Legend RSVP League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Legend RSVP Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Legend RSVP Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Legend RSVP Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now().AddDate(0, 0, 3),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	legendPlayerID := setupTeamCaptain(t, homeTeamID, "legend-rsvp-player@test.com", "validpassword123")
+	tmm := &models.TeamMemberModel{DB: testDB}
+	if err := tmm.SetLegendStatus(legendPlayerID, homeTeamID, true); err != nil {
+		t.Fatal(err)
+	}
+	rm := &models.RSVPModel{DB: testDB}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "legend-rsvp-player@test.com", "validpassword123")
+
+	_, _, getBody := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+	if strings.Contains(getBody, "Your RSVP") {
+		t.Error("expected no RSVP widget for a Legend")
+	}
+	_, _, signupBody := ts.get(t, "/user/signup")
+	csrfToken := extractCSRFToken(t, signupBody)
+
+	code, headers, _ := ts.postForm(t, fmt.Sprintf("/match/%d/rsvp", matchID), url.Values{
+		"csrf_token": {csrfToken},
+		"status":     {"yes"},
+	})
+	if code != http.StatusSeeOther {
+		t.Errorf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	if loc := headers.Get("Location"); loc != fmt.Sprintf("/match/%d", matchID) {
+		t.Errorf("want Location %q; got %q", fmt.Sprintf("/match/%d", matchID), loc)
+	}
+
+	rsvps, err := rm.ListByMatch(matchID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rsvps) != 0 {
+		t.Fatalf("expected no RSVP recorded for a Legend, got %d rows", len(rsvps))
+	}
+}
+
 // A match that already happened can no longer be RSVP'd to: the widget
 // doesn't render, and a direct POST is redirected away without recording a
 // response — the same "in-handler eligibility check" enforced server-side,
@@ -3996,6 +4071,103 @@ func TestPlayerNotificationsHidesSMSCardsWithoutSMSConfigured(t *testing.T) {
 	if !strings.Contains(body, "Add to Calendar") {
 		t.Error("expected the Calendar card to still show while SMS isn't configured")
 	}
+}
+
+// A player's private bio info (email/phone/date of birth/address) is
+// only shown to people who already have a legitimate reason to see it —
+// the player themself, an admin, a captain/league admin of any team they
+// belong to, or a plain teammate. The page itself (name, stats) stays
+// visible to any active user regardless.
+func TestPlayerProfilePrivateInfoVisibility(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Privacy Test League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Privacy Test FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Other Team FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pm := &models.PlayerModel{DB: testDB}
+	targetPlayerID, err := pm.Insert(&models.Player{
+		FirstName:   "Private",
+		LastName:    "Person",
+		Email:       sql.NullString{String: "private-person@example.com", Valid: true},
+		PhoneNumber: sql.NullString{String: "518-555-0177", Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	if err := tmm.AddMembership(targetPlayerID, teamID); err != nil {
+		t.Fatal(err)
+	}
+
+	setupRosterMember(t, teamID, "privacy-teammate@test.com", "validpassword123")
+	setupTeamCaptain(t, teamID, "privacy-captain@test.com", "validpassword123")
+	setupLeagueAdmin(t, leagueID, "privacy-leagueadmin@test.com", "validpassword123")
+	setupRosterMember(t, otherTeamID, "privacy-stranger@test.com", "validpassword123")
+
+	viewURL := fmt.Sprintf("/player/view/%d", targetPlayerID)
+
+	t.Run("a stranger on a different team sees the page but not private info", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "privacy-stranger@test.com", "validpassword123")
+		code, _, body := ts.get(t, viewURL)
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "Private Person") {
+			t.Error("expected the player's name to still show")
+		}
+		if strings.Contains(body, "private-person@example.com") || strings.Contains(body, "518-555-0177") {
+			t.Error("expected private info to be hidden from a stranger")
+		}
+	})
+
+	t.Run("a teammate sees private info", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "privacy-teammate@test.com", "validpassword123")
+		_, _, body := ts.get(t, viewURL)
+		if !strings.Contains(body, "private-person@example.com") {
+			t.Error("expected a teammate to see the player's private info")
+		}
+	})
+
+	t.Run("the team's captain sees private info", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "privacy-captain@test.com", "validpassword123")
+		_, _, body := ts.get(t, viewURL)
+		if !strings.Contains(body, "private-person@example.com") {
+			t.Error("expected the captain to see the player's private info")
+		}
+	})
+
+	t.Run("a league admin of that league sees private info", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "privacy-leagueadmin@test.com", "validpassword123")
+		_, _, body := ts.get(t, viewURL)
+		if !strings.Contains(body, "private-person@example.com") {
+			t.Error("expected a league admin to see the player's private info")
+		}
+	})
+
+	t.Run("a site admin sees private info", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testAdminEmail, testAdminPass)
+		_, _, body := ts.get(t, viewURL)
+		if !strings.Contains(body, "private-person@example.com") {
+			t.Error("expected a site admin to see the player's private info")
+		}
+	})
 }
 
 // A player's profile page shows all-time totals (goals/assists/cards from

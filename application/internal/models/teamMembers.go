@@ -83,6 +83,24 @@ func (m *TeamMemberModel) IsMember(playerID, teamID int) (bool, error) {
 	return exists, nil
 }
 
+// IsLegend reports whether playerID's membership on teamID is currently
+// marked as a Legend (see SetLegendStatus) — used to gate actions a
+// Legend shouldn't take (RSVPing) even though Legend status leaves
+// underlying membership (IsMember) itself untouched. Returns false, not
+// an error, for a playerID/teamID pair with no membership row at all —
+// callers are expected to check IsMember (or equivalent) first, so this
+// only needs to answer "is the known membership a Legend one."
+func (m *TeamMemberModel) IsLegend(playerID, teamID int) (bool, error) {
+	stmt := `SELECT COALESCE((SELECT isLegend FROM teamMembers WHERE playerID = ? AND teamID = ?), 0)`
+
+	var isLegend bool
+	err := m.DB.QueryRow(stmt, playerID, teamID).Scan(&isLegend)
+	if err != nil {
+		return false, err
+	}
+	return isLegend, nil
+}
+
 // HasTeamInLeague reports whether playerID already belongs to some team in
 // leagueID — the check behind the "one team per league" rule.
 func (m *TeamMemberModel) HasTeamInLeague(playerID, leagueID int) (bool, error) {

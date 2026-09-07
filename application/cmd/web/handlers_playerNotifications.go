@@ -77,13 +77,8 @@ func (app *application) playerNotifications(w http.ResponseWriter, r *http.Reque
 	}
 
 	pageData := &playerNotificationsData{
-		Player: player,
-		// TODO(sms): forced off regardless of app.smsFeatureEnabled() —
-		// phone verification/SMS reminders are hidden from this page
-		// until SMS development is finished. Restore
-		// `app.smsFeatureEnabled()` here (and drop this comment) once
-		// that's ready; nothing else needs to change.
-		SMSFeatureEnabled: false,
+		Player:            player,
+		SMSFeatureEnabled: app.smsFeatureEnabled(),
 	}
 
 	if pageData.SMSFeatureEnabled {

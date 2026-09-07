@@ -649,7 +649,15 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 
 	playerID := app.getPlayerID(r)
 	isPast := matchIsPast(match)
-	canRSVP := playerID > 0 && !isPast && (app.isMemberOfTeam(r, match.HomeTeamID) || app.isMemberOfTeam(r, match.AwayTeamID))
+	canRSVPHome, err := app.canRSVPAsTeam(r, playerID, match.HomeTeamID)
+	if err != nil {
+		return nil, err
+	}
+	canRSVPAway, err := app.canRSVPAsTeam(r, playerID, match.AwayTeamID)
+	if err != nil {
+		return nil, err
+	}
+	canRSVP := playerID > 0 && !isPast && (canRSVPHome || canRSVPAway)
 
 	// Before the match has a recorded result, a non-manager only sees their
 	// own team's box — not the opponent's roster/RSVP roll call, notes,
@@ -861,8 +869,9 @@ func (app *application) matchView(w http.ResponseWriter, r *http.Request) {
 
 // matchRSVPSubmit records the current player's yes/no response (plus an
 // optional message) to a match. Eligibility is "on the roster of either the
-// home or away team" (isMemberOfTeam), the same bar joinRequestSubmit uses
-// for its own in-handler check rather than a dedicated middleware tier.
+// home or away team" (isMemberOfTeam) and not a Legend of that team (see
+// canRSVPAsTeam) — the same bar joinRequestSubmit uses for its own
+// in-handler check rather than a dedicated middleware tier.
 func (app *application) matchRSVPSubmit(w http.ResponseWriter, r *http.Request) {
 	match, ok := app.getRouteMatch(w, r)
 	if !ok {
@@ -883,6 +892,16 @@ func (app *application) matchRSVPSubmit(w http.ResponseWriter, r *http.Request) 
 		teamID = match.HomeTeamID
 	}
 
+	canRSVP, err := app.canRSVPAsTeam(r, playerID, teamID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	if !canRSVP {
+		http.Redirect(w, r, fmt.Sprintf("/match/%d", match.ID), http.StatusSeeOther)
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		app.clientError(w, http.StatusBadRequest)
 		return
@@ -892,7 +911,7 @@ func (app *application) matchRSVPSubmit(w http.ResponseWriter, r *http.Request) 
 		Message: r.PostForm.Get("message"),
 	}
 
-	err := app.rsvpService.SubmitRSVP(match.ID, playerID, teamID, form)
+	err = app.rsvpService.SubmitRSVP(match.ID, playerID, teamID, form)
 	if err != nil {
 		if errors.Is(err, models.ErrBadData) {
 			viewData, buildErr := app.buildMatchViewData(r, match)

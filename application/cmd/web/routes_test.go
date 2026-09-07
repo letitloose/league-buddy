@@ -27,6 +27,9 @@ func TestPublicRoutes(t *testing.T) {
 		{"login", "/user/login"},
 		{"signup", "/user/signup"},
 		{"forgot password", "/user/forgotPassword"},
+		{"privacy policy", "/privacy"},
+		{"terms and conditions", "/terms"},
+		{"sms opt-in", "/sms-optin"},
 	}
 
 	for _, tt := range tests {
@@ -36,6 +39,25 @@ func TestPublicRoutes(t *testing.T) {
 				t.Errorf("want %d; got %d", http.StatusOK, code)
 			}
 		})
+	}
+}
+
+// /sms-optin exists so carrier/Twilio review can see the phone-
+// verification/reminder-delivery opt-in flow without logging in — it must
+// stay reachable unauthenticated and show the actual opt-in language, not
+// just render as an empty page.
+func TestSMSOptInPage(t *testing.T) {
+	app := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+
+	code, _, body := ts.get(t, "/sms-optin")
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	for _, want := range []string{"Phone Number", "Reminder Delivery", "Privacy Policy"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected the page to mention %q", want)
+		}
 	}
 }
 

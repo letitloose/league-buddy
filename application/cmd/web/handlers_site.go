@@ -64,6 +64,15 @@ func (app *application) termsConditions(w http.ResponseWriter, r *http.Request) 
 	app.render(w, http.StatusOK, "terms-conditions.html", app.newTemplateData(r))
 }
 
+// smsOptIn is a static, non-functional mockup of the real Notification
+// Preferences page's phone-verification/reminder-delivery opt-in flow
+// (see player-notifications.html) — a plain public page for the same
+// reason as privacyPolicy/termsConditions above: carrier/Twilio review
+// needs a URL that shows the opt-in mechanism without logging in.
+func (app *application) smsOptIn(w http.ResponseWriter, r *http.Request) {
+	app.render(w, http.StatusOK, "sms-optin.html", app.newTemplateData(r))
+}
+
 // captainGuide is a plain public page (no auth required) walking a newly
 // invited captain through what they can do — linked from the home page.
 func (app *application) captainGuide(w http.ResponseWriter, r *http.Request) {

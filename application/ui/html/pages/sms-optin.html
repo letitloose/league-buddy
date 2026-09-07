@@ -1,0 +1,57 @@
+{{define "title"}}SMS Opt-In{{end}}
+
+{{define "main"}}
+<div class="flex items-center flex-col">
+    <h2>SMS Opt-In</h2>
+    <p class="text-sm text-gray-500 text-center mb-4 max-w-md">This is a static sample of the phone-verification and reminder-delivery opt-in flow every player sees on their own Notification Preferences page after logging in.</p>
+    <div class="w-full max-w-md">
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <h3 class="pt-0 text-center">Phone Number</h3>
+            <p class="text-center text-gray-500 mb-4">Not verified. Verify a number to unlock text notifications.</p>
+
+            <div class="mb-4">
+                <label class="field-label">Phone number</label>
+                <input class="form-field" type="tel" disabled value="518-555-0100">
+                <div class="mt-2 text-center"><button class="btn-secondary m-0" type="button" disabled>Send Verification Code</button></div>
+            </div>
+
+            <div>
+                <label class="field-label">Enter the 6-digit code we texted you</label>
+                <input class="form-field" type="text" disabled placeholder="123456">
+                <div class="mt-2 text-center"><button class="btn m-0" type="button" disabled>Confirm Code</button></div>
+            </div>
+        </div>
+
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <h3 class="pt-0 text-center">Reminder Delivery</h3>
+
+            <div class="mb-4">
+                <label class="field-label">RSVP Reminders</label>
+                <select class="form-field" disabled>
+                    <option selected>Email</option>
+                    <option>Text</option>
+                    <option>Both</option>
+                    <option>Off</option>
+                </select>
+            </div>
+
+            <div class="mb-4">
+                <label class="field-label">Captain's Message Reminders</label>
+                <p class="text-xs text-gray-500 mb-1">Only sent if you're a team's captain.</p>
+                <select class="form-field" disabled>
+                    <option selected>Email</option>
+                    <option>Text</option>
+                    <option>Both</option>
+                    <option>Off</option>
+                </select>
+            </div>
+
+            <p class="text-xs text-gray-500 mb-4">Verify your phone number above to choose Text or Both.</p>
+
+            <div class="text-center"><button class="btn m-0" type="button" disabled>Save</button></div>
+        </div>
+
+        <p class="text-xs text-gray-500 text-center">Text reminders are opt-in and message/data rates may apply. See our <a class="underline" href="/privacy">Privacy Policy</a> for details, including how to stop messages (reply STOP) or get help (reply HELP).</p>
+    </div>
+</div>
+{{end}}

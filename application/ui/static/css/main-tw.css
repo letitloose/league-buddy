@@ -982,6 +982,10 @@ table tr:nth-child(even) {
   visibility: visible;
 }
 
+.static {
+  position: static;
+}
+
 .fixed {
   position: fixed;
 }

@@ -82,7 +82,7 @@ func TestSMSOptInPage(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("want %d; got %d", http.StatusOK, code)
 	}
-	if !strings.Contains(body, `src="/static/images/sms-optin-1.png"`) {
+	if !strings.Contains(body, `src="/static/images/sms-opt-in-begin.png"`) {
 		t.Error("expected the page to reference its screenshot images")
 	}
 }

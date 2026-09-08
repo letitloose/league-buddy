@@ -2,23 +2,43 @@
 
 {{define "main"}}
 <div class="flex flex-col items-center">
-    <div class="w-full max-w-2xl px-2 md:px-0">
+    <div class="w-full max-w-5xl px-2 md:px-0">
         <h2 class="text-center">SMS Opt-In</h2>
-        <p class="text-sm text-gray-500 text-center mb-6">Screenshots of the real phone-verification and reminder-delivery opt-in flow on a player's Notification Preferences page.</p>
+        <p class="text-sm text-gray-500 text-center mb-6">The real phone-verification and reminder-delivery opt-in flow on a player's Notification Preferences page, start to finish. Click any screenshot to view it full-size.</p>
 
         <div class="bg-white shadow-md rounded px-6 py-6 mb-4">
-            <h3 class="pt-0 text-center">Phone number entry and SMS consent</h3>
-            <img src="/static/images/sms-optin-1.png" alt="Phone number entry and SMS consent checkbox on the Notification Preferences page">
+            <h3 class="pt-0 text-center">1. Before verifying: phone number entry and SMS consent</h3>
+            <a href="/static/images/sms-opt-in-begin.png" target="_blank" rel="noopener noreferrer">
+                <img class="cursor-zoom-in" src="/static/images/sms-opt-in-begin.png" alt="Phone number entry and unchecked SMS consent checkbox on the Notification Preferences page">
+            </a>
         </div>
 
         <div class="bg-white shadow-md rounded px-6 py-6 mb-4">
-            <h3 class="pt-0 text-center">Verification code confirmation</h3>
-            <img src="/static/images/sms-optin-2.png" alt="Verification code confirmation on the Notification Preferences page">
+            <h3 class="pt-0 text-center">2. Consent is required: blocked without checking the box</h3>
+            <a href="/static/images/sms-opt-in-popup-consent.png" target="_blank" rel="noopener noreferrer">
+                <img class="cursor-zoom-in" src="/static/images/sms-opt-in-popup-consent.png" alt="Browser validation message requiring the SMS consent checkbox before proceeding">
+            </a>
         </div>
 
         <div class="bg-white shadow-md rounded px-6 py-6 mb-4">
-            <h3 class="pt-0 text-center">Reminder delivery preferences</h3>
-            <img src="/static/images/sms-optin-3.png" alt="Reminder delivery preferences on the Notification Preferences page">
+            <h3 class="pt-0 text-center">3. After consenting: verification code sent</h3>
+            <a href="/static/images/sms-opt-in-verification-sent.png" target="_blank" rel="noopener noreferrer">
+                <img class="cursor-zoom-in" src="/static/images/sms-opt-in-verification-sent.png" alt="Confirmation that a verification code was texted, with the code entry field">
+            </a>
+        </div>
+
+        <div class="bg-white shadow-md rounded px-6 py-6 mb-4">
+            <h3 class="pt-0 text-center">4. Phone number verified</h3>
+            <a href="/static/images/sms-opt-in-verified-confirmed.png" target="_blank" rel="noopener noreferrer">
+                <img class="cursor-zoom-in" src="/static/images/sms-opt-in-verified-confirmed.png" alt="Phone number verified confirmation on the Notification Preferences page">
+            </a>
+        </div>
+
+        <div class="bg-white shadow-md rounded px-6 py-6 mb-4">
+            <h3 class="pt-0 text-center">5. Reminder delivery preferences, now available by text</h3>
+            <a href="/static/images/sms-opt-in-notification-preferences.png" target="_blank" rel="noopener noreferrer">
+                <img class="cursor-zoom-in" src="/static/images/sms-opt-in-notification-preferences.png" alt="Reminder delivery preferences with Text now selectable, plus site footer showing Privacy Policy and Terms links">
+            </a>
         </div>
     </div>
 </div>

@@ -46,6 +46,7 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodPost, "/user/resetPassword", dynamic.ThenFunc(app.resetPasswordPost))
 	router.Handler(http.MethodGet, "/privacy", dynamic.ThenFunc(app.privacyPolicy))
 	router.Handler(http.MethodGet, "/terms", dynamic.ThenFunc(app.termsConditions))
+	router.Handler(http.MethodGet, "/contact", dynamic.ThenFunc(app.contact))
 	router.Handler(http.MethodGet, "/sms-optin", dynamic.ThenFunc(app.smsOptIn))
 	router.Handler(http.MethodGet, "/captains", dynamic.ThenFunc(app.captainGuide))
 

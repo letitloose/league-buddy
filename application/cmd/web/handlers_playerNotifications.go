@@ -145,6 +145,12 @@ func (app *application) playerPhoneVerificationRequest(w http.ResponseWriter, r 
 		return
 	}
 
+	if r.PostForm.Get("smsConsent") != "on" {
+		app.sessionManager.Put(r.Context(), "flash", "You must check the SMS consent box to verify a phone number.")
+		http.Redirect(w, r, fmt.Sprintf("/player/notifications/%d", player.ID), http.StatusSeeOther)
+		return
+	}
+
 	err := app.playerService.RequestPhoneVerification(player.ID, r.PostForm.Get("phonenumber"))
 	if err != nil {
 		switch {

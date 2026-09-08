@@ -982,10 +982,6 @@ table tr:nth-child(even) {
   visibility: visible;
 }
 
-.static {
-  position: static;
-}
-
 .fixed {
   position: fixed;
 }
@@ -1202,6 +1198,10 @@ table tr:nth-child(even) {
 
 .flex-wrap {
   flex-wrap: wrap;
+}
+
+.items-start {
+  align-items: flex-start;
 }
 
 .items-end {

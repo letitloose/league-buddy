@@ -4,24 +4,6 @@
 <div class="flex items-center flex-col">
     <h2>Notification Preferences</h2>
     <div class="w-full max-w-md">
-        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
-            <h3 class="pt-0 text-center">Calendar</h3>
-            <p class="text-sm text-gray-500 text-center mb-4">See your upcoming matches, across every team, in your phone's own calendar app. On your phone, tap the link below to subscribe.</p>
-            <div class="text-center mb-4">
-                <a class="btn m-0" href="{{.Data.CalendarFeedURL}}">Add to Calendar</a>
-            </div>
-            <details class="mb-4">
-                <summary class="cursor-pointer text-xs text-gray-500 text-center list-none">Tapping the button do nothing? Add it manually instead</summary>
-                <p class="text-xs text-gray-500 mt-2 mb-1">Only Safari on iPhone opens Calendar directly from that button — in any other browser, copy this link and add it yourself: on iPhone, Settings &rarr; Calendar &rarr; Accounts &rarr; Add Subscribed Calendar; on Android, your calendar app's "Add calendar by URL" option.</p>
-                <input class="form-field text-xs" type="text" readonly value="{{.Data.CalendarFeedHTTPSURL}}">
-            </details>
-            <form action="/player/notifications/{{.Data.Player.ID}}/calendar/regenerate" method="POST">
-                <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
-                <p class="text-xs text-gray-500 text-center mb-2">If this link ever leaks, regenerate it — the old link stops working immediately, and you'll need to re-subscribe with the new one.</p>
-                <div class="text-center"><input class="btn-secondary m-0" type="submit" value="Regenerate Link"></div>
-            </form>
-        </div>
-
         {{if .Data.SMSFeatureEnabled}}
         <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
             <h3 class="pt-0 text-center">Phone Number</h3>
@@ -36,6 +18,10 @@
                 <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
                 <label class="field-label">{{if .Data.PhoneVerified}}Change phone number{{else}}Phone number{{end}}</label>
                 <input class="form-field" type="tel" name="phonenumber" placeholder="518-555-0100" value="{{.Data.Player.PhoneNumber.String}}">
+                <label class="flex items-start gap-2 mt-3 text-sm">
+                    <input type="checkbox" name="smsConsent" required class="mt-1">
+                    <span>By checking this box, I agree to receive SMS text messages from Blame the Ball, including RSVP reminders and captain's messages. Message frequency depends on your match schedule and preferences. Message and data rates may apply. Reply STOP to opt out, HELP for help. See our <a class="underline" href="/privacy" target="_blank">Privacy Policy</a> and <a class="underline" href="/terms" target="_blank">Terms &amp; Conditions</a>.</span>
+                </label>
                 <div class="mt-2 text-center"><input class="btn-secondary m-0" type="submit" value="Send Verification Code"></div>
             </form>
 
@@ -83,6 +69,24 @@
             </form>
         </div>
         {{end}}
+
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <h3 class="pt-0 text-center">Calendar</h3>
+            <p class="text-sm text-gray-500 text-center mb-4">See your upcoming matches, across every team, in your phone's own calendar app. On your phone, tap the link below to subscribe.</p>
+            <div class="text-center mb-4">
+                <a class="btn m-0" href="{{.Data.CalendarFeedURL}}">Add to Calendar</a>
+            </div>
+            <details class="mb-4">
+                <summary class="cursor-pointer text-xs text-gray-500 text-center list-none">Tapping the button do nothing? Add it manually instead</summary>
+                <p class="text-xs text-gray-500 mt-2 mb-1">Only Safari on iPhone opens Calendar directly from that button — in any other browser, copy this link and add it yourself: on iPhone, Settings &rarr; Calendar &rarr; Accounts &rarr; Add Subscribed Calendar; on Android, your calendar app's "Add calendar by URL" option.</p>
+                <input class="form-field text-xs" type="text" readonly value="{{.Data.CalendarFeedHTTPSURL}}">
+            </details>
+            <form action="/player/notifications/{{.Data.Player.ID}}/calendar/regenerate" method="POST">
+                <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                <p class="text-xs text-gray-500 text-center mb-2">If this link ever leaks, regenerate it — the old link stops working immediately, and you'll need to re-subscribe with the new one.</p>
+                <div class="text-center"><input class="btn-secondary m-0" type="submit" value="Regenerate Link"></div>
+            </form>
+        </div>
 
         <div class="text-center"><a class="btn m-0" href="/player/view/{{.Data.Player.ID}}">Back</a></div>
     </div>

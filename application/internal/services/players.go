@@ -278,6 +278,15 @@ func (service *PlayerService) RequestPhoneVerification(playerID int, phoneNumber
 		if err := service.SMS.Send(normalized, body); err != nil {
 			return err
 		}
+		// TODO(sms): temporary -- also logging the code even though a real
+		// SMS provider is configured, so it can be grabbed for Twilio
+		// verification screenshots if a text doesn't land while the
+		// toll-free number is still pending approval. Revert to logging
+		// only in the no-provider-configured branch below once those
+		// screenshots are captured.
+		if service.InfoLog != nil {
+			service.InfoLog.Printf("verification code for player %d (%s): %s", playerID, normalized, code)
+		}
 	} else if service.InfoLog != nil {
 		service.InfoLog.Printf("no SMS provider configured -- verification code for player %d (%s): %s", playerID, normalized, code)
 	}

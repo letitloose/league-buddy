@@ -29,6 +29,7 @@ func TestPublicRoutes(t *testing.T) {
 		{"forgot password", "/user/forgotPassword"},
 		{"privacy policy", "/privacy"},
 		{"terms and conditions", "/terms"},
+		{"contact", "/contact"},
 		{"sms opt-in", "/sms-optin"},
 	}
 
@@ -42,22 +43,47 @@ func TestPublicRoutes(t *testing.T) {
 	}
 }
 
-// /sms-optin exists so carrier/Twilio review can see the phone-
-// verification/reminder-delivery opt-in flow without logging in — it must
-// stay reachable unauthenticated and show the actual opt-in language, not
-// just render as an empty page.
+// The footer's "Contact Us" link points to a real page (not a mailto:)
+// showing the same business/contact info as the Contact Us section on the
+// Privacy Policy and Terms pages.
+func TestContactPage(t *testing.T) {
+	app := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+
+	_, _, homeBody := ts.get(t, "/")
+	if !strings.Contains(homeBody, `href="/contact"`) {
+		t.Error("expected the footer's Contact Us link to point to /contact")
+	}
+
+	code, _, body := ts.get(t, "/contact")
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	for _, want := range []string{"David L Garwood", "10 Andrew Court", "league.buddy.site@gmail.com"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected the page to mention %q", want)
+		}
+	}
+}
+
+// /sms-optin hosts screenshots of the real phone-verification/
+// reminder-delivery opt-in flow for carrier/Twilio review — reachable
+// unauthenticated, but no longer linked from the site nav/footer.
 func TestSMSOptInPage(t *testing.T) {
 	app := newTestApplication(t)
 	ts := newTestServer(t, app.routes())
+
+	_, _, homeBody := ts.get(t, "/")
+	if strings.Contains(homeBody, `href="/sms-optin"`) {
+		t.Error("expected /sms-optin to no longer be linked from the footer")
+	}
 
 	code, _, body := ts.get(t, "/sms-optin")
 	if code != http.StatusOK {
 		t.Fatalf("want %d; got %d", http.StatusOK, code)
 	}
-	for _, want := range []string{"Phone Number", "Reminder Delivery", "Privacy Policy"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("expected the page to mention %q", want)
-		}
+	if !strings.Contains(body, `src="/static/images/sms-optin-1.png"`) {
+		t.Error("expected the page to reference its screenshot images")
 	}
 }
 
@@ -4337,6 +4363,46 @@ func TestPlayerNotificationsGating(t *testing.T) {
 
 // End-to-end: a player requests a verification code, confirms it, and can
 // then set an RSVP-reminder preference of "sms" — and that setting sms
+// Requesting a verification code without checking the SMS consent box is
+// rejected — the affirmative opt-in step Twilio's carrier verification
+// requires, not just a phone number by itself.
+func TestPlayerNotificationsPhoneVerificationRequiresConsent(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Consent Gate Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playerID := setupRosterMember(t, teamID, "consent-gate-self@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "consent-gate-self@test.com", "validpassword123")
+
+	_, _, body := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
+	csrfToken := extractCSRFToken(t, body)
+
+	code, headers, _ := ts.postForm(t, fmt.Sprintf("/player/notifications/%d/phone", playerID), url.Values{
+		"csrf_token":  {csrfToken},
+		"phonenumber": {"518-555-0100"},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	if loc := headers.Get("Location"); loc != fmt.Sprintf("/player/notifications/%d", playerID) {
+		t.Errorf("want Location %q; got %q", fmt.Sprintf("/player/notifications/%d", playerID), loc)
+	}
+
+	pm := &models.PlayerModel{DB: testDB}
+	player, err := pm.Get(playerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if player.PhoneVerificationCode.Valid {
+		t.Fatal("expected no verification code to be sent without checking SMS consent")
+	}
+}
+
 // before ever verifying is rejected.
 func TestPlayerNotificationsVerifyPhoneAndSetPreference(t *testing.T) {
 	app := newTestApplication(t)
@@ -4376,6 +4442,7 @@ func TestPlayerNotificationsVerifyPhoneAndSetPreference(t *testing.T) {
 	code, headers, _ = ts.postForm(t, fmt.Sprintf("/player/notifications/%d/phone", playerID), url.Values{
 		"csrf_token":  {csrfToken},
 		"phonenumber": {"518-555-0100"},
+		"smsConsent":  {"on"},
 	})
 	if code != http.StatusSeeOther {
 		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)

@@ -41,6 +41,43 @@ No bulk/batch email system is ported — the reference project's `EmailTemplate`
 
 ---
 
+## Twilio (SMS)
+
+**Purpose:** Phone-number verification codes and text-message match/RSVP reminders.
+**API:** Twilio Messages API (`https://api.twilio.com/2010-04-01/Accounts/{SID}/Messages.json`) via plain `net/http` + Basic Auth — no Twilio SDK dependency.
+**Service:** `internal/services/sms.go` — `SMS` struct (`AccountSID`, `AuthToken`, `FromNumber`), one method `Send(to, body string) error`. Phone numbers are normalized to E.164 before sending.
+
+### Configuration
+
+| Variable | Purpose |
+|---|---|
+| `SMS_FEATURE_ENABLED` | Site-wide flag gating whether the phone-verification/notification-preferences UI is shown **at all** — deliberately separate from the credentials below, so real Twilio creds can sit configured (e.g. for backend testing while a toll-free number awaits carrier approval) without exposing a "verify your phone" flow to real users it can't yet deliver to |
+| `SMS_ACCOUNT_SID`, `SMS_AUTH_TOKEN` | Twilio account credentials |
+| `SMS_FROM_NUMBER` | An SMS-capable Twilio number, in E.164 format |
+
+If `SMS_ACCOUNT_SID` is unset, `main.go` never constructs an `SMS` service — verification codes and reminders are logged instead of sent, not fatal — the same degrade-gracefully pattern `EMAIL_USER` uses above.
+
+### Consent model
+
+Texting a player requires all three of the following, each independently checked wherever a message is about to be sent (`MatchReminderService.notify`, `SendTestReminderSMS`, and its own recipient picker) — not just at the form that sets them:
+
+1. **Phone verified** (`Player.PhoneVerifiedAt`) — proves the player controls the number, via a 6-digit code sent to it and confirmed back.
+2. **SMS program opt-in** (`Player.SMSOptInAt`) — a separate, explicit, persisted consent event distinct from verification, recorded when the player checks the opt-in box while requesting a code. Revocable at any time via a self-service "Opt Out of SMS Program" action, independent of removing the phone number itself.
+3. **Per-category delivery preference** (`playerNotificationPreferences` table, `models.ChannelSMS`/`ChannelBoth`) — a player can enable text for RSVP reminders and/or captain's messages independently; neither is implied by the other, and both default to email-only until changed.
+
+A preference save that requests SMS/Both without (1) and (2) both being true is rejected server-side (`NotificationPreferenceService.SetPreference`) regardless of what the form itself renders. STOP/HELP keyword replies are handled entirely by Twilio's own Advanced Opt-Out feature at the messaging-service level — the app has no inbound-SMS webhook and never itself sees or records a STOP reply.
+
+**Transactional/automated texts sent by the application:**
+
+| Trigger | Recipient | Content |
+|---|---|---|
+| Phone verification requested | The player, at the number just entered | 6-digit one-time code |
+| RSVP reminder due (per team's configured schedule) | Roster players who haven't responded and prefer text | Match date/opponent, RSVP link |
+| Captain's-message reminder due | Roster players who prefer text | The captain's message for that match |
+| Captain/admin "Send Test Reminder" (SMS) | Selected verified, opted-in teammates | A `[TEST]`-prefixed preview of the real reminder copy |
+
+---
+
 ## PayPal — not yet integrated
 
 Deliberately out of scope for this scaffold. When team payments (dues, fees, tournament costs) are needed, `toller-club-docker`'s `internal/services/paypal.go` (OAuth2 client-credentials REST API v2, order-create + capture flow) and its two `/api/orders` handlers in `handlers_site.go` are a working reference implementation to port over. See that project's `docs/integrations/integrations.md` for the full flow documentation.

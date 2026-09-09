@@ -25,7 +25,8 @@ All state-changing requests (POST, DELETE) are protected against Cross-Site Requ
 Sessions are managed by [SCS v2](https://github.com/alexedwards/scs) with a **MySQL-backed store** (`scs/mysqlstore`).
 
 - Session tokens are stored in a `sessions` table in MariaDB.
-- Sessions expire after **12 hours** (set in `main.go`).
+- Sessions expire after **12 hours** by default (`sessionManager.Lifetime` in `main.go`) — or **30 days** if the player checked "Remember me" at login, via `sessionManager.SetDeadline` called in `userLoginPost` right after `RenewToken` (which would otherwise reset the deadline back to the 12-hour default — order matters here).
+- The session cookie is persistent (survives a browser close) either way — scs's `Cookie.Persist` defaults to `true` and is never overridden — so "Remember me" controls how long the session stays valid, not whether it survives closing the browser.
 - The session stores only the authenticated user ID: `authenticatedUserID = int`.
 - `sessionManager.RenewToken()` is called on both login (before writing the user ID) and logout (before clearing it), preventing session fixation attacks.
 
@@ -43,11 +44,13 @@ Every response carries the following headers (set by the `secureHeaders` middlew
 
 | Header | Value |
 |---|---|
-| `Content-Security-Policy` | `default-src 'self'` plus inline styles — no third-party script/style origins in v1 |
+| `Content-Security-Policy` | `default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; upgrade-insecure-requests` |
 | `Referrer-Policy` | `origin-when-cross-origin` |
 | `X-Content-Type-Options` | `nosniff` |
 | `X-Frame-Options` | `deny` |
 | `X-XSS-Protection` | `0` — disabled; CSP is the correct modern protection |
+
+`script-src 'self'` with no `'unsafe-inline'` means inline event-handler attributes (`onclick="..."`, `onchange="..."`) are silently inert — every interactive bit of JS in `ui/static/js/main.js` is wired up via `addEventListener` in a `DOMContentLoaded` handler instead, and any browser-native validation message that needs custom wording (e.g. a required checkbox) is overridden the same way, via the `invalid` event, not an inline attribute. `style-src` allows inline styles (Tailwind-generated markup relies on some), but not inline scripts.
 
 ## Authorization Model
 

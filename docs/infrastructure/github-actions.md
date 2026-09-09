@@ -1,6 +1,6 @@
 # GitHub Actions (`.github/workflows/main.yml`)
 
-Triggers on every `push`. Two active jobs, one commented-out job.
+Triggers on every `push`. Three jobs, all active: `test` → `build-and-push` → `deploy`, each gated on the previous one succeeding.
 
 ## `test`
 
@@ -16,10 +16,19 @@ cd application && go test -p 1 ./...
 
 Runs only after `test` passes, and only `if: github.ref == 'refs/heads/main'`. Logs into GHCR with the auto-provided `secrets.GITHUB_TOKEN` (no manual PAT needed — the `packages: write` permission at the workflow level is what authorizes the push), then builds and pushes `ghcr.io/letitloose/league-buddy:latest` via `docker/build-push-action@v5`.
 
-## `deploy` (commented out)
+## `deploy`
 
-Written but not active — there's no production server yet. The commented block SSHes into a host via `appleboy/ssh-action`, `git pull`s, stamps a `SOFTWARE_LAST_UPDATE` timestamp into `.env`, and runs `docker compose pull && docker compose up -d`. To activate it:
+Runs only after `build-and-push` succeeds, and only `if: github.ref == 'refs/heads/main'` — so every push to `main` that passes tests goes live automatically, with no manual deploy step. SSHes into the production host via `appleboy/ssh-action`, then:
 
-1. Uncomment the `deploy:` block.
-2. Add repo secrets `SERVER_IP`, `SERVER_USERNAME`, `SERVER_KEY` (SSH private key for a user that can `docker compose` on the target host).
-3. Ensure the target host already has this repo cloned at `~/league-buddy` (or adjust the `cd` in the script) and `nginx-compose.yml` running for TLS/routing.
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u <actor> --password-stdin
+cd league-buddy
+git pull
+sed -i~ '/^SOFTWARE_LAST_UPDATE=/s/=.*/=<current date/time>/' .env
+docker compose pull
+docker compose up -d
+```
+
+Requires three repo secrets: `SERVER_IP`, `SERVER_USERNAME`, `SERVER_KEY` (an SSH private key for a user that can run `docker compose` on the target host). The target host is expected to already have this repo cloned at `~/league-buddy` and `nginx-compose.yml` running for TLS/routing (see [Docker Compose](./docker-compose.md)).
+
+Because this runs unattended on every push to `main`, treat a merge to `main` as a production deploy — there's no separate "promote to prod" step to catch a bad change before it goes live beyond the `test` job.

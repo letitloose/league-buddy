@@ -39,6 +39,7 @@ nginx is the public entry point. It terminates TLS and reverse-proxies all traff
 | Database | MariaDB (via `go-sql-driver/mysql`) |
 | CSS | Tailwind CSS (compiled, embedded) |
 | Email | Mailjet API v3 |
+| SMS | Twilio Messages API (raw REST, no SDK) |
 
 ## Application Layers
 
@@ -57,13 +58,18 @@ internal/models/            ← Database access layer
 | `routes.go` | Registers all URL patterns with their middleware chains |
 | `middleware.go` | CSRF, sessions, authentication, panic recovery, logging |
 | `context.go` | Typed context keys for passing auth state through the request |
-| `helpers.go` | `render`, `serverError`, `isAuthenticated`, template data builder |
-| `templates.go` | Template cache construction, `templateData` struct |
-| `handlers_site.go` | Home page |
-| `handlers_users.go` | Signup (including invite-token threading), login, logout, password reset, user admin |
-| `handlers_players.go` | Player (roster) CRUD, search — team-scoped |
-| `handlers_leagues.go` | League CRUD, browse |
-| `handlers_teams.go` | Team CRUD, captain assignment, invites, join requests |
+| `helpers.go` | `render`, `serverError`, template data builder, and most in-handler authorization helpers (`canManageTeam`, `canManageLeague`, `isMemberOfTeam`, `smsFeatureEnabled`, etc. — see [Middleware Chain](./middleware.md)) |
+| `templates.go` | Template cache construction, `templateData` struct, date/time formatting helpers |
+| `handlers_site.go` | Home dashboard, privacy/terms/contact pages, captain guide, SMS opt-in proof page |
+| `handlers_users.go` | Signup (including invite-token threading), login (including Remember Me), logout, password reset, admin user management |
+| `handlers_players.go` | Player profile CRUD, career stats, `canManagePlayer`/`isTeammateOfPlayer` authorization |
+| `handlers_playerNotifications.go` | A player's own Notification Preferences page: phone verification, SMS program opt-in/opt-out, per-category email/text delivery preferences, calendar token regeneration |
+| `handlers_leagues.go` | League CRUD, browse, and the league detail page (standings, leaders, season picker) |
+| `handlers_seasons.go` | Season CRUD and CSV schedule import |
+| `handlers_matches.go` | Match CRUD, the match detail page (RSVPs, goals, cards, captain notes, attendance), and reminder test-send endpoints — the largest handler file |
+| `handlers_teams.go` | Team CRUD, roster PDF export/CSV import, captain/scorekeeper/Legend-status management, invites, join requests — the second-largest handler file |
+| `handlers_locations.go` | Admin CRUD for home-field locations |
+| `handlers_calendar.go` | The token-authenticated, cookie-less per-player calendar feed (`GET /calendar/:token/schedule.ics`) |
 
 ### `internal/services/` — Business Logic Layer
 
@@ -84,9 +90,9 @@ Templates use a base/partial/page structure:
 
 ## Database Schema
 
-The schema is defined in full in `sql/setup.sql` (this is a fresh scaffold, not an accreted history — `sql/migrations/` starts empty and is reserved for genuine future changes). Migrations, if any, are applied automatically on startup by `MigrationModel.PerformMigrations()`, which tracks applied files in a `migration` table.
+The base schema is defined in `sql/setup.sql` (18 tables — `sessions`, `migration`, `leagues`, `teams`, `address`, `locations`, `players`, `teamMembers`, `leagueAdmins`, `seasons`, `matches`, `playerMatchStats`, `users`, `roles`, `userRole`, `auditLog`, `invites`, `teamJoinRequests`). `sql/migrations/` is a genuine, actively-growing history from there — 20 files as of this writing, layering on RSVPs, goals/cards, team notes, reminder settings and their delivery-tracking tables, per-player attendance overrides, notification preferences and phone verification, Legend roster status, calendar tokens, and SMS program opt-in, among others. Migrations are applied automatically on startup by `MigrationModel.PerformMigrations()`, which tracks applied files in a `migration` table — safe to run repeatedly, since already-applied files are skipped.
 
-The schema supports real multi-team leagues: a `leagues` table (top-level scope), a `teams` table (belongs to one league, has zero or one captain via `captainPlayerID`), and a nullable `players.teamID` — a self-registered player starts unaffiliated until an invite or an approved join request assigns a team. Two supporting tables round this out: `invites` (single-use signup tokens a captain/admin emails to a prospective player — the invited team is granted regardless of what email address the person actually registers with) and `teamJoinRequests` (an unaffiliated player's request to join a team, approved/rejected by that team's captain or any admin). `setup.sql` seeds exactly one league and one team on a fresh install.
+The schema supports real multi-team leagues: a `leagues` table (top-level scope) and a `teams` table (belongs to one league, has zero or one captain via `captainPlayerID`). Team membership is **not** a column on `players` — it's the `teamMembers` junction table (`playerID`, `teamID`, `joinedAt`), so a player can belong to more than one team at once (only "at most one team per league" is enforced, and only in the service layer, not by a DB constraint). A self-registered player starts on no team at all until an invite or an approved join request assigns one. `leagueAdmins` is a similar many-to-many junction — a player can administer more than one league, and a league can have more than one admin. Two more supporting tables round out registration: `invites` (single-use signup tokens a captain/admin emails to a prospective player — the invited team is granted regardless of what email address the person actually registers with) and `teamJoinRequests` (an unaffiliated player's request to join a team, approved/rejected by that team's captain or any admin). `setup.sql` seeds exactly one league and one team on a fresh install; the dev-only `RESETDB=true` path layers on realistic seed data (a full roster, historical seasons/results, test logins for every role) on top of that — see `cmd/web/seed_roster.go`/`seed_historical.go`, never run outside local dev.
 
 ## Configuration
 
@@ -96,8 +102,11 @@ All configuration is passed via environment variables (never compiled in). Key v
 |---|---|
 | `DBHOST`, `DBPORT`, `MYSQL_*` | Database connection |
 | `EMAIL_USER`, `EMAIL_PASSWORD`, `EMAIL_SENDER` | Mailjet credentials (unset = email sending skipped, not fatal) |
-| `VIRTUAL_HOST` | Public hostname (used in email links) |
+| `SMS_FEATURE_ENABLED`, `SMS_ACCOUNT_SID`, `SMS_AUTH_TOKEN`, `SMS_FROM_NUMBER` | Twilio credentials and a separate site-wide feature flag (unset SID = SMS sending skipped, not fatal — see [Integrations](../integrations/integrations.md)) |
+| `PUBLIC_HOST` | Hostname the app itself uses to build links (email, calendar feed) |
+| `VIRTUAL_HOST` | nginx-proxy/Let's Encrypt routing label only, not read by the app |
 | `SITE_HOST`, `SITE_PORT` | Bind address |
+| `MIGRATION_PATH` | Directory of `.sql` files applied on boot |
 | `RESETDB=true` | Tears down and re-seeds the database on startup |
 
 ## Routing Constraints
@@ -109,13 +118,13 @@ All configuration is passed via environment variables (never compiled in). Key v
 Explicitly deferred, not forgotten:
 
 - **PayPal integration** — not ported. The reference project (`toller-club-docker`) has a working `internal/services/paypal.go` to pull over when team payments are needed.
-- **Generic role management UI** — only an ADMIN toggle exists; add a role picker if a role beyond Admin/Player is needed.
+- **Generic role management UI** — the `roles`/`userRole` tables support more than one role, but only `ADMIN` is ever seeded and only a plain activate/deactivate + admin toggle exist; add a role picker if a role beyond Admin/Player is needed.
 - **Invite token expiration** — only `usedAt` prevents reuse; there's no time-based expiry.
-- **Multiple captains per team, or one captain for multiple teams** — `teams.captainPlayerID` is unique and a team has at most one captain.
+- **One captain per team** — `teams.captainPlayerID` is still unique per team, so a team has at most one captain (a player isn't otherwise restricted from captaining more than one). Scorekeepers (`teamScorekeepers`) now provide a second, non-exclusive tier of match-editing delegation below the captain, for teams that want to split that work up.
 - **A global cross-team player directory for Admins** — rosters are browsed per-team like everyone else; only `/admin/joinRequests` is genuinely cross-team.
-- **Direct admin reassignment of a player between teams** outside the invite/join-request flows — `PlayerModel.SetTeam` exists and could be exposed later.
 - **League/team deletion cascades** — blocked with `ErrHasDependents`; an admin must clear dependents (teams, then players) first.
 - **Resubmission cooldowns** after a rejected join request, and **revoking/rate-limiting invites**.
+- **An inbound-SMS webhook** — STOP/HELP replies are currently handled entirely by Twilio's own Advanced Opt-Out feature at the messaging-service level; the app has no code path that sees or records an inbound text itself.
 
 ## Further Reading
 

@@ -84,9 +84,10 @@ Note: the `verification_hash` is **not updated** after a password reset (same kn
 4. Updates `lastlogin` timestamp.
 5. Back in the handler: `sessionManager.RenewToken(ctx)` — rotates the session token to prevent session fixation.
 6. `sessionManager.Put(ctx, "authenticatedUserID", id)`.
-7. Redirects to `/`.
+7. **Remember me**: if the login form's checkbox was checked, `sessionManager.SetDeadline(ctx, time.Now().Add(30 days))` extends this session's lifetime well past the ordinary 12-hour default — done *after* `RenewToken` above, since renewal resets the deadline back to the default and would otherwise silently discard this. See [Security Model: Sessions](../security/security.md#sessions) for why this changes session length rather than whether the cookie survives a browser close (it already does, either way).
+8. Redirects to `/`.
 
-Login sets **only the user ID** in the session. All role and player data is re-fetched on every request by the `authenticate` middleware.
+Login sets **only the user ID** (and, if Remember Me was checked, a longer deadline) in the session. All role and player data is re-fetched on every request by the `authenticate` middleware.
 
 ---
 

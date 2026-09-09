@@ -64,6 +64,8 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodGet, "/player/notifications/:id", active.ThenFunc(app.playerNotifications))
 	router.Handler(http.MethodPost, "/player/notifications/:id/phone", active.ThenFunc(app.playerPhoneVerificationRequest))
 	router.Handler(http.MethodPost, "/player/notifications/:id/phone/confirm", active.ThenFunc(app.playerPhoneVerificationConfirm))
+	router.Handler(http.MethodPost, "/player/notifications/:id/phone/remove", active.ThenFunc(app.playerPhoneNumberRemove))
+	router.Handler(http.MethodPost, "/player/notifications/:id/sms/optOut", active.ThenFunc(app.playerSMSOptOut))
 	router.Handler(http.MethodPost, "/player/notifications/:id/preferences", active.ThenFunc(app.playerNotificationPreferencesSave))
 	router.Handler(http.MethodPost, "/player/notifications/:id/calendar/regenerate", active.ThenFunc(app.playerCalendarRegenerate))
 	router.Handler(http.MethodGet, "/league", active.ThenFunc(app.leagueList))

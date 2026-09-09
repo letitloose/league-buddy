@@ -4575,6 +4575,150 @@ func TestPlayerNotificationsVerifyPhoneAndSetPreference(t *testing.T) {
 	}
 }
 
+// Removing a phone number clears the number and verification state but
+// leaves SMS program opt-in untouched — a player who adds and verifies a
+// new number later shouldn't have to re-opt-in.
+func TestPlayerPhoneNumberRemove(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Phone Remove Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playerID := setupRosterMember(t, teamID, "phone-remove-self@test.com", "validpassword123")
+
+	pm := &models.PlayerModel{DB: testDB}
+	player, err := pm.Get(playerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	player.PhoneNumber = sql.NullString{String: "518-555-0100", Valid: true}
+	if err := pm.Update(player); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.SetPhoneVerificationCode(playerID, "123456", time.Now().Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.ConfirmPhoneVerified(playerID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.SetSMSOptIn(playerID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "phone-remove-self@test.com", "validpassword123")
+
+	_, _, body := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
+	if !strings.Contains(body, "Remove Phone Number") {
+		t.Fatal("expected a Remove Phone Number action once a number is on file")
+	}
+	csrfToken := extractCSRFToken(t, body)
+
+	code, headers, _ := ts.postForm(t, fmt.Sprintf("/player/notifications/%d/phone/remove", playerID), url.Values{
+		"csrf_token": {csrfToken},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	if loc := headers.Get("Location"); loc != fmt.Sprintf("/player/notifications/%d", playerID) {
+		t.Errorf("want Location %q; got %q", fmt.Sprintf("/player/notifications/%d", playerID), loc)
+	}
+
+	after, err := pm.Get(playerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.PhoneNumber.Valid {
+		t.Error("expected the phone number to be cleared")
+	}
+	if after.PhoneVerifiedAt.Valid {
+		t.Error("expected verification to be cleared along with the number")
+	}
+	if !after.SMSOptInAt.Valid {
+		t.Error("expected SMS program opt-in to survive removing the phone number")
+	}
+}
+
+// Opting out of the SMS program revokes SMSOptInAt without touching phone
+// verification, and immediately blocks setting a category back to
+// sms/both — the real self-service opt-out this app offers on top of a
+// carrier-level STOP reply.
+func TestPlayerSMSOptOut(t *testing.T) {
+	app := newTestApplication(t)
+
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "SMS Opt Out Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	playerID := setupRosterMember(t, teamID, "sms-optout-self@test.com", "validpassword123")
+
+	pm := &models.PlayerModel{DB: testDB}
+	if err := pm.SetPhoneVerificationCode(playerID, "123456", time.Now().Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.ConfirmPhoneVerified(playerID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.SetSMSOptIn(playerID, true); err != nil {
+		t.Fatal(err)
+	}
+	npm := &models.NotificationPreferenceModel{DB: testDB}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "sms-optout-self@test.com", "validpassword123")
+
+	_, _, body := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
+	if !strings.Contains(body, "Opt Out of SMS Program") {
+		t.Fatal("expected an Opt Out of SMS Program action once opted in")
+	}
+	csrfToken := extractCSRFToken(t, body)
+
+	code, headers, _ := ts.postForm(t, fmt.Sprintf("/player/notifications/%d/sms/optOut", playerID), url.Values{
+		"csrf_token": {csrfToken},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	if loc := headers.Get("Location"); loc != fmt.Sprintf("/player/notifications/%d", playerID) {
+		t.Errorf("want Location %q; got %q", fmt.Sprintf("/player/notifications/%d", playerID), loc)
+	}
+
+	after, err := pm.Get(playerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.SMSOptInAt.Valid {
+		t.Error("expected SMS program opt-in to be revoked")
+	}
+	if !after.PhoneVerifiedAt.Valid {
+		t.Error("expected phone verification to survive opting out of SMS")
+	}
+
+	// Trying to enable Text for a notification after opting out is
+	// rejected at the real HTTP layer too, not just in SetPreference's own
+	// unit test — the phone is still verified, so opt-in alone (not
+	// verification) is what's now missing.
+	_, _, prefsBody := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
+	prefsCSRF := extractCSRFToken(t, prefsBody)
+	code, _, _ = ts.postForm(t, fmt.Sprintf("/player/notifications/%d/preferences", playerID), url.Values{
+		"csrf_token": {prefsCSRF},
+		"rsvpText":   {"on"},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	channel, err := npm.GetChannel(playerID, models.CategoryRSVPReminder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if channel == models.ChannelSMS || channel == models.ChannelBoth {
+		t.Fatalf("expected sms to be rejected after opting out, got channel %q", channel)
+	}
+}
+
 // The calendar feed is deliberately unauthenticated — a phone's calendar
 // app fetches it with no session cookie at all — so it's tested against
 // a fresh client that never logs in, unlike every other route above.

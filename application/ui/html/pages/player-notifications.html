@@ -34,6 +34,23 @@
                 <div class="mt-2 text-center"><input class="btn m-0" type="submit" value="Confirm Code"></div>
             </form>
             {{end}}
+
+            {{if or .Data.Player.PhoneNumber.Valid .Data.SMSOptedIn}}
+            <div class="flex flex-col sm:flex-row sm:justify-center gap-2 mt-4 pt-4 border-t">
+                {{if .Data.Player.PhoneNumber.Valid}}
+                <form action="/player/notifications/{{.Data.Player.ID}}/phone/remove" method="POST" class="m-0">
+                    <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                    <button class="btn-secondary text-red-600 m-0" type="submit">Remove Phone Number</button>
+                </form>
+                {{end}}
+                {{if .Data.SMSOptedIn}}
+                <form action="/player/notifications/{{.Data.Player.ID}}/sms/optOut" method="POST" class="m-0">
+                    <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                    <button class="btn-secondary text-red-600 m-0" type="submit">Opt Out of SMS Program</button>
+                </form>
+                {{end}}
+            </div>
+            {{end}}
         </div>
 
         <div class="bg-white border border-brand-line px-8 pt-6 pb-8 mb-4">

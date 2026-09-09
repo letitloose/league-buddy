@@ -211,6 +211,56 @@ func (app *application) playerPhoneVerificationRequest(w http.ResponseWriter, r 
 	http.Redirect(w, r, fmt.Sprintf("/player/notifications/%d", player.ID), http.StatusSeeOther)
 }
 
+// playerPhoneNumberRemove clears the player's phone number and any
+// verification state — the self-service "start over" action, e.g. for a
+// number they no longer control. Doesn't touch SMS program opt-in (see
+// PlayerModel.ClearPhoneNumber) or category preferences; those pick back
+// up automatically once a new number is added and verified.
+func (app *application) playerPhoneNumberRemove(w http.ResponseWriter, r *http.Request) {
+	player, ok := app.requireOwnPlayer(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	if err := app.playerService.ClearPhoneNumber(player.ID); err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", "Phone number removed.")
+	http.Redirect(w, r, fmt.Sprintf("/player/notifications/%d", player.ID), http.StatusSeeOther)
+}
+
+// playerSMSOptOut revokes SMS program consent — the real, self-service
+// opt-out this app should offer on top of the carrier-level STOP reply,
+// independent of and without requiring the player to also remove their
+// phone number. Category preferences (see notificationPreferenceService)
+// are left as-is: SetPreference already re-checks SMSOptInAt before ever
+// allowing sms/both, so a stale "sms" choice here is inert, not a leak,
+// and picks back up automatically if they opt in again later.
+func (app *application) playerSMSOptOut(w http.ResponseWriter, r *http.Request) {
+	player, ok := app.requireOwnPlayer(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	if err := app.playerService.SetSMSOptIn(player.ID, false); err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", "Opted out of the SMS program.")
+	http.Redirect(w, r, fmt.Sprintf("/player/notifications/%d", player.ID), http.StatusSeeOther)
+}
+
 func (app *application) playerPhoneVerificationConfirm(w http.ResponseWriter, r *http.Request) {
 	player, ok := app.requireOwnPlayer(w, r)
 	if !ok {

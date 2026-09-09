@@ -112,6 +112,17 @@ func (m *PlayerModel) ConfirmPhoneVerified(playerID int) error {
 	return err
 }
 
+// ClearPhoneNumber removes playerID's phone number entirely, along with
+// any verification state — the self-service "start over" action on the
+// Notification Preferences page. Independent of SetSMSOptIn: removing a
+// number doesn't revoke SMS program consent, so adding and verifying a
+// new number later resumes texting without having to opt in again.
+func (m *PlayerModel) ClearPhoneNumber(playerID int) error {
+	statement := `update players set phonenumber = NULL, phoneVerifiedAt = NULL, phoneVerificationCode = NULL, phoneVerificationExpiresAt = NULL where id = ?`
+	_, err := m.DB.Exec(statement, playerID)
+	return err
+}
+
 // SetSMSOptIn records or clears playerID's consent to the SMS program —
 // optedIn true sets smsOptInAt to now, false clears it back to NULL, a
 // real revocation rather than just steering notification preferences back

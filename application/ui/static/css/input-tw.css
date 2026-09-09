@@ -6,26 +6,68 @@
   src: url('/static/fonts/SourceCodePro-SemiBold.woff2') format('woff2');
 }
 
+/* Design-refresh type system — see ui/html/pages (design-refresh branch).
+   Self-hosted, same pattern as SourceCodePro above: the CSP's style-src is
+   'self' only, so a Google Fonts <link> would be blocked outright. */
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/static/fonts/Fraunces-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: italic;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/static/fonts/Fraunces-Italic-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Work Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/static/fonts/WorkSans-Variable.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/static/fonts/IBMPlexMono-500.woff2') format('woff2');
+}
+
 @tailwind base;
 
 @layer base {
+  body {
+    font-family: 'Work Sans', system-ui, sans-serif;
+  }
+
   a {
-    @apply underline text-orange-600;
+    @apply underline text-pitch-600;
+  }
+
+  h1 {
+    @apply text-3xl sm:text-4xl font-semibold p-0;
+    font-family: 'Fraunces', Georgia, serif;
+    text-wrap: balance;
   }
 
   h2 {
     @apply text-2xl font-semibold p-4;
-    font-family: 'SourceCodePro', ui-monospace, Menlo, Consolas, monospace;
+    font-family: 'Fraunces', Georgia, serif;
   }
 
   h3 {
     @apply text-xl font-bold p-3;
-    font-family: 'SourceCodePro', ui-monospace, Menlo, Consolas, monospace;
+    font-family: 'Fraunces', Georgia, serif;
   }
 
   h4 {
     @apply text-lg font-bold p-2;
-    font-family: 'SourceCodePro', ui-monospace, Menlo, Consolas, monospace;
+    font-family: 'Fraunces', Georgia, serif;
   }
 }
 
@@ -62,10 +104,10 @@
   }
 
   .form-field {
-    @apply shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight;
+    @apply appearance-none border border-brand-line w-full py-2 px-3 text-gray-700 leading-tight;
   }
   .form-field:focus {
-    @apply outline-none ring-2 ring-orange-500;
+    @apply outline-none ring-2 ring-pitch-500;
   }
 
   .error-border {
@@ -91,28 +133,28 @@
     display: none;
     position: absolute;
     width: 190px;
-    background-color: #f9f9f9;
-    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+    background-color: theme('colors.brand.surface');
+    border: 1px solid theme('colors.brand.line');
     z-index: 1;
   }
 
   /* Links inside the dropdown */
   .dropdown-content a {
-    color: #555;
+    color: theme('colors.brand.ink');
     padding: 12px 16px;
     text-decoration: none;
     display: block;
   }
 
   .dropdown-content button {
-    color: #555;
+    color: theme('colors.brand.ink');
     padding: 12px 16px;
     text-decoration: none;
     display: block;
   }
 
   /* Change color of dropdown links on hover */
-  .dropdown-content a:hover {background-color: #fff7ed}
+  .dropdown-content a:hover {background-color: theme('colors.pitch.50')}
 
   /* Show the dropdown menu on hover */
   .dropdown:hover .dropdown-content {
@@ -120,19 +162,28 @@
   }
 
   .btn {
-    @apply inline-block text-white bg-orange-600 hover:bg-orange-700 font-medium rounded-xl text-sm px-5 py-2 m-2 no-underline;
+    @apply inline-block text-white bg-pitch-600 hover:bg-pitch-700 font-medium rounded text-sm px-5 py-2 m-2 no-underline;
   }
 
   .btn-sm {
-    @apply inline-block text-white bg-orange-600 hover:bg-orange-700 font-medium rounded-xl text-sm px-3 py-1 no-underline;
+    @apply inline-block text-white bg-pitch-600 hover:bg-pitch-700 font-medium rounded text-sm px-3 py-1 no-underline;
   }
 
   .btn-secondary {
-    @apply inline-block text-slate-800 bg-gray-300 hover:bg-gray-400 font-medium rounded-xl text-sm px-5 py-2 m-2 no-underline;
+    @apply inline-block text-brand-ink bg-transparent border border-brand-ink hover:bg-brand-paper font-medium rounded text-sm px-5 py-2 m-2 no-underline;
   }
 
   .badge-count {
-    @apply inline-flex items-center justify-center ml-1 h-5 min-w-[1.25rem] px-1 text-xs font-bold text-white bg-orange-700 rounded-full;
+    @apply inline-flex items-center justify-center ml-1 h-5 min-w-[1.25rem] px-1 text-xs font-bold text-white bg-pitch-700 rounded-full;
+  }
+
+  /* A card grid that behaves with any item count — a lone card stretches
+     to fill the row instead of sitting alone in a half-width column with
+     an awkward empty gap beside it, which is what sm:grid-cols-2 alone
+     does for the single-league/single-team case (the most common one). */
+  .card-grid {
+    @apply grid gap-4;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
   }
 
   .tab-bar {
@@ -140,11 +191,11 @@
   }
 
   .tab-link {
-    @apply inline-block px-4 py-2 text-sm font-medium no-underline text-gray-500 hover:text-orange-600 border-b-2 border-transparent;
+    @apply inline-block px-4 py-2 text-sm font-medium no-underline text-gray-500 hover:text-pitch-600 border-b-2 border-transparent;
   }
 
   .tab-link-active {
-    @apply inline-block px-4 py-2 text-sm font-bold no-underline text-orange-600 border-b-2 border-orange-600;
+    @apply inline-block px-4 py-2 text-sm font-bold no-underline text-pitch-600 border-b-2 border-pitch-600;
   }
 
   .matchday-heading {
@@ -152,7 +203,7 @@
   }
 
   .match-card {
-    @apply block bg-white shadow-md rounded-xl px-4 py-3 no-underline text-slate-800 hover:shadow-lg transition-shadow;
+    @apply block bg-white border border-brand-line px-4 py-3 no-underline text-slate-800 hover:border-pitch-600 transition;
   }
 
   .result-header {
@@ -160,7 +211,15 @@
   }
 
   .brand-font {
-    font-family: 'SourceCodePro', ui-monospace, Menlo, Consolas, monospace;
+    font-family: 'Fraunces', Georgia, serif;
+    font-weight: 600;
+  }
+
+  /* Small uppercase eyebrow/label text — see the homepage hero and role
+     cards. A nod to a scoreboard readout rather than decoration. */
+  .tag {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    @apply text-xs uppercase tracking-widest text-brand-muted;
   }
 
   .breadcrumbs {
@@ -168,7 +227,7 @@
   }
 
   .breadcrumbs a {
-    @apply text-gray-500 no-underline hover:text-orange-600;
+    @apply text-gray-500 no-underline hover:text-pitch-600;
   }
 
   .breadcrumb-current {

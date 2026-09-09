@@ -9,13 +9,16 @@
         {{if .Form.FieldErrors.hometeamid }}
             {{$errorClass = "error-border"}}
         {{end}}
+        {{/* data-location-id lets main.js default the Location field to the
+             chosen home team's own home field on change — 0 means the team
+             has none on file, so the location picker is left alone. */}}
         <select class="form-field {{$errorClass}}" name="hometeamid">
             <option value="">-- Select --</option>
             {{range .Data.Teams}}
                 {{if eq .ID $.Form.HomeTeamID}}
-                    <option value="{{.ID}}" selected>{{.Name}}</option>
+                    <option value="{{.ID}}" data-location-id="{{if .LocationID.Valid}}{{.LocationID.Int32}}{{else}}0{{end}}" selected>{{.Name}}</option>
                 {{else}}
-                    <option value="{{.ID}}">{{.Name}}</option>
+                    <option value="{{.ID}}" data-location-id="{{if .LocationID.Valid}}{{.LocationID.Int32}}{{else}}0{{end}}">{{.Name}}</option>
                 {{end}}
             {{end}}
         </select>
@@ -45,10 +48,10 @@
     </div>
 {{end}}
 
-{{/* Date/location/score/notes — shared by create and update. Needs
+{{/* Date/time/location — shared by create and update. Needs
      .Data.Locations in scope (present on both matchFormData and
      matchUpdateData). */}}
-{{define "match-details-fields"}}
+{{define "match-schedule-fields"}}
     {{range .Form.NonFieldErrors}}
         <p class="error-message pb-2">{{.}}</p>
     {{end}}
@@ -95,6 +98,11 @@
             <p class='error-message'>{{.}}</p>
         {{end}}
     </div>
+{{end}}
+
+{{/* Home/away score — update-only (see match-create.html: a match being
+     added hasn't been played yet, so there's nothing to score). */}}
+{{define "match-score-fields"}}
     <div class="mb-4 flex gap-4">
         <div class="flex-1">
             <label class="field-label">Home Score</label>
@@ -112,8 +120,19 @@
     {{with .Form.FieldErrors.homescore}}
         <p class='error-message -mt-2 mb-4'>{{.}}</p>
     {{end}}
+{{end}}
+
+{{define "match-notes-field"}}
     <div class="mb-4">
         <label class="field-label">Notes</label>
         <input class="form-field" type='text' name='notes' value='{{.Form.Notes}}' placeholder="e.g. short-handed opponent">
     </div>
+{{end}}
+
+{{/* Date/location/score/notes — shared shape used by match-update.html
+     (a match being edited may already have a result to record). */}}
+{{define "match-details-fields"}}
+    {{template "match-schedule-fields" .}}
+    {{template "match-score-fields" .}}
+    {{template "match-notes-field" .}}
 {{end}}

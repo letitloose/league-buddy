@@ -2,13 +2,13 @@
 
 {{define "main"}}
 <div class="text-center py-8">
-    <h2>Welcome to Blame the Ball</h2>
+    {{if or .IsActive .IsAuthenticated}}<h2>Welcome to Blame the Ball</h2>{{end}}
     {{if .IsActive}}
         {{if .Data.ShowCaptainGuideBanner}}
         <div class="max-w-3xl mx-auto px-4">
-            <div class="relative bg-orange-50 border border-orange-200 hover:border-orange-500 rounded-xl px-5 py-3 mb-2 transition">
+            <div class="relative bg-pitch-50 border border-pitch-200 hover:border-pitch-600 px-5 py-3 mb-2 transition">
                 <a href="/captains" class="block no-underline text-center pr-6">
-                    <span class="font-semibold text-orange-700">New captains start here!</span>
+                    <span class="font-semibold text-pitch-700">New captains start here!</span>
                     <span class="text-sm text-gray-600 block sm:inline sm:ml-2">See everything you can do as team captain &rarr;</span>
                 </a>
                 <form action="/captains/dismiss" method="POST" class="absolute top-1.5 right-2">
@@ -22,34 +22,31 @@
             <div class="max-w-3xl mx-auto px-4 pt-2 text-left">
                 {{if .Data.HasUpcomingMatch}}
                 <h3 class="px-0">Upcoming Matches</h3>
-                <div class="overflow-x-auto mb-8">
-                <table class="table-compact text-left w-full">
-                    <tr>
-                        <th>Date</th>
-                        <th>Opponent</th>
-                        <th>Location</th>
-                    </tr>
+                <div class="card-grid mb-8">
                     {{range .Data.Teams}}
                         {{if .NextMatch}}
-                        <tr>
-                            <td><a href="/match/{{.NextMatch.ID}}">{{matchDateTimeShort .NextMatch.MatchDate}}</a></td>
-                            <td>
-                                <a href="/team/{{.NextMatchOpponentID}}">{{if not .NextMatchIsHome}}@ {{end}}{{.NextMatchOpponent}}</a>
-                                {{if gt $.Data.UpcomingMatchTeamCount 1}}<span class="text-xs text-gray-500">({{.Team.Name}})</span>{{end}}
-                            </td>
-                            <td>{{if .NextMatchLocation}}<a href="{{mapsURL .NextMatchLocationAddress}}" target="_blank" rel="noopener noreferrer">{{.NextMatchLocation.Name}}</a>{{end}}</td>
-                        </tr>
+                        <div class="match-card">
+                            <a class="block no-underline text-slate-800" href="/match/{{.NextMatch.ID}}">
+                                <p class="text-center text-xs text-gray-500">{{matchDateTimeShort .NextMatch.MatchDate}}</p>
+                                <p class="text-center font-medium text-sm mt-1">{{if not .NextMatchIsHome}}@ {{end}}{{.NextMatchOpponent}}</p>
+                                {{if gt $.Data.UpcomingMatchTeamCount 1}}<p class="text-center text-xs text-gray-500 mt-1">({{.Team.Name}})</p>{{end}}
+                            </a>
+                            {{if .NextMatchLocation}}
+                            <p class="text-center text-xs text-gray-500 mt-2 pt-2 border-t">
+                                <a href="{{mapsURL .NextMatchLocationAddress}}" target="_blank" rel="noopener noreferrer">{{.NextMatchLocation.Name}}</a>
+                            </p>
+                            {{end}}
+                        </div>
                         {{end}}
                     {{end}}
-                </table>
                 </div>
                 {{end}}
 
                 {{with .Data.Leagues}}
                 <h3 class="px-0">My Leagues</h3>
-                <div class="grid gap-4 sm:grid-cols-2 mb-8">
+                <div class="card-grid mb-8">
                     {{range .}}
-                    <a href="/league/{{.League.ID}}" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-orange-500 transition p-5">
+                    <a href="/league/{{.League.ID}}" class="block no-underline bg-white border border-brand-line hover:border-pitch-600 transition p-5">
                         <h4 class="text-slate-800 p-0 mb-2">{{.League.Name}}</h4>
                         {{with .League.Motto.String}}<p class="text-sm italic text-gray-600 mb-1">&ldquo;{{.}}&rdquo;</p>{{end}}
                         <p class="text-sm text-gray-600 mb-1">{{.TeamCount}} team{{if ne .TeamCount 1}}s{{end}}</p>
@@ -65,9 +62,9 @@
 
                 {{with .Data.Teams}}
                 <h3 class="px-0">My Teams</h3>
-                <div class="grid gap-4 sm:grid-cols-2 mb-8">
+                <div class="card-grid mb-8">
                     {{range .}}
-                    <a href="/team/{{.Team.ID}}" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-orange-500 transition p-5">
+                    <a href="/team/{{.Team.ID}}" class="block no-underline bg-white border border-brand-line hover:border-pitch-600 transition p-5">
                         <p class="text-xs uppercase tracking-wide text-gray-500 mb-1">{{.League.Name}}</p>
                         <h4 class="text-slate-800 p-0 mb-2">{{.Team.Name}}</h4>
                         {{with .Team.Motto.String}}<p class="text-sm italic text-gray-600 mb-1">&ldquo;{{.}}&rdquo;</p>{{end}}
@@ -84,20 +81,20 @@
 
                 {{if .IsAdmin}}
                 <h3 class="px-0">Site Admin</h3>
-                <div class="grid gap-4 sm:grid-cols-2">
-                    <a href="/user/search" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-orange-500 transition p-5">
+                <div class="card-grid">
+                    <a href="/user/search" class="block no-underline bg-white border border-brand-line hover:border-pitch-600 transition p-5">
                         <h4 class="text-slate-800 p-0 mb-1">Users</h4>
                         <p class="text-sm text-gray-600 m-0">Search and manage user accounts and player profiles.</p>
                     </a>
-                    <a href="/admin/team/create" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-orange-500 transition p-5">
+                    <a href="/admin/team/create" class="block no-underline bg-white border border-brand-line hover:border-pitch-600 transition p-5">
                         <h4 class="text-slate-800 p-0 mb-1">Add Team</h4>
                         <p class="text-sm text-gray-600 m-0">Create a new team in any league.</p>
                     </a>
-                    <a href="/admin/joinRequests" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-orange-500 transition p-5">
+                    <a href="/admin/joinRequests" class="block no-underline bg-white border border-brand-line hover:border-pitch-600 transition p-5">
                         <h4 class="text-slate-800 p-0 mb-1">Join Requests</h4>
                         <p class="text-sm text-gray-600 m-0">Review pending join requests across every team.</p>
                     </a>
-                    <a href="/location" class="block no-underline bg-white shadow-md hover:shadow-lg rounded-xl border border-transparent hover:border-orange-500 transition p-5">
+                    <a href="/location" class="block no-underline bg-white border border-brand-line hover:border-pitch-600 transition p-5">
                         <h4 class="text-slate-800 p-0 mb-1">Locations</h4>
                         <p class="text-sm text-gray-600 m-0">Manage home fields teams can be assigned to.</p>
                     </a>
@@ -110,31 +107,43 @@
     {{else if .IsAuthenticated}}
         <p>Your account is pending activation. Please check your email.</p>
     {{else}}
-        <div class="max-w-4xl mx-auto px-4 pt-2 text-left">
-            <p class="text-center text-lg text-gray-600 mb-6">The team management app that already knows whose fault that was.</p>
-            <div class="text-center mb-8 md:hidden">
-                <a class="btn" href="/user/login">Login</a>
-                <a class="btn-secondary" href="/user/signup">Signup</a>
+        <div class="max-w-3xl mx-auto px-4 pt-6 pb-4 text-center">
+            <span class="tag">Capital District Over 30 Rec Soccer</span>
+            <h1 class="mt-3 mb-5">The team management app that already knows whose fault that was.</h1>
+            <p class="text-brand-muted text-lg mb-8 max-w-xl mx-auto">Rosters, schedules, and standings for every team in the league — so the only thing left to argue about is the ball.</p>
+            <div class="flex justify-center gap-3 flex-wrap">
+                <a class="btn" href="/user/signup">Sign up</a>
+                <a class="btn-secondary" href="/user/login">Log in</a>
             </div>
-            <h3 class="text-center px-0 mb-6">What do you want to be?</h3>
-            <div class="grid gap-4 sm:grid-cols-3 mb-10">
-                <div class="bg-white shadow-md rounded-xl p-5 text-center">
-                    <h4 class="text-slate-800 p-0 mb-2">A Player</h4>
-                    <p class="text-sm text-gray-600 m-0">Join a team and earn glory on the field.</p>
+        </div>
+
+        <div class="max-w-3xl mx-auto px-4 pt-10 pb-4 text-left border-t border-brand-line">
+            <h2 class="text-center mb-1">What do you want to be?</h2>
+            <p class="text-center text-brand-muted mb-8">Same season, three different jobs. Pick the one that matches your Sunday morning.</p>
+            <div class="grid sm:grid-cols-3 border border-brand-line divide-y sm:divide-y-0 sm:divide-x divide-brand-line">
+                <div class="bg-white p-6 text-center sm:text-left">
+                    <span class="tag text-pitch-600">Roster spot</span>
+                    <h3 class="mt-2 mb-2 p-0">Player</h3>
+                    <p class="text-sm text-brand-muted m-0">Join a team and earn glory on the field.</p>
                 </div>
-                <div class="bg-white shadow-md rounded-xl p-5 text-center">
-                    <h4 class="text-slate-800 p-0 mb-2">A Captain</h4>
-                    <p class="text-sm text-gray-600 m-0">Manage your roster and see if you can guide your team to the heights of recreational success.</p>
+                <div class="bg-white p-6 text-center sm:text-left">
+                    <span class="tag text-pitch-600">Team lead</span>
+                    <h3 class="mt-2 mb-2 p-0">Captain</h3>
+                    <p class="text-sm text-brand-muted m-0">Manage your roster and see if you can guide your team to the heights of recreational success.</p>
                 </div>
-                <div class="bg-white shadow-md rounded-xl p-5 text-center">
-                    <h4 class="text-slate-800 p-0 mb-2">A Commissioner</h4>
-                    <p class="text-sm text-gray-600 m-0">Thanklessly manage an entire league for glory-hungry ingrates.</p>
+                <div class="bg-white p-6 text-center sm:text-left">
+                    <span class="tag text-pitch-600">League run</span>
+                    <h3 class="mt-2 mb-2 p-0">Commissioner</h3>
+                    <p class="text-sm text-brand-muted m-0">Thanklessly manage an entire league for glory-hungry ingrates.</p>
                 </div>
             </div>
-            <div class="text-center">
-                <p class="text-gray-600 mb-3">But first, create an account.</p>
-                <a class="btn" href="/user/login">Login</a>
-                <a class="btn-secondary" href="/user/signup">Signup</a>
+        </div>
+
+        <div class="max-w-3xl mx-auto px-4 pt-10 pb-4 text-center">
+            <p class="text-brand-muted mb-3">But first, create an account.</p>
+            <div class="flex justify-center gap-3 flex-wrap">
+                <a class="btn" href="/user/signup">Sign up</a>
+                <a class="btn-secondary" href="/user/login">Log in</a>
             </div>
         </div>
     {{end}}

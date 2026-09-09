@@ -25,6 +25,16 @@ type Player struct {
 	PhoneVerifiedAt            sql.NullTime
 	PhoneVerificationCode      sql.NullString
 	PhoneVerificationExpiresAt sql.NullTime
+	// SMSOptInAt is the player's own consent to the SMS program — distinct
+	// from PhoneVerifiedAt (proof they control the number) and checked
+	// alongside it everywhere a text is actually sent (see
+	// NotificationPreferenceService.SetPreference and
+	// MatchReminderService.notify/SendTestReminderSMS). Selected alongside
+	// PhoneVerifiedAt in every query below, rather than as a
+	// HasDismissedCaptainGuideBanner-style dedicated lookup, since it's
+	// needed in every one of those SMS-gating call sites already loading a
+	// *Player.
+	SMSOptInAt sql.NullTime
 }
 
 type PlayerModel struct {
@@ -102,6 +112,21 @@ func (m *PlayerModel) ConfirmPhoneVerified(playerID int) error {
 	return err
 }
 
+// SetSMSOptIn records or clears playerID's consent to the SMS program —
+// optedIn true sets smsOptInAt to now, false clears it back to NULL, a
+// real revocation rather than just steering notification preferences back
+// to email. Independent of phone verification: opting out doesn't require
+// (and doesn't touch) PhoneVerifiedAt, and re-verifying a changed phone
+// number doesn't require re-opting-in either.
+func (m *PlayerModel) SetSMSOptIn(playerID int, optedIn bool) error {
+	if optedIn {
+		_, err := m.DB.Exec(`update players set smsOptInAt = UTC_TIMESTAMP() where id = ?`, playerID)
+		return err
+	}
+	_, err := m.DB.Exec(`update players set smsOptInAt = NULL where id = ?`, playerID)
+	return err
+}
+
 // DismissCaptainGuideBanner permanently hides the home page's "New captains
 // start here!" banner for playerID.
 func (m *PlayerModel) DismissCaptainGuideBanner(playerID int) error {
@@ -159,7 +184,7 @@ func (m *PlayerModel) SetCalendarToken(playerID int, token string) error {
 // every other Get* here. ErrNoRecord for an unknown or revoked token.
 func (m *PlayerModel) GetByCalendarToken(token string) (*Player, error) {
 
-	stmt := `select id, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created, phoneVerifiedAt, phoneVerificationCode, phoneVerificationExpiresAt
+	stmt := `select id, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created, phoneVerifiedAt, phoneVerificationCode, phoneVerificationExpiresAt, smsOptInAt
 		from players where calendarToken = ?`
 
 	result := m.DB.QueryRow(stmt, token)
@@ -167,7 +192,7 @@ func (m *PlayerModel) GetByCalendarToken(token string) (*Player, error) {
 	player := &Player{}
 	err := result.Scan(&player.ID, &player.FirstName, &player.LastName,
 		&player.DateOfBirth, &player.AddressID, &player.Email, &player.PhoneNumber, &player.Created,
-		&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt)
+		&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt, &player.SMSOptInAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -188,7 +213,7 @@ func (m *PlayerModel) Delete(id int) error {
 
 func (m *PlayerModel) Get(id int) (*Player, error) {
 
-	stmt := `select id, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created, phoneVerifiedAt, phoneVerificationCode, phoneVerificationExpiresAt
+	stmt := `select id, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created, phoneVerifiedAt, phoneVerificationCode, phoneVerificationExpiresAt, smsOptInAt
 		from players where id = ?`
 
 	result := m.DB.QueryRow(stmt, id)
@@ -196,7 +221,7 @@ func (m *PlayerModel) Get(id int) (*Player, error) {
 	player := &Player{}
 	err := result.Scan(&player.ID, &player.FirstName, &player.LastName,
 		&player.DateOfBirth, &player.AddressID, &player.Email, &player.PhoneNumber, &player.Created,
-		&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt)
+		&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt, &player.SMSOptInAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -209,7 +234,7 @@ func (m *PlayerModel) Get(id int) (*Player, error) {
 
 func (m *PlayerModel) GetByEmail(email string) (*Player, error) {
 
-	stmt := `select id, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created, phoneVerifiedAt, phoneVerificationCode, phoneVerificationExpiresAt
+	stmt := `select id, firstname, lastname, dateOfBirth, addressID, email, phonenumber, created, phoneVerifiedAt, phoneVerificationCode, phoneVerificationExpiresAt, smsOptInAt
 		from players where email = ?`
 
 	result := m.DB.QueryRow(stmt, email)
@@ -217,7 +242,7 @@ func (m *PlayerModel) GetByEmail(email string) (*Player, error) {
 	player := &Player{}
 	err := result.Scan(&player.ID, &player.FirstName, &player.LastName,
 		&player.DateOfBirth, &player.AddressID, &player.Email, &player.PhoneNumber, &player.Created,
-		&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt)
+		&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt, &player.SMSOptInAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -232,7 +257,7 @@ func (m *PlayerModel) GetByEmail(email string) (*Player, error) {
 // player can belong to more than one team.
 func (m *PlayerModel) GetByTeam(teamID int) ([]*Player, error) {
 
-	stmt := `select p.id, p.firstname, p.lastname, p.dateOfBirth, p.addressID, p.email, p.phonenumber, p.created, p.phoneVerifiedAt, p.phoneVerificationCode, p.phoneVerificationExpiresAt
+	stmt := `select p.id, p.firstname, p.lastname, p.dateOfBirth, p.addressID, p.email, p.phonenumber, p.created, p.phoneVerifiedAt, p.phoneVerificationCode, p.phoneVerificationExpiresAt, p.smsOptInAt
 		from players p
 		join teamMembers tm on tm.playerID = p.id
 		where tm.teamID = ?
@@ -249,7 +274,7 @@ func (m *PlayerModel) GetByTeam(teamID int) ([]*Player, error) {
 		player := &Player{}
 		err := rows.Scan(&player.ID, &player.FirstName, &player.LastName,
 			&player.DateOfBirth, &player.AddressID, &player.Email, &player.PhoneNumber, &player.Created,
-			&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt)
+			&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt, &player.SMSOptInAt)
 		if err != nil {
 			return nil, err
 		}
@@ -267,7 +292,7 @@ func (m *PlayerModel) GetByTeam(teamID int) ([]*Player, error) {
 // show up, RSVP, and get stats recorded like anyone else; "Legend" is a
 // roster-page organizing status, not a functional restriction.
 func (m *PlayerModel) GetActiveByTeam(teamID int) ([]*Player, error) {
-	stmt := `select p.id, p.firstname, p.lastname, p.dateOfBirth, p.addressID, p.email, p.phonenumber, p.created, p.phoneVerifiedAt, p.phoneVerificationCode, p.phoneVerificationExpiresAt
+	stmt := `select p.id, p.firstname, p.lastname, p.dateOfBirth, p.addressID, p.email, p.phonenumber, p.created, p.phoneVerifiedAt, p.phoneVerificationCode, p.phoneVerificationExpiresAt, p.smsOptInAt
 		from players p
 		join teamMembers tm on tm.playerID = p.id
 		where tm.teamID = ? and tm.isLegend = 0
@@ -284,7 +309,7 @@ func (m *PlayerModel) GetActiveByTeam(teamID int) ([]*Player, error) {
 		player := &Player{}
 		err := rows.Scan(&player.ID, &player.FirstName, &player.LastName,
 			&player.DateOfBirth, &player.AddressID, &player.Email, &player.PhoneNumber, &player.Created,
-			&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt)
+			&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt, &player.SMSOptInAt)
 		if err != nil {
 			return nil, err
 		}
@@ -299,7 +324,7 @@ func (m *PlayerModel) GetActiveByTeam(teamID int) ([]*Player, error) {
 // team, still showing their career stats on their own profile (see
 // TeamMemberModel.SetLegendStatus).
 func (m *PlayerModel) GetLegendsByTeam(teamID int) ([]*Player, error) {
-	stmt := `select p.id, p.firstname, p.lastname, p.dateOfBirth, p.addressID, p.email, p.phonenumber, p.created, p.phoneVerifiedAt, p.phoneVerificationCode, p.phoneVerificationExpiresAt
+	stmt := `select p.id, p.firstname, p.lastname, p.dateOfBirth, p.addressID, p.email, p.phonenumber, p.created, p.phoneVerifiedAt, p.phoneVerificationCode, p.phoneVerificationExpiresAt, p.smsOptInAt
 		from players p
 		join teamMembers tm on tm.playerID = p.id
 		where tm.teamID = ? and tm.isLegend = 1
@@ -316,7 +341,7 @@ func (m *PlayerModel) GetLegendsByTeam(teamID int) ([]*Player, error) {
 		player := &Player{}
 		err := rows.Scan(&player.ID, &player.FirstName, &player.LastName,
 			&player.DateOfBirth, &player.AddressID, &player.Email, &player.PhoneNumber, &player.Created,
-			&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt)
+			&player.PhoneVerifiedAt, &player.PhoneVerificationCode, &player.PhoneVerificationExpiresAt, &player.SMSOptInAt)
 		if err != nil {
 			return nil, err
 		}

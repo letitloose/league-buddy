@@ -32,8 +32,19 @@ func (app *application) newTemplateData(r *http.Request) *templateData {
 	if playerID := app.getPlayerID(r); app.isActive(r) && playerID > 0 {
 		tmm := &models.TeamMemberModel{DB: app.playerService.DB}
 		if teams, err := tmm.GetTeamsForPlayer(playerID); err == nil {
+			lm := &models.LeagueModel{DB: app.playerService.DB}
+			seenLeagues := map[int]bool{}
 			for _, team := range teams {
 				data.MyTeams = append(data.MyTeams, NavTeamInfo{ID: team.ID, Name: team.Name})
+				if seenLeagues[team.LeagueID] {
+					continue
+				}
+				seenLeagues[team.LeagueID] = true
+				if league, err := lm.Get(team.LeagueID); err == nil {
+					data.MyLeagues = append(data.MyLeagues, NavLeagueInfo{ID: league.ID, Name: league.Name})
+				} else {
+					app.errorLog.Println(err)
+				}
 			}
 		} else {
 			app.errorLog.Println(err)

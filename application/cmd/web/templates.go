@@ -35,20 +35,25 @@ type NavLeagueInfo struct {
 }
 
 type templateData struct {
-	CurrentYear       int
-	LastUpdate        string
-	Form              any
-	Data              any
-	SupportData       any
-	Flash             string
-	IsAuthenticated   bool
-	IsActive          bool
-	IsAdmin           bool
-	IsRealAdmin       bool
-	ViewingAsPlayer   bool
-	UserName          string
-	PlayerID          int
-	MyTeams           []NavTeamInfo
+	CurrentYear     int
+	LastUpdate      string
+	Form            any
+	Data            any
+	SupportData     any
+	Flash           string
+	IsAuthenticated bool
+	IsActive        bool
+	IsAdmin         bool
+	IsRealAdmin     bool
+	ViewingAsPlayer bool
+	UserName        string
+	PlayerID        int
+	MyTeams         []NavTeamInfo
+	// MyLeagues is the (deduplicated) set of leagues MyTeams actually play
+	// in — a plain player's "My Leagues" nav dropdown, distinct from
+	// MyAdminLeagues (leagues they administer, which may not overlap at
+	// all with leagues their own team competes in).
+	MyLeagues         []NavLeagueInfo
 	MyAdminLeagues    []NavLeagueInfo
 	CSRFToken         string
 	Breadcrumbs       []Breadcrumb

@@ -45,7 +45,7 @@ func (app *application) seedHistoricalSeasons() error {
 		return err
 	}
 
-	return seedFall2026Season(db)
+	return seedFall2026Season(db, teamIDs, locationIDs)
 }
 
 // Team names below match the Fall 2026 schedule CSV rather than the older,
@@ -276,10 +276,13 @@ func seedHistoricalMatchRows(db *sql.DB, teamIDs, locationIDs, seasonIDs map[str
 	return nil
 }
 
-// seedFall2026Season creates the upcoming season with no matches yet — the
-// real Fall 2026 schedule is real data, brought in via the season's "Import
-// Schedule" CSV upload rather than seeded here alongside synthetic fixtures.
-func seedFall2026Season(db *sql.DB) error {
+// seedFall2026Season creates the upcoming season and its known home opener
+// (Colonial FC vs. Brunswick FC, 9/13 at East Greenbush — a real match the
+// site owner kept re-entering by hand after every dev DB reset) — the rest
+// of the real Fall 2026 schedule is real data, brought in via the season's
+// "Import Schedule" CSV upload rather than seeded here alongside synthetic
+// fixtures.
+func seedFall2026Season(db *sql.DB, teamIDs, locationIDs map[string]int) error {
 	sm := &models.SeasonModel{DB: db}
 	start, err := time.Parse("2006-01-02", "2026-09-13")
 	if err != nil {
@@ -289,11 +292,27 @@ func seedFall2026Season(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	_, err = sm.Insert(&models.Season{
+	seasonID, err := sm.Insert(&models.Season{
 		LeagueID:  1,
 		Name:      "Fall 2026",
 		StartDate: sql.NullTime{Time: start, Valid: true},
 		EndDate:   sql.NullTime{Time: end, Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+
+	kickoff, err := time.ParseInLocation("2006-01-02 15:04", "2026-09-13 09:30", easternLocation)
+	if err != nil {
+		return err
+	}
+	mm := &models.MatchModel{DB: db}
+	_, err = mm.Insert(&models.Match{
+		SeasonID:   seasonID,
+		HomeTeamID: teamIDs["Colonial FC"],
+		AwayTeamID: teamIDs["Brunswick FC"],
+		MatchDate:  kickoff,
+		LocationID: sql.NullInt32{Int32: int32(locationIDs["eastgreenbush"]), Valid: true},
 	})
 	return err
 }

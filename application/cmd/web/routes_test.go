@@ -1504,8 +1504,8 @@ func TestLeagueAdminCanManageSeasonsAndMatches(t *testing.T) {
 			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
 		}
 		loc := headers.Get("Location")
-		if _, err := fmt.Sscanf(loc, "/season/%d", &seasonID); err != nil || seasonID < 1 {
-			t.Fatalf("expected a /season/:id redirect, got %q", loc)
+		if _, err := fmt.Sscanf(loc, "/league/1?season=%d", &seasonID); err != nil || seasonID < 1 {
+			t.Fatalf("expected a /league/1?season=:id redirect, got %q", loc)
 		}
 	})
 
@@ -1552,8 +1552,8 @@ func TestLeagueAdminCanManageSeasonsAndMatches(t *testing.T) {
 		if code != http.StatusSeeOther {
 			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
 		}
-		if loc := headers.Get("Location"); loc != fmt.Sprintf("/season/%d", seasonID) {
-			t.Fatalf("want Location %q; got %q", fmt.Sprintf("/season/%d", seasonID), loc)
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/league/1?season=%d", seasonID) {
+			t.Fatalf("want Location %q; got %q", fmt.Sprintf("/league/1?season=%d", seasonID), loc)
 		}
 
 		mm := &models.MatchModel{DB: testDB}
@@ -1696,14 +1696,14 @@ func TestCaptainRedirectedFromSeasonMatchAdminRoutes(t *testing.T) {
 	})
 
 	t.Run("season view allowed (read-only)", func(t *testing.T) {
-		code, _, _ := ts.get(t, fmt.Sprintf("/season/%d", seasonID))
+		code, _, _ := ts.get(t, fmt.Sprintf("/league/%d?season=%d", leagueID, seasonID))
 		if code != http.StatusOK {
 			t.Errorf("want %d; got %d", http.StatusOK, code)
 		}
 	})
 
 	t.Run("team schedule view allowed (read-only)", func(t *testing.T) {
-		code, _, _ := ts.get(t, fmt.Sprintf("/team/%d/season/%d", teamID, seasonID))
+		code, _, _ := ts.get(t, fmt.Sprintf("/team/%d?season=%d&tab=matches", teamID, seasonID))
 		if code != http.StatusOK {
 			t.Errorf("want %d; got %d", http.StatusOK, code)
 		}
@@ -1818,8 +1818,15 @@ func TestLeagueStandingsSortingAndLeaderTables(t *testing.T) {
 		if !(posA < posB && posB < posC) {
 			t.Fatalf("expected order A, B, C by points; got positions %d/%d/%d", posA, posB, posC)
 		}
+	})
+
+	t.Run("leaders tab shows the goal/assist leader tables", func(t *testing.T) {
+		code, _, body := ts.get(t, fmt.Sprintf("/league/%d?tab=leaders", leagueID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
 		if !strings.Contains(body, "Goal Leaders") || !strings.Contains(body, "Assist Leaders") {
-			t.Error("expected both leader tables on the league page")
+			t.Error("expected both leader tables on the league page's Leaders tab")
 		}
 		if !strings.Contains(body, "Goalie Scorer") || !strings.Contains(body, "Setup Assister") {
 			t.Error("expected the seeded scorer/assister to appear in the leader tables")
@@ -1837,15 +1844,16 @@ func TestLeagueStandingsSortingAndLeaderTables(t *testing.T) {
 		}
 	})
 
-	t.Run("season page shows the same leader tables", func(t *testing.T) {
-		// Leader tables render on the season page's Standings tab (Matches
-		// is the default) — see season-view.html.
-		code, _, body := ts.get(t, fmt.Sprintf("/season/%d?tab=standings", seasonID))
+	t.Run("picking this season via ?season= shows the same leader tables", func(t *testing.T) {
+		// The league page defaults to whatever GetCurrentOrNext picks, so
+		// this pins the query param explicitly to prove the picker (not
+		// just "whichever season happens to be current") drives the tab.
+		code, _, body := ts.get(t, fmt.Sprintf("/league/%d?season=%d&tab=leaders", leagueID, seasonID))
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
 		if !strings.Contains(body, "Goal Leaders") || !strings.Contains(body, "Assist Leaders") {
-			t.Error("expected both leader tables on the season page")
+			t.Error("expected both leader tables on the Leaders tab")
 		}
 		if !strings.Contains(body, "Goalie Scorer") || !strings.Contains(body, "Setup Assister") {
 			t.Error("expected the seeded scorer/assister to appear in the leader tables")
@@ -1918,10 +1926,10 @@ func TestLeagueMatchesTabGroupsByDay(t *testing.T) {
 	}
 }
 
-// The season page shows its matches the same way the league page's Matches
-// tab does — grouped into matchday cards, not a flat table — and a manager
-// still gets per-match Edit/Delete controls on each card.
-func TestSeasonViewGroupsMatchesByDay(t *testing.T) {
+// The league page's Matches tab groups a selected season's matches into
+// matchday cards and gives a manager per-match Edit/Delete controls on each
+// card — capability that used to live only on the now-removed season page.
+func TestLeagueMatchesTabManagerControls(t *testing.T) {
 	app := newTestApplication(t)
 
 	lm := &models.LeagueModel{DB: testDB}
@@ -1954,7 +1962,7 @@ func TestSeasonViewGroupsMatchesByDay(t *testing.T) {
 	ts := newTestServer(t, app.routes())
 	ts.login(t, testAdminEmail, testAdminPass)
 
-	code, _, body := ts.get(t, fmt.Sprintf("/season/%d", seasonID))
+	code, _, body := ts.get(t, fmt.Sprintf("/league/%d?season=%d&tab=matches", leagueID, seasonID))
 	if code != http.StatusOK {
 		t.Fatalf("want %d; got %d", http.StatusOK, code)
 	}
@@ -1975,12 +1983,11 @@ func TestSeasonViewGroupsMatchesByDay(t *testing.T) {
 	}
 }
 
-// The season page's Standings tab shows that specific season's own
-// standings — not "whichever season is current" (the league page's
-// concept) — so a past season's page keeps showing its own final table
-// even once a newer season exists. Matches is the season page's default
-// tab; Standings only renders once selected via ?tab=standings.
-func TestSeasonViewStandingsTab(t *testing.T) {
+// Picking a past season via ?season= on the league page shows that
+// season's own standings — not "whichever season is current" (the
+// no-?season= default) — so a past season stays browsable on its own
+// terms even once a newer season exists.
+func TestLeagueViewStandingsForSelectedSeason(t *testing.T) {
 	app := newTestApplication(t)
 
 	lm := &models.LeagueModel{DB: testDB}
@@ -2018,11 +2025,12 @@ func TestSeasonViewStandingsTab(t *testing.T) {
 	ts := newTestServer(t, app.routes())
 	ts.login(t, testActiveEmail, testActivePass)
 
-	code, _, body := ts.get(t, fmt.Sprintf("/season/%d?tab=standings", pastSeasonID))
+	code, _, body := ts.get(t, fmt.Sprintf("/league/%d?season=%d&tab=standings", leagueID, pastSeasonID))
 	if code != http.StatusOK {
 		t.Fatalf("want %d; got %d", http.StatusOK, code)
 	}
-	if !strings.Contains(body, "tab-link-active\" href=\"/season/"+fmt.Sprint(pastSeasonID)+"?tab=standings\"") {
+	wantActiveTabHref := fmt.Sprintf("tab-link-active\" href=\"/league/%d?season=%d&tab=standings\"", leagueID, pastSeasonID)
+	if !strings.Contains(body, wantActiveTabHref) {
 		t.Error("expected the Standings tab link to render as active")
 	}
 	winnerIdx := strings.Index(body, "Season Standings Winner FC")
@@ -2162,7 +2170,7 @@ func TestMatchViewAndCaptainEditAccess(t *testing.T) {
 		ts := newTestServer(t, app.routes())
 		ts.login(t, testActiveEmail, testActivePass)
 
-		code, _, body := ts.get(t, fmt.Sprintf("/team/%d", homeTeamID))
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d?tab=matches", homeTeamID))
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
@@ -2178,7 +2186,7 @@ func TestMatchViewAndCaptainEditAccess(t *testing.T) {
 		ts := newTestServer(t, app.routes())
 		ts.login(t, testActiveEmail, testActivePass)
 
-		code, _, body := ts.get(t, fmt.Sprintf("/team/%d", awayTeamID))
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d?tab=matches", awayTeamID))
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
@@ -2523,7 +2531,7 @@ func TestMatchRSVP(t *testing.T) {
 		ts := newTestServer(t, app.routes())
 		ts.login(t, testActiveEmail, testActivePass)
 
-		code, _, body := ts.get(t, fmt.Sprintf("/team/%d", homeTeamID))
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d?tab=matches", homeTeamID))
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
@@ -2840,7 +2848,7 @@ func TestRosterAccountIndicatorVisibleOnlyToManagers(t *testing.T) {
 		ts := newTestServer(t, app.routes())
 		ts.login(t, "roster-account-captain@test.com", "validpassword123")
 
-		code, _, body := ts.get(t, fmt.Sprintf("/team/%d", teamID))
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d?tab=roster", teamID))
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
@@ -2856,7 +2864,7 @@ func TestRosterAccountIndicatorVisibleOnlyToManagers(t *testing.T) {
 		ts := newTestServer(t, app.routes())
 		ts.login(t, testActiveEmail, testActivePass)
 
-		code, _, body := ts.get(t, fmt.Sprintf("/team/%d", teamID))
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d?tab=roster", teamID))
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
@@ -3065,7 +3073,7 @@ func TestTeamRosterDefaultSortAndToggle(t *testing.T) {
 	ts.login(t, testActiveEmail, testActivePass)
 
 	t.Run("defaults to goals descending", func(t *testing.T) {
-		code, _, body := ts.get(t, fmt.Sprintf("/team/%d", teamID))
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d?tab=roster", teamID))
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
@@ -3080,7 +3088,7 @@ func TestTeamRosterDefaultSortAndToggle(t *testing.T) {
 	})
 
 	t.Run("sorting by name ascending shows name as the active column", func(t *testing.T) {
-		code, _, body := ts.get(t, fmt.Sprintf("/team/%d?sort=name&order=ASC", teamID))
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d?tab=roster&sort=name&order=ASC", teamID))
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
@@ -3096,8 +3104,8 @@ func TestTeamRosterDefaultSortAndToggle(t *testing.T) {
 	})
 }
 
-// The team page's leaders line includes an Own goal leader alongside the
-// existing leading scorer/assister, once someone on the roster has one.
+// The team page's Leaders tab calls out an Own goal leader above the
+// Goal/Assist Leaders tables, once someone on the roster has one.
 func TestTeamViewOwnGoalLeader(t *testing.T) {
 	app := newTestApplication(t)
 
@@ -3147,12 +3155,12 @@ func TestTeamViewOwnGoalLeader(t *testing.T) {
 	ts := newTestServer(t, app.routes())
 	ts.login(t, testActiveEmail, testActivePass)
 
-	code, _, body := ts.get(t, fmt.Sprintf("/team/%d", teamID))
+	code, _, body := ts.get(t, fmt.Sprintf("/team/%d?tab=leaders", teamID))
 	if code != http.StatusOK {
 		t.Fatalf("want %d; got %d", http.StatusOK, code)
 	}
 	if !strings.Contains(body, "Own goal leader: Unlucky Defender (1)") {
-		t.Error("expected the Own goal leader line to appear on the team page")
+		t.Error("expected the Own goal leader line to appear on the team page's Leaders tab")
 	}
 }
 
@@ -3210,8 +3218,8 @@ func TestScorekeeperTier(t *testing.T) {
 		if code != http.StatusSeeOther {
 			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
 		}
-		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d", homeTeamID) {
-			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d", homeTeamID), loc)
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d?tab=roster", homeTeamID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d?tab=roster", homeTeamID), loc)
 		}
 
 		tsm := &models.TeamScorekeeperModel{DB: testDB}
@@ -3223,7 +3231,7 @@ func TestScorekeeperTier(t *testing.T) {
 			t.Fatal("expected candidate to be a scorekeeper of the home team")
 		}
 
-		_, _, body := captainTS.get(t, fmt.Sprintf("/team/%d", homeTeamID))
+		_, _, body := captainTS.get(t, fmt.Sprintf("/team/%d?tab=roster", homeTeamID))
 		if !strings.Contains(body, "Remove Scorekeeper") {
 			t.Error("expected the roster row's action to flip to Remove Scorekeeper")
 		}
@@ -3285,8 +3293,8 @@ func TestScorekeeperTier(t *testing.T) {
 		if code != http.StatusSeeOther {
 			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
 		}
-		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d", homeTeamID) {
-			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d", homeTeamID), loc)
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d?tab=roster", homeTeamID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d?tab=roster", homeTeamID), loc)
 		}
 
 		ts := newTestServer(t, app.routes())
@@ -3364,8 +3372,8 @@ func TestTeamLegendStatus(t *testing.T) {
 		if code != http.StatusSeeOther {
 			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
 		}
-		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d?tab=legends", teamID) {
-			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d?tab=legends", teamID), loc)
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d?tab=roster&rosterTab=legends", teamID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d?tab=roster&rosterTab=legends", teamID), loc)
 		}
 
 		tsm := &models.TeamScorekeeperModel{DB: testDB}
@@ -3395,18 +3403,18 @@ func TestTeamLegendStatus(t *testing.T) {
 			t.Fatalf("expected the veteran to be the sole Legend, got %+v", legends)
 		}
 
-		_, _, activeBody := captainTS.get(t, fmt.Sprintf("/team/%d?tab=active", teamID))
+		_, _, activeBody := captainTS.get(t, fmt.Sprintf("/team/%d?tab=roster&rosterTab=active", teamID))
 		if strings.Contains(activeBody, fmt.Sprintf(`href="/player/view/%d"`, veteranID)) {
 			t.Error("expected the veteran to no longer appear on the Active tab")
 		}
-		_, _, legendsBody := captainTS.get(t, fmt.Sprintf("/team/%d?tab=legends", teamID))
+		_, _, legendsBody := captainTS.get(t, fmt.Sprintf("/team/%d?tab=roster&rosterTab=legends", teamID))
 		if !strings.Contains(legendsBody, "Move to Active") {
 			t.Error("expected a Move to Active action on the Legends tab")
 		}
 	})
 
 	t.Run("captain moves the veteran back to the active roster", func(t *testing.T) {
-		_, _, formBody := captainTS.get(t, fmt.Sprintf("/team/%d?tab=legends", teamID))
+		_, _, formBody := captainTS.get(t, fmt.Sprintf("/team/%d?tab=roster&rosterTab=legends", teamID))
 		csrfToken := extractCSRFToken(t, formBody)
 
 		code, headers, _ := captainTS.postForm(t, "/admin/team/legends/remove", url.Values{
@@ -3417,8 +3425,8 @@ func TestTeamLegendStatus(t *testing.T) {
 		if code != http.StatusSeeOther {
 			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
 		}
-		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d", teamID) {
-			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d", teamID), loc)
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/team/%d?tab=roster", teamID) {
+			t.Errorf("want Location %q; got %q", fmt.Sprintf("/team/%d?tab=roster", teamID), loc)
 		}
 
 		pm := &models.PlayerModel{DB: testDB}
@@ -3755,7 +3763,7 @@ func TestMatchAttendanceSubmit(t *testing.T) {
 			t.Errorf("expected the walk-on to count toward MP, got %d", played[walkOnID])
 		}
 
-		_, _, teamBody := ts.get(t, fmt.Sprintf("/team/%d", homeTeamID))
+		_, _, teamBody := ts.get(t, fmt.Sprintf("/team/%d?tab=roster", homeTeamID))
 		if !strings.Contains(teamBody, ">MP<") {
 			t.Error("expected the team page's roster table to have an MP column header")
 		}
@@ -3822,6 +3830,72 @@ func TestLoginRedirectsToNextAfterAuth(t *testing.T) {
 		}
 		if loc := headers.Get("Location"); loc != "/" {
 			t.Errorf("want Location %q (unsafe next rejected); got %q", "/", loc)
+		}
+	})
+}
+
+// Checking "Remember me" at login extends the session cookie's Max-Age from
+// the ordinary ~12-hour Lifetime out to rememberMeDuration (~30 days) — see
+// the SetDeadline call in userLoginPost. Both cases inspect the raw
+// Set-Cookie header from the login response itself (not a later request),
+// since that's the one response where the newly (re)issued session cookie
+// is actually written.
+func TestLoginRememberMe(t *testing.T) {
+	app := newTestApplication(t)
+
+	sessionCookie := func(t *testing.T, headers http.Header) *http.Cookie {
+		t.Helper()
+		resp := &http.Response{Header: headers}
+		for _, c := range resp.Cookies() {
+			if c.Name == "session" {
+				return c
+			}
+		}
+		t.Fatal("no session cookie in response")
+		return nil
+	}
+
+	t.Run("unchecked keeps the ordinary ~12-hour session", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+
+		_, _, body := ts.get(t, "/user/login")
+		csrfToken := extractCSRFToken(t, body)
+
+		code, headers, _ := ts.postForm(t, "/user/login", url.Values{
+			"email":      {testActiveEmail},
+			"password":   {testActivePass},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+
+		maxAge := sessionCookie(t, headers).MaxAge
+		if maxAge <= 0 || maxAge > int((13*time.Hour).Seconds()) {
+			t.Errorf("want a Max-Age around 12 hours; got %d seconds", maxAge)
+		}
+	})
+
+	t.Run("checked extends the session to ~30 days", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+
+		_, _, body := ts.get(t, "/user/login")
+		csrfToken := extractCSRFToken(t, body)
+
+		code, headers, _ := ts.postForm(t, "/user/login", url.Values{
+			"email":      {testActiveEmail},
+			"password":   {testActivePass},
+			"rememberMe": {"on"},
+			"csrf_token": {csrfToken},
+		})
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+
+		maxAge := sessionCookie(t, headers).MaxAge
+		wantMin := int((29 * 24 * time.Hour).Seconds())
+		if maxAge < wantMin {
+			t.Errorf("want a Max-Age of at least ~29 days; got %d seconds", maxAge)
 		}
 	})
 }
@@ -4031,6 +4105,9 @@ func TestMatchTestReminderSMSSubmit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := pm.ConfirmPhoneVerified(verifiedID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.SetSMSOptIn(verifiedID, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4304,8 +4381,8 @@ func TestPlayerProfileShowsCareerStats(t *testing.T) {
 			t.Errorf("expected the %s card to show %d", want.label, want.value)
 		}
 	}
-	if !strings.Contains(body, fmt.Sprintf(`href="/season/%d"`, seasonID)) {
-		t.Error("expected the Career Stats table's season to link to its season page")
+	if !strings.Contains(body, fmt.Sprintf(`href="/league/%d?season=%d"`, leagueID, seasonID)) {
+		t.Error("expected the Career Stats table's season to link to its league page with that season selected")
 	}
 	if !strings.Contains(body, "Career Stats Season") {
 		t.Error("expected the season's name to appear in the Career Stats table")
@@ -4420,10 +4497,11 @@ func TestPlayerNotificationsVerifyPhoneAndSetPreference(t *testing.T) {
 	_, _, body := ts.get(t, fmt.Sprintf("/player/notifications/%d", playerID))
 	csrfToken := extractCSRFToken(t, body)
 
-	// Setting sms before ever verifying a phone is rejected.
+	// Setting sms before ever verifying a phone (or opting in) is rejected.
 	code, headers, _ := ts.postForm(t, fmt.Sprintf("/player/notifications/%d/preferences", playerID), url.Values{
-		"csrf_token":  {csrfToken},
-		"rsvpChannel": {"sms"},
+		"csrf_token": {csrfToken},
+		"rsvpEmail":  {"on"},
+		"rsvpText":   {"on"},
 	})
 	if code != http.StatusSeeOther {
 		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
@@ -4435,14 +4513,14 @@ func TestPlayerNotificationsVerifyPhoneAndSetPreference(t *testing.T) {
 		t.Fatal(err)
 	}
 	if channel != models.ChannelEmail {
-		t.Fatalf("expected the sms preference to be rejected (still default %q), got %q", models.ChannelEmail, channel)
+		t.Fatalf("expected the sms preference to be rejected (still default %q — the checked Email box is still honored), got %q", models.ChannelEmail, channel)
 	}
 
-	// Request a verification code.
+	// Request a verification code, checking the SMS opt-in box.
 	code, headers, _ = ts.postForm(t, fmt.Sprintf("/player/notifications/%d/phone", playerID), url.Values{
 		"csrf_token":  {csrfToken},
 		"phonenumber": {"518-555-0100"},
-		"smsConsent":  {"on"},
+		"smsOptIn":    {"on"},
 	})
 	if code != http.StatusSeeOther {
 		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
@@ -4454,6 +4532,9 @@ func TestPlayerNotificationsVerifyPhoneAndSetPreference(t *testing.T) {
 	}
 	if !player.PhoneVerificationCode.Valid {
 		t.Fatal("expected a pending verification code after requesting one")
+	}
+	if !player.SMSOptInAt.Valid {
+		t.Fatal("expected SMS opt-in to be recorded at request time, independent of whether the code is ever confirmed")
 	}
 
 	// Confirm with the real code.
@@ -4479,8 +4560,8 @@ func TestPlayerNotificationsVerifyPhoneAndSetPreference(t *testing.T) {
 	_, _, body = ts.get(t, headers.Get("Location"))
 	csrfToken = extractCSRFToken(t, body)
 	code, _, _ = ts.postForm(t, fmt.Sprintf("/player/notifications/%d/preferences", playerID), url.Values{
-		"csrf_token":  {csrfToken},
-		"rsvpChannel": {"sms"},
+		"csrf_token": {csrfToken},
+		"rsvpText":   {"on"},
 	})
 	if code != http.StatusSeeOther {
 		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
@@ -4490,7 +4571,7 @@ func TestPlayerNotificationsVerifyPhoneAndSetPreference(t *testing.T) {
 		t.Fatal(err)
 	}
 	if channel != models.ChannelSMS {
-		t.Fatalf("expected channel %q after verifying, got %q", models.ChannelSMS, channel)
+		t.Fatalf("expected channel %q after verifying and opting in, got %q", models.ChannelSMS, channel)
 	}
 }
 

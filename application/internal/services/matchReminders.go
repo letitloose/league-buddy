@@ -49,8 +49,9 @@ type MatchReminderService struct {
 // preference for category (defaulting to email if they've never set one
 // — see models.NotificationPreferenceModel.GetChannel). If the preference
 // wants SMS but the phone isn't currently verified (e.g. verification
-// lapsed after a phone-number change since they set the preference), it
-// falls back to email rather than silently dropping the reminder. Returns
+// lapsed after a phone-number change since they set the preference) or
+// SMS program consent has since been withdrawn, it falls back to email
+// rather than silently dropping the reminder. Returns
 // whether anything was actually dispatched — false for a player whose
 // preference is ChannelOff, which callers use to decide whether this
 // counts as a real send (for their "N reminders sent" count and whether
@@ -64,7 +65,7 @@ func (service *MatchReminderService) notify(category string, recipient *models.P
 
 	wantsEmail := channel == models.ChannelEmail || channel == models.ChannelBoth
 	wantsSMS := channel == models.ChannelSMS || channel == models.ChannelBoth
-	if wantsSMS && !recipient.PhoneVerifiedAt.Valid {
+	if wantsSMS && (!recipient.PhoneVerifiedAt.Valid || !recipient.SMSOptInAt.Valid) {
 		wantsSMS = false
 		wantsEmail = true
 	}
@@ -419,10 +420,10 @@ func (service *MatchReminderService) SendTestReminder(matchID, teamID int, addre
 
 // SendTestReminderSMS is SendTestReminder's SMS counterpart. Unlike
 // SendTestReminder (which accepts arbitrary addresses), every playerID is
-// re-checked here against teamID's roster and PhoneVerifiedAt regardless
-// of what the caller passed — this is the one place a consent mistake
-// would actually text someone, so it doesn't trust the picker alone.
-// Returns how many were sent.
+// re-checked here against teamID's roster, PhoneVerifiedAt, and
+// SMSOptInAt regardless of what the caller passed — this is the one place
+// a consent mistake would actually text someone, so it doesn't trust the
+// picker alone. Returns how many were sent.
 func (service *MatchReminderService) SendTestReminderSMS(matchID, teamID int, playerIDs []int) (int, error) {
 	mm := &models.MatchModel{DB: service.DB}
 	match, err := mm.Get(matchID)
@@ -461,7 +462,7 @@ func (service *MatchReminderService) SendTestReminderSMS(matchID, teamID int, pl
 			}
 			return sent, err
 		}
-		if !player.PhoneVerifiedAt.Valid {
+		if !player.PhoneVerifiedAt.Valid || !player.SMSOptInAt.Valid {
 			continue
 		}
 

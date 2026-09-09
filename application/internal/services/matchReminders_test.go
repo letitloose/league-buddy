@@ -103,13 +103,19 @@ func TestSendDueRSVPRemindersOnlyEmailsNonResponders(t *testing.T) {
 // verifyPlayerPhone drives a player's phone through the real
 // request-code/confirm-code model methods (rather than hand-writing SQL),
 // so tests exercise the same path the app actually uses to mark a phone
-// verified.
+// verified, and also opts them into the SMS program — in the real app the
+// two always happen together (the consent checkbox gates requesting a
+// code at all), and both PhoneVerifiedAt and SMSOptInAt are required
+// before a text actually goes out (see notify/SendTestReminderSMS).
 func verifyPlayerPhone(t *testing.T, pm *models.PlayerModel, playerID int) {
 	t.Helper()
 	if err := pm.SetPhoneVerificationCode(playerID, "123456", time.Now().Add(10*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if err := pm.ConfirmPhoneVerified(playerID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.SetSMSOptIn(playerID, true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -165,6 +171,22 @@ func TestSendDueRSVPRemindersRespectsChannelPreference(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Verified phone, but SMS program consent never (or no longer) given —
+	// must also fall back to email, the same as an unverified phone.
+	notOptedInID, err := pm.Insert(&models.Player{FirstName: "NotOptedIn", LastName: "Phone", Email: sql.NullString{String: "not-opted-in@example.com", Valid: true}, PhoneNumber: sql.NullString{String: "518-555-0102", Valid: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.SetPhoneVerificationCode(notOptedInID, "123456", time.Now().Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := pm.ConfirmPhoneVerified(notOptedInID); err != nil {
+		t.Fatal(err)
+	}
+	if err := npm.SetChannel(notOptedInID, models.CategoryRSVPReminder, models.ChannelSMS); err != nil {
+		t.Fatal(err)
+	}
+
 	// Explicit "off" — must not be counted or recorded as sent at all.
 	offID, err := pm.Insert(&models.Player{FirstName: "Opted", LastName: "Out", Email: sql.NullString{String: "opted-out@example.com", Valid: true}})
 	if err != nil {
@@ -174,7 +196,7 @@ func TestSendDueRSVPRemindersRespectsChannelPreference(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, playerID := range []int{smsOnlyID, unverifiedID, offID} {
+	for _, playerID := range []int{smsOnlyID, unverifiedID, notOptedInID, offID} {
 		if err := tmm.AddMembership(playerID, 1); err != nil {
 			t.Fatal(err)
 		}
@@ -184,8 +206,8 @@ func TestSendDueRSVPRemindersRespectsChannelPreference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sent != 2 {
-		t.Fatalf("expected 2 reminders sent (sms-only and the unverified-fallback-to-email player, not the opted-out one), got %d", sent)
+	if sent != 3 {
+		t.Fatalf("expected 3 reminders sent (sms-only, and both fallback-to-email players, not the opted-out one), got %d", sent)
 	}
 
 	wasSentSMSOnly, err := mrrm.WasSent(matchID, smsOnlyID, 3)
@@ -201,6 +223,13 @@ func TestSendDueRSVPRemindersRespectsChannelPreference(t *testing.T) {
 	}
 	if !wasSentUnverified {
 		t.Fatal("expected the unverified-but-has-email player to be marked reminded via the email fallback")
+	}
+	wasSentNotOptedIn, err := mrrm.WasSent(matchID, notOptedInID, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wasSentNotOptedIn {
+		t.Fatal("expected the verified-but-not-opted-in player to be marked reminded via the email fallback")
 	}
 	wasSentOff, err := mrrm.WasSent(matchID, offID, 3)
 	if err != nil {

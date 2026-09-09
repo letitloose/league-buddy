@@ -4,36 +4,30 @@
 {{with .Data}}
 <h2 class="text-center">{{.FirstName}} {{.LastName}}</h2>
 {{if .CanViewPrivateInfo}}
-<div class="w-full md:w-2/3 mx-auto px-2 md:px-0 mb-4">
-    <div class="bg-white shadow-md px-3 py-4 rounded text-center">
-        <div class="flex">
-            <div class="mr-2 text-right w-1/3 font-semibold">Email:</div>
-            <p class="text-left">{{if .Email.Valid}}<a href="mailto:{{.Email.String}}">{{.Email.String}}</a>{{else}}&mdash;{{end}}</p>
-        </div>
-        <div class="flex">
-            <div class="mr-2 text-right w-1/3 font-semibold">Phone:</div>
-            <p class="text-left">{{if .PhoneNumber.Valid}}{{.PhoneNumber.String}}{{else}}&mdash;{{end}}</p>
-        </div>
-        <div class="flex">
-            <div class="mr-2 text-right w-1/3 font-semibold">Date of Birth:</div>
-            <p class="text-left">{{if .DateOfBirth.Valid}}{{humanDate .DateOfBirth.Time}}{{else}}&mdash;{{end}}</p>
-        </div>
-        <div class="flex">
-            <div class="mr-2 text-right w-1/3 font-semibold">Address:</div>
+<div class="w-full sm:max-w-md mx-auto px-2 sm:px-0 mb-4">
+    <div class="bg-white border border-brand-line px-4 py-4 text-center">
+        <div class="inline-grid grid-cols-[auto_auto] gap-x-2 gap-y-1 text-left">
+            <span class="text-right font-semibold">Email:</span>
+            <span>{{if .Email.Valid}}<a href="mailto:{{.Email.String}}">{{.Email.String}}</a>{{else}}&mdash;{{end}}</span>
+            <span class="text-right font-semibold">Phone:</span>
+            <span>{{if .PhoneNumber.Valid}}{{.PhoneNumber.String}}{{else}}&mdash;{{end}}</span>
+            <span class="text-right font-semibold">Date of Birth:</span>
+            <span>{{if .DateOfBirth.Valid}}{{humanDate .DateOfBirth.Time}}{{else}}&mdash;{{end}}</span>
+            <span class="text-right font-semibold">Address:</span>
             {{if .Address}}
-            <p class="text-left">{{.Address.Address1.String}}{{if .Address.Address2.Valid}}, {{.Address.Address2.String}}{{end}}<br>{{.Address.City.String}}, {{.Address.StateProvince.String}} {{.Address.ZipCode.String}}</p>
+            <span>{{.Address.Address1.String}}{{if .Address.Address2.Valid}}, {{.Address.Address2.String}}{{end}}<br>{{.Address.City.String}}, {{.Address.StateProvince.String}} {{.Address.ZipCode.String}}</span>
             {{else}}
-            <p class="text-left">&mdash;</p>
+            <span>&mdash;</span>
             {{end}}
         </div>
     </div>
 </div>
 {{end}}
 
-<div class="w-full md:w-2/3 mx-auto px-2 md:px-0 mb-4">
-    <div class="bg-white shadow-md px-3 py-4 rounded text-center">
+<div class="w-full sm:max-w-xl mx-auto px-2 sm:px-0 mb-4">
+    <div class="bg-white border border-brand-line px-4 py-4 text-center">
         <h4 class="pt-0 mb-2">All-Time Stats</h4>
-        <div class="grid grid-cols-3 sm:grid-cols-6 gap-y-3">
+        <div class="grid grid-cols-3 sm:grid-cols-6 gap-4">
             <div><p class="text-2xl font-bold">{{.CareerMP}}</p><p class="text-xs text-gray-500 uppercase tracking-wide">MP</p></div>
             <div><p class="text-2xl font-bold">{{.CareerGoals}}</p><p class="text-xs text-gray-500 uppercase tracking-wide">Goals</p></div>
             <div><p class="text-2xl font-bold">{{.CareerAssists}}</p><p class="text-xs text-gray-500 uppercase tracking-wide">Assists</p></div>
@@ -59,7 +53,7 @@
         </tr>
         {{range .CareerSeasons}}
         <tr>
-            <td><a href="/season/{{.Season.ID}}">{{.Season.Name}}</a></td>
+            <td><a href="/league/{{.Season.LeagueID}}?season={{.Season.ID}}">{{.Season.Name}}</a></td>
             <td>{{.Goals}}</td>
             <td>{{.Assists}}</td>
             <td>{{.YellowCards}}</td>
@@ -74,19 +68,17 @@
     {{end}}
 </div>
 
-{{if .CanManage}}
-<div class="text-center">
-    <a class="btn" href="/player/update/{{.ID}}">Edit</a>
-</div>
-{{end}}
-{{if .IsSelf}}
-<div class="text-center mt-2">
-    <a class="btn-secondary" href="/player/notifications/{{.ID}}">Notification Preferences</a>
-</div>
-{{end}}
-{{if $.IsAdmin}}
-<div class="text-center">
-    <button class="btn bg-red-600 hover:bg-red-700" data-delete-url="/player/delete/{{.ID}}" data-confirm-message="Permanently delete {{.FirstName}} {{.LastName}}? This removes their bio, address, and every team membership." data-redirect-url="/">Delete Player</button>
+{{if or .CanManage .IsSelf $.IsAdmin}}
+<div class="flex flex-col sm:flex-row sm:justify-center sm:flex-wrap items-stretch sm:items-center gap-2 w-full max-w-xs sm:max-w-none mx-auto px-4 sm:px-0 mb-4">
+    {{if .CanManage}}
+    <a class="btn-secondary text-center m-0" href="/player/update/{{.ID}}">Edit</a>
+    {{end}}
+    {{if .IsSelf}}
+    <a class="btn-secondary text-center m-0" href="/player/notifications/{{.ID}}">Notification Preferences</a>
+    {{end}}
+    {{if $.IsAdmin}}
+    <button class="btn-secondary text-red-600 m-0" data-delete-url="/player/delete/{{.ID}}" data-confirm-message="Permanently delete {{.FirstName}} {{.LastName}}? This removes their bio, address, and every team membership." data-redirect-url="/">Delete Player</button>
+    {{end}}
 </div>
 {{end}}
 {{end}}

@@ -3,14 +3,27 @@
 {{define "main"}}
 <div class="flex items-center flex-col">
     <h2>Add Season</h2>
+    {{$leagueName := ""}}
+    {{range .SupportData.Leagues}}
+        {{if eq .ID $.Form.LeagueID}}{{$leagueName = .Name}}{{end}}
+    {{end}}
+    {{if $leagueName}}<p class="mb-4 text-sm text-gray-500">{{$leagueName}}</p>{{end}}
     <div class="w-full max-w-xs">
-        <form class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" action='/admin/season/create' method='POST'>
+        <form class="bg-white border border-brand-line px-8 pt-6 pb-8 mb-4" action='/admin/season/create' method='POST'>
             <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
-            {{template "season-league-field" .}}
+            {{if $leagueName}}
+                <input type='hidden' name='leagueID' value='{{.Form.LeagueID}}'>
+            {{else}}
+                {{template "season-league-field" .}}
+            {{end}}
             {{template "season-form-fields" .}}
             <div class="flex justify-between">
                 <input class="btn m-0" type='submit' value='Add'>
+                {{if $leagueName}}
+                <a class="btn m-0" href="/league/{{.Form.LeagueID}}">Cancel</a>
+                {{else}}
                 <a class="btn m-0" href="/league">Cancel</a>
+                {{end}}
             </div>
         </form>
     </div>

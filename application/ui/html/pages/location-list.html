@@ -4,10 +4,12 @@
 <div class="flex flex-col items-center">
     <div class="text-center">
         <h2>Locations</h2>
-        {{if .IsAdmin}}
-            <a class="btn" href="/admin/location/create">Add Location</a>
-        {{end}}
     </div>
+    {{if .IsAdmin}}
+    <div class="flex flex-col sm:flex-row sm:justify-center sm:flex-wrap items-stretch sm:items-center gap-2 w-full max-w-xs sm:max-w-none px-4 sm:px-0 mb-4">
+        <a class="btn-secondary text-center m-0" href="/admin/location/create">Add Location</a>
+    </div>
+    {{end}}
     <div class="overflow-x-auto w-full md:w-2/3 px-2 md:px-0">
     <table class="text-left w-full mb-4">
         <tr>

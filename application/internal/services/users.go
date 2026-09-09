@@ -23,6 +23,7 @@ type UserForm struct {
 	Password            string `form:"password"`
 	ConfirmPassword     string
 	InviteToken         string `form:"-"` // from ?invite= at signup, threaded through as a hidden field
+	RememberMe          bool   `form:"-"` // login-only, checkbox — see userLoginPost
 	validator.Validator `form:"-"`
 }
 

@@ -6,11 +6,21 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/letitloose/league-buddy/internal/models"
 	"github.com/letitloose/league-buddy/internal/services"
 )
+
+// rememberMeDuration is how long a session lasts when "Remember me" is
+// checked at login, versus the session manager's ordinary 12-hour Lifetime
+// (see sessionManager.Lifetime in main.go). scs's session cookie is
+// persistent either way (Cookie.Persist defaults to true and this app never
+// overrides it, so every session already survives a browser close) — what
+// "Remember me" actually changes is how long the session itself stays valid
+// before it must be re-authenticated, via SetDeadline in userLoginPost.
+const rememberMeDuration = 30 * 24 * time.Hour
 
 func (app *application) userSignup(w http.ResponseWriter, r *http.Request) {
 	data := app.newTemplateData(r)
@@ -175,8 +185,9 @@ func (app *application) userLoginPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	form := services.UserForm{
-		Email:    r.PostForm.Get("email"),
-		Password: r.PostForm.Get("password"),
+		Email:      r.PostForm.Get("email"),
+		Password:   r.PostForm.Get("password"),
+		RememberMe: r.PostForm.Get("rememberMe") == "on",
 	}
 
 	id, err := app.userService.AuthenticateUser(&form)
@@ -209,6 +220,12 @@ func (app *application) userLoginPost(w http.ResponseWriter, r *http.Request) {
 	// A stale "view as player" flag shouldn't carry over into a fresh
 	// login (RenewToken rotates the session ID but keeps existing data).
 	app.sessionManager.Remove(r.Context(), "viewAsPlayer")
+
+	// Must come after RenewToken above — it resets the deadline back to the
+	// ordinary 12-hour Lifetime, which would otherwise clobber this.
+	if form.RememberMe {
+		app.sessionManager.SetDeadline(r.Context(), time.Now().Add(rememberMeDuration))
+	}
 
 	if next != "" {
 		http.Redirect(w, r, next, http.StatusSeeOther)

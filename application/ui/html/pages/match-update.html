@@ -2,18 +2,22 @@
 
 {{define "main"}}
 <div class="flex items-center flex-col">
-    <h2>{{.Data.HomeTeam.Name}} vs {{.Data.AwayTeam.Name}}</h2>
+    <h2 class="text-xl flex flex-col items-center gap-0.5 sm:flex-row sm:gap-2">
+        <span>{{.Data.HomeTeam.Name}}</span>
+        <span class="text-sm font-normal text-gray-500">vs</span>
+        <span>{{.Data.AwayTeam.Name}}</span>
+    </h2>
     <p class="mb-4 text-sm text-gray-500">{{.Data.Season.Name}} &middot; {{.Data.League.Name}}</p>
 
     <form class="w-full md:w-2/3 px-2 md:px-0" action='/admin/match/update' method='POST'>
         <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
         <input type='hidden' name='match-id' value='{{.Data.Match.ID}}'>
 
-        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4 max-w-xs mx-auto">
+        <div class="bg-white border border-brand-line px-8 pt-6 pb-8 mb-4 max-w-xs mx-auto">
             {{template "match-details-fields" .}}
         </div>
 
-        <div class="bg-white shadow-md rounded px-4 pt-4 pb-4 mb-4">
+        <div class="bg-white border border-brand-line px-4 pt-4 pb-4 mb-4">
             <h4 class="text-center pt-0">Goals</h4>
             <div class="overflow-x-auto">
             <table class="text-left w-full text-sm">
@@ -38,7 +42,7 @@
             </div>
         </div>
 
-        <div class="bg-white shadow-md rounded px-4 pt-4 pb-4 mb-4">
+        <div class="bg-white border border-brand-line px-4 pt-4 pb-4 mb-4">
             <h4 class="text-center pt-0">Cards</h4>
             <div class="overflow-x-auto">
             <table class="text-left w-full text-sm">

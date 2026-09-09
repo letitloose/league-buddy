@@ -21,12 +21,22 @@ import (
 // reachable (see requireOwnPlayer) since the Calendar card underneath is
 // useful with no SMS provider configured at all.
 type playerNotificationsData struct {
-	Player                *models.Player
-	SMSFeatureEnabled     bool
-	PhoneVerified         bool
-	HasPendingCode        bool
-	RSVPChannel           string
-	CaptainMessageChannel string
+	Player            *models.Player
+	SMSFeatureEnabled bool
+	PhoneVerified     bool
+	HasPendingCode    bool
+	// SMSOptedIn is the player's own consent to the SMS program (see
+	// models.Player.SMSOptInAt) — distinct from PhoneVerified, and the gate
+	// on whether the Text column below is selectable at all.
+	SMSOptedIn bool
+	// RSVP/CaptainMessage{Email,Text}Checked drive the Reminder Delivery
+	// table's checkbox state — derived from each category's stored channel
+	// (see models.NotificationPreferenceModel.GetChannel), which already
+	// encodes every combination a pair of checkboxes can express.
+	RSVPEmailChecked    bool
+	RSVPTextChecked     bool
+	CaptainEmailChecked bool
+	CaptainTextChecked  bool
 	// CalendarFeedURL (webcal://) is the tap-to-subscribe link — template.URL,
 	// not a plain string, because html/template's default safe-URL-scheme
 	// allowlist doesn't include "webcal" and would otherwise silently
@@ -39,6 +49,25 @@ type playerNotificationsData struct {
 	// "Add calendar by URL" option as a fallback.
 	CalendarFeedURL      template.URL
 	CalendarFeedHTTPSURL string
+}
+
+// channelFromCheckboxes maps the Reminder Delivery table's independent
+// Email/Text checkboxes for one category onto the four-value channel enum
+// SetPreference/GetChannel already store and enforce — the checkbox pair
+// covers exactly the same four states (both off maps to ChannelOff), so
+// no model/storage change was needed to move the form from a dropdown to
+// a checkbox table.
+func channelFromCheckboxes(emailChecked, smsChecked bool) string {
+	switch {
+	case emailChecked && smsChecked:
+		return models.ChannelBoth
+	case smsChecked:
+		return models.ChannelSMS
+	case emailChecked:
+		return models.ChannelEmail
+	default:
+		return models.ChannelOff
+	}
 }
 
 // requireOwnPlayer resolves the :id route param and fetches that player,
@@ -94,8 +123,11 @@ func (app *application) playerNotifications(w http.ResponseWriter, r *http.Reque
 		}
 		pageData.PhoneVerified = player.PhoneVerifiedAt.Valid
 		pageData.HasPendingCode = player.PhoneVerificationCode.Valid
-		pageData.RSVPChannel = rsvpChannel
-		pageData.CaptainMessageChannel = captainChannel
+		pageData.SMSOptedIn = player.SMSOptInAt.Valid
+		pageData.RSVPEmailChecked = rsvpChannel == models.ChannelEmail || rsvpChannel == models.ChannelBoth
+		pageData.RSVPTextChecked = rsvpChannel == models.ChannelSMS || rsvpChannel == models.ChannelBoth
+		pageData.CaptainEmailChecked = captainChannel == models.ChannelEmail || captainChannel == models.ChannelBoth
+		pageData.CaptainTextChecked = captainChannel == models.ChannelSMS || captainChannel == models.ChannelBoth
 	}
 
 	token, err := app.calendarService.EnsureToken(player.ID)
@@ -145,8 +177,8 @@ func (app *application) playerPhoneVerificationRequest(w http.ResponseWriter, r 
 		return
 	}
 
-	if r.PostForm.Get("smsConsent") != "on" {
-		app.sessionManager.Put(r.Context(), "flash", "You must check the SMS consent box to verify a phone number.")
+	if r.PostForm.Get("smsOptIn") != "on" {
+		app.sessionManager.Put(r.Context(), "flash", "Check this box only if you want to receive text notifications.")
 		http.Redirect(w, r, fmt.Sprintf("/player/notifications/%d", player.ID), http.StatusSeeOther)
 		return
 	}
@@ -163,6 +195,15 @@ func (app *application) playerPhoneVerificationRequest(w http.ResponseWriter, r 
 			return
 		}
 		http.Redirect(w, r, fmt.Sprintf("/player/notifications/%d", player.ID), http.StatusSeeOther)
+		return
+	}
+
+	// Recorded here, not inside RequestPhoneVerification itself — this is
+	// the one moment the player affirmatively checked the SMS-program
+	// consent box, independent of whether the number they typed turns out
+	// to be valid or ever gets confirmed.
+	if err := app.playerService.SetSMSOptIn(player.ID, true); err != nil {
+		app.serverError(w, err)
 		return
 	}
 
@@ -204,16 +245,13 @@ func (app *application) playerNotificationPreferencesSave(w http.ResponseWriter,
 	}
 
 	updates := map[string]string{
-		models.CategoryRSVPReminder:           r.PostForm.Get("rsvpChannel"),
-		models.CategoryCaptainMessageReminder: r.PostForm.Get("captainMessageChannel"),
+		models.CategoryRSVPReminder:           channelFromCheckboxes(r.PostForm.Get("rsvpEmail") == "on", r.PostForm.Get("rsvpText") == "on"),
+		models.CategoryCaptainMessageReminder: channelFromCheckboxes(r.PostForm.Get("captainEmail") == "on", r.PostForm.Get("captainText") == "on"),
 	}
 	for category, channel := range updates {
-		if channel == "" {
-			continue
-		}
 		if err := app.notificationPreferenceService.SetPreference(player.ID, category, channel); err != nil {
 			if errors.Is(err, models.ErrBadData) {
-				app.sessionManager.Put(r.Context(), "flash", "Verify your phone number before choosing text for a notification.")
+				app.sessionManager.Put(r.Context(), "flash", "Verify your phone number and opt into the SMS program before choosing Text for a notification.")
 				http.Redirect(w, r, fmt.Sprintf("/player/notifications/%d", player.ID), http.StatusSeeOther)
 				return
 			}

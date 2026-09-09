@@ -2,7 +2,11 @@
 
 {{define "main"}}
 <div class="flex flex-col items-center">
-    <h2>{{.Data.HomeTeam.Name}} vs {{.Data.AwayTeam.Name}}</h2>
+    <h2 class="text-xl flex flex-col items-center gap-0.5 sm:flex-row sm:gap-2">
+        <span>{{.Data.HomeTeam.Name}}</span>
+        <span class="text-sm font-normal text-gray-500">vs</span>
+        <span>{{.Data.AwayTeam.Name}}</span>
+    </h2>
     <p class="mb-1 text-sm text-gray-500">{{matchDateTime .Data.Match.MatchDate}}</p>
     {{if .Data.Location}}
         <p class="mb-4 text-sm text-gray-500">
@@ -28,7 +32,7 @@
     {{if .Data.CanRSVP}}
     {{$hasResponse := or (eq .Form.Status "yes") (eq .Form.Status "no")}}
     {{$hasErrors := or .Form.FieldErrors.status .Form.FieldErrors.message .Form.NonFieldErrors}}
-    <div class="bg-white shadow-md rounded px-6 py-4 mb-6 w-full sm:w-96">
+    <div class="bg-white border border-brand-line px-6 py-4 mb-6 w-full sm:w-96">
         <h4 class="pt-0 text-center">Your RSVP</h4>
         {{if and $hasResponse (not $hasErrors)}}
         <details>
@@ -50,7 +54,7 @@
 
     <div class="grid gap-4 {{if and .Data.ShowHomeBox .Data.ShowAwayBox}}sm:grid-cols-2{{end}} w-full md:w-2/3 mb-6">
         {{if .Data.ShowHomeBox}}
-        <div class="bg-white shadow-md rounded px-4 py-4">
+        <div class="bg-white border border-brand-line px-4 py-4">
             <h4 class="pt-0 text-center"><a href="/team/{{.Data.HomeTeam.ID}}">{{.Data.HomeTeam.Name}}</a></h4>
             {{template "team-note-panel" (teamNoteSideData $ .Data.HomeNote)}}
             {{template "team-test-reminder" (teamNoteSideData $ .Data.HomeNote)}}
@@ -98,7 +102,7 @@
         </div>
         {{end}}
         {{if .Data.ShowAwayBox}}
-        <div class="bg-white shadow-md rounded px-4 py-4">
+        <div class="bg-white border border-brand-line px-4 py-4">
             <h4 class="pt-0 text-center"><a href="/team/{{.Data.AwayTeam.ID}}">{{.Data.AwayTeam.Name}}</a></h4>
             {{template "team-note-panel" (teamNoteSideData $ .Data.AwayNote)}}
             {{template "team-test-reminder" (teamNoteSideData $ .Data.AwayNote)}}

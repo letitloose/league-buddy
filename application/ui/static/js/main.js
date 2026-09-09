@@ -173,6 +173,54 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
+    // The league and team pages' season pickers auto-submit their own (GET)
+    // form on change — inline onchange="" attributes are blocked by this
+    // app's CSP (script-src 'self', no 'unsafe-inline'), so it's wired up
+    // here instead. Only one of the two pages ever renders at a time, so
+    // sharing the "season-picker" id is safe. The <noscript> submit button
+    // in each template covers browsers with JS disabled.
+    var seasonPicker = document.getElementById('season-picker');
+    if (seasonPicker) {
+        seasonPicker.addEventListener('change', function () {
+            seasonPicker.form.submit();
+        });
+    }
+
+    // On match-create.html, picking a Home Team defaults the Location
+    // field to that team's own home field (its selected <option> carries
+    // data-location-id — see match-team-fields in match-form-fields.html).
+    // Left alone if the team has none on file, and never overrides a
+    // location the user has already picked some other way except by this
+    // same change event, so switching Home Team again just re-defaults it.
+    var homeTeamSelect = document.querySelector('select[name="hometeamid"]');
+    var locationSelect = document.querySelector('select[name="locationid"]');
+    if (homeTeamSelect && locationSelect) {
+        homeTeamSelect.addEventListener('change', function () {
+            var selected = homeTeamSelect.options[homeTeamSelect.selectedIndex];
+            var locationId = selected ? selected.dataset.locationId : '';
+            if (locationId && locationId !== '0') {
+                locationSelect.value = locationId;
+            }
+        });
+    }
+
+    // The SMS opt-in checkbox on player-notifications.html is required
+    // (you can't text a verification code to someone without their
+    // consent to be texted at all), but the browser's own default message
+    // for a required checkbox ("Please check this box if you want to
+    // proceed") reads as if SMS itself were mandatory to use the app,
+    // which is exactly wrong — override it with wording that makes clear
+    // it's only required for *this* action.
+    var smsOptInCheckbox = document.getElementById('sms-optin-checkbox');
+    if (smsOptInCheckbox) {
+        smsOptInCheckbox.addEventListener('invalid', function () {
+            smsOptInCheckbox.setCustomValidity('Check this box only if you want to receive text notifications.');
+        });
+        smsOptInCheckbox.addEventListener('change', function () {
+            smsOptInCheckbox.setCustomValidity('');
+        });
+    }
+
     var navToggle = document.getElementById('nav-toggle');
     if (navToggle) {
         navToggle.addEventListener('click', function () {

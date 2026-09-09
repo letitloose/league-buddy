@@ -4,7 +4,7 @@
 <div class="flex items-center flex-col">
     <h2>Login</h2>
     <div class="w-full max-w-xs">
-        <form class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4" action='/user/login' method='POST'>
+        <form class="bg-white border border-brand-line px-8 pt-6 pb-8 mb-4" action='/user/login' method='POST'>
             <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
             <input type='hidden' name='next' value='{{.NextURL}}'>
             {{range .Form.NonFieldErrors}}
@@ -32,6 +32,10 @@
                     <p class="error-message">{{.}}</p>
                 {{end}}
             </div>
+            <label class="flex items-center gap-2 mb-6 font-normal">
+                <input type="checkbox" name="rememberMe" {{if .Form.RememberMe}}checked{{end}}>
+                Remember me
+            </label>
             <div class="flex items-center justify-between">
                 <button class="btn" type="submit">Login</button>
                 <div class="block">

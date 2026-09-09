@@ -28,26 +28,6 @@ type seasonMatchRow struct {
 	AwayOut         int
 }
 
-type seasonViewData struct {
-	Season    *models.Season
-	League    *models.League
-	CanManage bool
-	ActiveTab string
-
-	// MatchCount is always populated (a cheap models.Match count, needed
-	// for the Delete Season button's confirmation regardless of which tab
-	// is active) — MatchDays is the expensive, fully-hydrated-per-match
-	// version, built only when ActiveTab is "matches" (see leagueView's
-	// identical MatchDays gating on the league page).
-	MatchCount int
-	MatchDays  []*matchDayGroup
-
-	Standings        []*standingRow
-	StandingsColumns []standingsColumn
-	GoalLeaders      []*models.LeagueLeaderLine
-	AssistLeaders    []*models.LeagueLeaderLine
-}
-
 func (app *application) buildSeasonMatchRows(matches []*models.Match) ([]*seasonMatchRow, error) {
 	tm := &models.TeamModel{DB: app.playerService.DB}
 	locm := &models.LocationModel{DB: app.playerService.DB}
@@ -100,110 +80,6 @@ func (app *application) buildSeasonMatchRows(matches []*models.Match) ([]*season
 		})
 	}
 	return rows, nil
-}
-
-func (app *application) seasonView(w http.ResponseWriter, r *http.Request) {
-	params := httprouter.ParamsFromContext(r.Context())
-
-	id, err := strconv.Atoi(params.ByName("id"))
-	if err != nil || id < 1 {
-		app.notFound(w)
-		return
-	}
-
-	sm := &models.SeasonModel{DB: app.playerService.DB}
-	season, err := sm.Get(id)
-	if err != nil {
-		if errors.Is(err, models.ErrNoRecord) {
-			app.notFound(w)
-		} else {
-			app.serverError(w, err)
-		}
-		return
-	}
-
-	lm := &models.LeagueModel{DB: app.playerService.DB}
-	league, err := lm.Get(season.LeagueID)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-
-	mm := &models.MatchModel{DB: app.playerService.DB}
-	matches, err := mm.GetBySeason(id)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-
-	activeTab := r.URL.Query().Get("tab")
-	if activeTab != "standings" {
-		activeTab = "matches"
-	}
-
-	var matchDays []*matchDayGroup
-	if activeTab == "matches" {
-		rows, err := app.buildSeasonMatchRows(matches)
-		if err != nil {
-			app.serverError(w, err)
-			return
-		}
-		matchDays = groupMatchesByDay(rows)
-	}
-
-	tm := &models.TeamModel{DB: app.playerService.DB}
-	teams, err := tm.GetByLeague(season.LeagueID)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-	standings, err := buildStandings(app.playerService.DB, teams, id)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-	sortKey := r.URL.Query().Get("sort")
-	if !validStandingsSortKeys[sortKey] {
-		sortKey = "points"
-	}
-	dir := r.URL.Query().Get("dir")
-	if dir != "asc" {
-		dir = "desc"
-	}
-	sortStandings(standings, sortKey, dir)
-
-	pmsm := &models.PlayerMatchStatModel{DB: app.playerService.DB}
-	goalLeaders, err := pmsm.TopScorersForSeason(id, 5)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-	assistLeaders, err := pmsm.TopAssistersForSeason(id, 5)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-
-	data := app.newTemplateData(r)
-	data.Data = &seasonViewData{
-		Season:           season,
-		League:           league,
-		CanManage:        app.canManageLeague(r, season.LeagueID),
-		ActiveTab:        activeTab,
-		MatchCount:       len(matches),
-		MatchDays:        matchDays,
-		Standings:        standings,
-		StandingsColumns: buildStandingsColumns(fmt.Sprintf("/season/%d", id), sortKey, dir),
-		GoalLeaders:      goalLeaders,
-		AssistLeaders:    assistLeaders,
-	}
-	data.Breadcrumbs = []Breadcrumb{
-		{Label: "Leagues", URL: "/league"},
-		{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)},
-		{Label: season.Name},
-	}
-
-	app.render(w, http.StatusOK, "season-view.html", data)
 }
 
 // seasonFormSupportData is the SupportData shape for season-create.html and
@@ -276,7 +152,7 @@ func (app *application) seasonCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", form.Name+" has been created!")
-	http.Redirect(w, r, fmt.Sprintf("/season/%d", id), http.StatusSeeOther)
+	http.Redirect(w, r, fmt.Sprintf("/league/%d?season=%d", leagueID, id), http.StatusSeeOther)
 }
 
 func (app *application) renderSeasonUpdateForm(w http.ResponseWriter, r *http.Request, form *services.SeasonForm, status int) {
@@ -299,7 +175,7 @@ func (app *application) renderSeasonUpdateForm(w http.ResponseWriter, r *http.Re
 		}
 	}
 	breadcrumbs = append(breadcrumbs,
-		Breadcrumb{Label: form.Name, URL: fmt.Sprintf("/season/%d", form.ID)},
+		Breadcrumb{Label: form.Name, URL: fmt.Sprintf("/league/%d?season=%d", form.LeagueID, form.ID)},
 		Breadcrumb{Label: "Edit"},
 	)
 	data.Breadcrumbs = breadcrumbs
@@ -402,128 +278,7 @@ func (app *application) seasonUpdatePost(w http.ResponseWriter, r *http.Request)
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", form.Name+" has been updated!")
-	http.Redirect(w, r, fmt.Sprintf("/season/%d", form.ID), http.StatusSeeOther)
-}
-
-// teamSeasonMatchRow is one row of a team's own schedule for a season —
-// just the opponent and whether this team was home or away, rather than
-// seasonMatchRow's home/away team names (which read oddly once you already
-// know which team's page you're on).
-type teamSeasonMatchRow struct {
-	Match           *models.Match
-	Opponent        string
-	IsHome          bool
-	Location        *models.Location
-	LocationAddress *models.Address
-}
-
-type teamSeasonViewData struct {
-	Team    *models.Team
-	League  *models.League
-	Season  *models.Season
-	Seasons []*models.Season
-	Matches []*teamSeasonMatchRow
-	Leaders []*models.StatLine
-}
-
-func (app *application) teamSeasonView(w http.ResponseWriter, r *http.Request) {
-	team, ok := app.getRouteTeam(w, r)
-	if !ok {
-		return
-	}
-
-	params := httprouter.ParamsFromContext(r.Context())
-	seasonID, err := strconv.Atoi(params.ByName("seasonID"))
-	if err != nil || seasonID < 1 {
-		app.notFound(w)
-		return
-	}
-
-	sm := &models.SeasonModel{DB: app.playerService.DB}
-	season, err := sm.Get(seasonID)
-	if err != nil {
-		if errors.Is(err, models.ErrNoRecord) {
-			app.notFound(w)
-		} else {
-			app.serverError(w, err)
-		}
-		return
-	}
-	if season.LeagueID != team.LeagueID {
-		app.notFound(w)
-		return
-	}
-
-	lm := &models.LeagueModel{DB: app.playerService.DB}
-	league, err := lm.Get(team.LeagueID)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-
-	seasons, err := sm.GetByLeague(team.LeagueID)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-
-	mm := &models.MatchModel{DB: app.playerService.DB}
-	matches, err := mm.GetByTeamAndSeason(team.ID, seasonID)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-	tm := &models.TeamModel{DB: app.playerService.DB}
-	locm := &models.LocationModel{DB: app.playerService.DB}
-	am := &models.AddressModel{DB: app.playerService.DB}
-	rows := make([]*teamSeasonMatchRow, 0, len(matches))
-	for _, match := range matches {
-		isHome := match.HomeTeamID == team.ID
-		opponentID := match.AwayTeamID
-		if !isHome {
-			opponentID = match.HomeTeamID
-		}
-		opponent, err := tm.Get(opponentID)
-		if err != nil {
-			app.serverError(w, err)
-			return
-		}
-		var location *models.Location
-		var locationAddress *models.Address
-		if match.LocationID.Valid {
-			location, err = locm.Get(int(match.LocationID.Int32))
-			if err != nil {
-				app.serverError(w, err)
-				return
-			}
-			locationAddress, err = am.Get(location.AddressID)
-			if err != nil {
-				app.serverError(w, err)
-				return
-			}
-		}
-		rows = append(rows, &teamSeasonMatchRow{Match: match, Opponent: opponent.Name, IsHome: isHome, Location: location, LocationAddress: locationAddress})
-	}
-
-	pmsm := &models.PlayerMatchStatModel{DB: app.playerService.DB}
-	leaders, err := pmsm.LeaderboardByTeamSeason(team.ID, seasonID)
-	if err != nil {
-		app.serverError(w, err)
-		return
-	}
-
-	data := app.newTemplateData(r)
-	data.Data = &teamSeasonViewData{
-		Team:    team,
-		League:  league,
-		Season:  season,
-		Seasons: seasons,
-		Matches: rows,
-		Leaders: leaders,
-	}
-	data.Breadcrumbs = append(app.teamBreadcrumbs(team, league, false), Breadcrumb{Label: "Schedule"})
-
-	app.render(w, http.StatusOK, "team-season-view.html", data)
+	http.Redirect(w, r, fmt.Sprintf("/league/%d?season=%d", form.LeagueID, form.ID), http.StatusSeeOther)
 }
 
 func (app *application) seasonDelete(w http.ResponseWriter, r *http.Request) {
@@ -611,7 +366,7 @@ func (app *application) seasonScheduleImportForm(w http.ResponseWriter, r *http.
 	data.Breadcrumbs = []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},
 		{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)},
-		{Label: season.Name, URL: fmt.Sprintf("/season/%d", season.ID)},
+		{Label: season.Name, URL: fmt.Sprintf("/league/%d?season=%d", league.ID, season.ID)},
 		{Label: "Import Schedule"},
 	}
 

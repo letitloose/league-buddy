@@ -5,7 +5,7 @@
     <h2>Notification Preferences</h2>
     <div class="w-full max-w-md">
         {{if .Data.SMSFeatureEnabled}}
-        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+        <div class="bg-white border border-brand-line px-8 pt-6 pb-8 mb-4">
             <h3 class="pt-0 text-center">Phone Number</h3>
             {{if .Data.PhoneVerified}}
             <p class="text-center mb-4"><span class="text-green-700">&check; Verified</span> &mdash; {{.Data.Player.PhoneNumber.String}}</p>
@@ -18,9 +18,10 @@
                 <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
                 <label class="field-label">{{if .Data.PhoneVerified}}Change phone number{{else}}Phone number{{end}}</label>
                 <input class="form-field" type="tel" name="phonenumber" placeholder="518-555-0100" value="{{.Data.Player.PhoneNumber.String}}">
-                <label class="flex items-start gap-2 mt-3 text-sm">
-                    <input type="checkbox" name="smsConsent" required class="mt-1">
-                    <span>By checking this box, I agree to receive SMS text messages from Blame the Ball, including RSVP reminders and captain's messages. Message frequency depends on your match schedule and preferences. Message and data rates may apply. Reply STOP to opt out, HELP for help. See our <a class="underline" href="/privacy" target="_blank">Privacy Policy</a> and <a class="underline" href="/terms" target="_blank">Terms &amp; Conditions</a>.</span>
+                <p class="text-sm text-gray-600 mt-3">Text notifications are optional. You can continue using Blame the Ball without enabling SMS.</p>
+                <label class="flex items-start gap-2 mt-2 text-sm">
+                    <input type="checkbox" id="sms-optin-checkbox" name="smsOptIn" required class="mt-1" {{if .Data.SMSOptedIn}}checked{{end}}>
+                    <span>I would like to opt in to the SMS program and be texted notifications from Blame the Ball, including RSVP reminders and, if I'm a team captain, captain's messages. Message frequency varies based on my match schedule and notification settings. Message and data rates may apply. Reply STOP to opt out, HELP for help. See our <a class="underline" href="/privacy" target="_blank">Privacy Policy</a> and <a class="underline" href="/terms" target="_blank">Terms &amp; Conditions</a>.</span>
                 </label>
                 <div class="mt-2 text-center"><input class="btn-secondary m-0" type="submit" value="Send Verification Code"></div>
             </form>
@@ -35,42 +36,40 @@
             {{end}}
         </div>
 
-        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+        <div class="bg-white border border-brand-line px-8 pt-6 pb-8 mb-4">
             <h3 class="pt-0 text-center">Reminder Delivery</h3>
+            <p class="text-xs text-gray-500 text-center mb-4">Choose Email, Text, both, or neither for each notification — nothing is sent for a notification with both boxes unchecked.</p>
+            {{if not .Data.SMSOptedIn}}
+            <p class="text-xs text-gray-500 text-center mb-4">Opt into the SMS program above to unlock Text delivery.</p>
+            {{else if not .Data.PhoneVerified}}
+            <p class="text-xs text-gray-500 text-center mb-4">Verify your phone number above to unlock Text delivery.</p>
+            {{end}}
+            {{$textLocked := or (not .Data.PhoneVerified) (not .Data.SMSOptedIn)}}
             <form action="/player/notifications/{{.Data.Player.ID}}/preferences" method="POST">
                 <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
-
-                <div class="mb-4">
-                    <label class="field-label">RSVP Reminders</label>
-                    <select class="form-field" name="rsvpChannel">
-                        <option value="email" {{if eq .Data.RSVPChannel "email"}}selected{{end}}>Email</option>
-                        <option value="sms" {{if eq .Data.RSVPChannel "sms"}}selected{{end}} {{if not .Data.PhoneVerified}}disabled{{end}}>Text</option>
-                        <option value="both" {{if eq .Data.RSVPChannel "both"}}selected{{end}} {{if not .Data.PhoneVerified}}disabled{{end}}>Both</option>
-                        <option value="off" {{if eq .Data.RSVPChannel "off"}}selected{{end}}>Off</option>
-                    </select>
-                </div>
-
-                <div class="mb-4">
-                    <label class="field-label">Captain's Message Reminders</label>
-                    <p class="text-xs text-gray-500 mb-1">Only sent if you're a team's captain.</p>
-                    <select class="form-field" name="captainMessageChannel">
-                        <option value="email" {{if eq .Data.CaptainMessageChannel "email"}}selected{{end}}>Email</option>
-                        <option value="sms" {{if eq .Data.CaptainMessageChannel "sms"}}selected{{end}} {{if not .Data.PhoneVerified}}disabled{{end}}>Text</option>
-                        <option value="both" {{if eq .Data.CaptainMessageChannel "both"}}selected{{end}} {{if not .Data.PhoneVerified}}disabled{{end}}>Both</option>
-                        <option value="off" {{if eq .Data.CaptainMessageChannel "off"}}selected{{end}}>Off</option>
-                    </select>
-                </div>
-
-                {{if not .Data.PhoneVerified}}
-                <p class="text-xs text-gray-500 mb-4">Verify your phone number above to choose Text or Both.</p>
-                {{end}}
-
+                <table class="text-left w-full mb-4">
+                    <tr>
+                        <th>Notification</th>
+                        <th class="text-center">Email</th>
+                        <th class="text-center">Text</th>
+                    </tr>
+                    <tr>
+                        <td>RSVP Reminders</td>
+                        <td class="text-center"><input type="checkbox" name="rsvpEmail" {{if .Data.RSVPEmailChecked}}checked{{end}}></td>
+                        <td class="text-center"><input type="checkbox" name="rsvpText" {{if .Data.RSVPTextChecked}}checked{{end}} {{if $textLocked}}disabled{{end}}></td>
+                    </tr>
+                    <tr>
+                        <td>Captain's Message Reminders<p class="text-xs text-gray-500 font-normal">Only sent if you're a team's captain.</p></td>
+                        <td class="text-center"><input type="checkbox" name="captainEmail" {{if .Data.CaptainEmailChecked}}checked{{end}}></td>
+                        <td class="text-center"><input type="checkbox" name="captainText" {{if .Data.CaptainTextChecked}}checked{{end}} {{if $textLocked}}disabled{{end}}></td>
+                    </tr>
+                </table>
                 <div class="text-center"><input class="btn m-0" type='submit' value='Save'></div>
             </form>
         </div>
         {{end}}
 
-        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+        <div class="bg-white border border-brand-line px-8 pt-6 pb-8 mb-4">
             <h3 class="pt-0 text-center">Calendar</h3>
             <p class="text-sm text-gray-500 text-center mb-4">See your upcoming matches, across every team, in your phone's own calendar app. On your phone, tap the link below to subscribe.</p>
             <div class="text-center mb-4">
@@ -88,7 +87,7 @@
             </form>
         </div>
 
-        <div class="text-center"><a class="btn m-0" href="/player/view/{{.Data.Player.ID}}">Back</a></div>
+        <div class="text-center mb-8"><a class="btn-secondary m-0" href="/player/view/{{.Data.Player.ID}}">Back</a></div>
     </div>
 </div>
 {{end}}

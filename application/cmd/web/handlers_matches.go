@@ -31,7 +31,7 @@ func matchFormBreadcrumbs(season *models.Season, league *models.League) []Breadc
 	return []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},
 		{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)},
-		{Label: season.Name, URL: fmt.Sprintf("/season/%d", season.ID)},
+		{Label: season.Name, URL: fmt.Sprintf("/league/%d?season=%d", league.ID, season.ID)},
 		{Label: "Add Match"},
 	}
 }
@@ -142,7 +142,7 @@ func (app *application) matchCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", "Match added.")
-	http.Redirect(w, r, fmt.Sprintf("/season/%d", seasonID), http.StatusSeeOther)
+	http.Redirect(w, r, fmt.Sprintf("/league/%d?season=%d", season.LeagueID, seasonID), http.StatusSeeOther)
 }
 
 // goalFormRow/cardFormRow are match-update.html's template-friendly view of
@@ -279,7 +279,7 @@ func (app *application) renderMatchUpdateForm(w http.ResponseWriter, r *http.Req
 	data.Breadcrumbs = []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},
 		{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)},
-		{Label: season.Name, URL: fmt.Sprintf("/season/%d", season.ID)},
+		{Label: season.Name, URL: fmt.Sprintf("/league/%d?season=%d", league.ID, season.ID)},
 		{Label: fmt.Sprintf("%s vs %s", homeTeam.Name, awayTeam.Name)},
 	}
 
@@ -693,7 +693,7 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 				if email, ok := activatedEmails[p.ID]; ok {
 					view.ActivatedTeammates = append(view.ActivatedTeammates, &teammateOption{PlayerID: p.ID, Name: p.FirstName + " " + p.LastName, Email: email})
 				}
-				if p.PhoneVerifiedAt.Valid {
+				if p.PhoneVerifiedAt.Valid && p.SMSOptInAt.Valid {
 					view.VerifiedPhoneTeammates = append(view.VerifiedPhoneTeammates, &teammateOption{PlayerID: p.ID, Name: p.FirstName + " " + p.LastName, Phone: p.PhoneNumber.String})
 				}
 			}
@@ -815,7 +815,7 @@ func matchViewBreadcrumbs(league *models.League, season *models.Season, homeTeam
 	return []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},
 		{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)},
-		{Label: season.Name, URL: fmt.Sprintf("/season/%d", season.ID)},
+		{Label: season.Name, URL: fmt.Sprintf("/league/%d?season=%d", league.ID, season.ID)},
 		{Label: fmt.Sprintf("%s vs %s", homeTeam.Name, awayTeam.Name)},
 	}
 }

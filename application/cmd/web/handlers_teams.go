@@ -49,7 +49,9 @@ type teamViewData struct {
 	// RosterTab is "active" (default) or "legends" — which of
 	// GetActiveByTeam/GetLegendsByTeam populated Roster above.
 	// ActiveCount/LegendsCount are both always populated (regardless of
-	// which tab is showing) for the tab labels.
+	// which tab is showing) for the tab labels. Its query param is
+	// "rosterTab", not "tab" — distinct from ActiveTab below (the page's
+	// own Roster/Matches/Leaders tabs) to avoid colliding with it.
 	RosterTab               string
 	ActiveCount             int
 	LegendsCount            int
@@ -57,15 +59,24 @@ type teamViewData struct {
 	PendingJoinRequestCount int
 	Location                *models.Location
 	LocationAddress         *models.Address
-	// CurrentSeason is the one season both the roster's stat columns and
-	// the schedule/RSVP block show — see teamView's currentSeason comment.
-	CurrentSeason   *models.Season
+	// Seasons lists every season in the team's league, most-recent-first,
+	// for the season-picker <select> — see teamView's season-resolution
+	// comment.
+	Seasons []*models.Season
+	// Season is the one being shown — the roster's stat columns, the
+	// Matches tab, and the Leaders tab all key off it. Picked via ?season=
+	// if valid for this league, otherwise GetCurrentOrNext (see teamView).
+	Season          *models.Season
+	ActiveTab       string
 	Leaders         []*models.StatLine
 	LeadersByPlayer map[int]*models.StatLine
-	LeadingScorer   *models.StatLine
-	LeadingAssister *models.StatLine
+	// LeadingOwnGoals is called out on its own (unlike goals/assists, which
+	// get the full Goal/Assist Leaders top-5 tables below) since own goals
+	// aren't tracked as a leaderboard elsewhere in the app.
 	LeadingOwnGoals *models.StatLine
-	Schedule        []*seasonMatchRow
+	GoalLeaders     []*models.LeagueLeaderLine
+	AssistLeaders   []*models.LeagueLeaderLine
+	MatchDays       []*matchDayGroup
 	HasAccount      map[int]bool
 	RosterSort      string
 	RosterOrder     string
@@ -127,6 +138,30 @@ func sortRoster(roster []*models.Player, leadersByPlayer map[int]*models.StatLin
 		}
 		return ascLess(i, j)
 	})
+}
+
+// topLeaderLines builds a Goal/Assist Leaders top-N table (the same shape
+// leagueView's TopScorersForSeason/TopAssistersForSeason produce) from a
+// team's own already-fetched season leaderboard, rather than a separate
+// query — mirrors topStatForSeason's own "HAVING total > 0" filter so a
+// player with none of the given stat doesn't clutter a team of mostly
+// non-scorers.
+func topLeaderLines(leaders []*models.StatLine, teamName string, statOf func(*models.StatLine) int, limit int) []*models.LeagueLeaderLine {
+	scorers := make([]*models.StatLine, 0, len(leaders))
+	for _, line := range leaders {
+		if statOf(line) > 0 {
+			scorers = append(scorers, line)
+		}
+	}
+	sort.SliceStable(scorers, func(i, j int) bool { return statOf(scorers[i]) > statOf(scorers[j]) })
+	if len(scorers) > limit {
+		scorers = scorers[:limit]
+	}
+	lines := make([]*models.LeagueLeaderLine, len(scorers))
+	for i, line := range scorers {
+		lines[i] = &models.LeagueLeaderLine{PlayerID: line.PlayerID, Name: line.Name, TeamName: teamName, Total: statOf(line)}
+	}
+	return lines
 }
 
 // teamFormSupportData is the SupportData shape for team-create.html and
@@ -197,7 +232,7 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		app.serverError(w, err)
 		return
 	}
-	rosterTab := r.URL.Query().Get("tab")
+	rosterTab := r.URL.Query().Get("rosterTab")
 	if rosterTab != "legends" {
 		rosterTab = "active"
 	}
@@ -258,28 +293,47 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		pendingJoinRequestCount = len(pendingRequests)
 	}
 
-	// currentSeason drives both the roster's stat columns and the
-	// schedule/RSVP block — one date-based pick (GetCurrentOrNext, which
-	// — unlike GetCurrent — prefers an upcoming season over a recently-
-	// ended one, so a fully-scheduled-but-unplayed season still shows its
-	// schedule ahead of its first match) shared by both, rather than two
-	// separately-computed seasons that could disagree. A newly created
-	// season's all-zero leaderboard is shown immediately rather than the
-	// page lingering on a previous season's stats until the new one has
-	// recorded results.
-	var currentSeason *models.Season
-	var leaders []*models.StatLine
-	var schedule []*seasonMatchRow
-	leadersByPlayer := map[int]*models.StatLine{}
+	// season drives the roster's stat columns, the Matches tab, and the
+	// Leaders tab — one shared pick rather than three separately-computed
+	// seasons that could disagree. A ?season= query param (from the
+	// picker, or a bookmarked/shared link) selects a specific season from
+	// this team's league; anything invalid, absent, or belonging to a
+	// different league falls back to GetCurrentOrNext (which — unlike
+	// GetCurrent — prefers an upcoming season over a recently-ended one,
+	// so a fully-scheduled-but-unplayed season still shows its schedule
+	// ahead of its first match). A newly created season's all-zero
+	// leaderboard is shown immediately rather than the page lingering on a
+	// previous season's stats until the new one has recorded results.
 	sm := &models.SeasonModel{DB: app.playerService.DB}
-	currentSeason, err = sm.GetCurrentOrNext(team.LeagueID, time.Now())
-	if err != nil && !errors.Is(err, models.ErrNoRecord) {
+	seasons, err := sm.GetByLeague(team.LeagueID)
+	if err != nil {
 		app.serverError(w, err)
 		return
 	}
-	if currentSeason != nil {
+
+	var season *models.Season
+	if seasonID, convErr := strconv.Atoi(r.URL.Query().Get("season")); convErr == nil && seasonID > 0 {
+		if picked, pickErr := sm.Get(seasonID); pickErr == nil && picked.LeagueID == team.LeagueID {
+			season = picked
+		} else if pickErr != nil && !errors.Is(pickErr, models.ErrNoRecord) {
+			app.serverError(w, pickErr)
+			return
+		}
+	}
+	if season == nil {
+		season, err = sm.GetCurrentOrNext(team.LeagueID, time.Now())
+		if err != nil && !errors.Is(err, models.ErrNoRecord) {
+			app.serverError(w, err)
+			return
+		}
+	}
+
+	var leaders []*models.StatLine
+	var matchDays []*matchDayGroup
+	leadersByPlayer := map[int]*models.StatLine{}
+	if season != nil {
 		pmsm := &models.PlayerMatchStatModel{DB: app.playerService.DB}
-		leaders, err = pmsm.LeaderboardByTeamSeason(team.ID, currentSeason.ID)
+		leaders, err = pmsm.LeaderboardByTeamSeason(team.ID, season.ID)
 		if err != nil {
 			app.serverError(w, err)
 			return
@@ -289,7 +343,7 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		}
 
 		mam := &models.MatchAttendanceModel{DB: app.playerService.DB}
-		matchesPlayed, err := mam.MatchesPlayedByTeamSeason(team.ID, currentSeason.ID, startOfTodayEastern())
+		matchesPlayed, err := mam.MatchesPlayedByTeamSeason(team.ID, season.ID, startOfTodayEastern())
 		if err != nil {
 			app.serverError(w, err)
 			return
@@ -304,29 +358,35 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		}
 
 		mm := &models.MatchModel{DB: app.playerService.DB}
-		matches, err := mm.GetByTeamAndSeason(team.ID, currentSeason.ID)
+		matches, err := mm.GetByTeamAndSeason(team.ID, season.ID)
 		if err != nil {
 			app.serverError(w, err)
 			return
 		}
-		schedule, err = app.buildSeasonMatchRows(matches)
+		rows, err := app.buildSeasonMatchRows(matches)
 		if err != nil {
 			app.serverError(w, err)
 			return
 		}
+		// Grouped by day (same as leagueView's Matches tab) even though a
+		// team plays at most once per date — one heading per match reads as
+		// a vertical stack, which is the point, rather than a card-grid
+		// packing this team's few matches side by side.
+		matchDays = groupMatchesByDay(rows)
 	}
 
-	var leadingScorer, leadingAssister, leadingOwnGoals *models.StatLine
+	var leadingOwnGoals *models.StatLine
 	for _, line := range leaders {
-		if line.Goals > 0 && (leadingScorer == nil || line.Goals > leadingScorer.Goals) {
-			leadingScorer = line
-		}
-		if line.Assists > 0 && (leadingAssister == nil || line.Assists > leadingAssister.Assists) {
-			leadingAssister = line
-		}
 		if line.OwnGoals > 0 && (leadingOwnGoals == nil || line.OwnGoals > leadingOwnGoals.OwnGoals) {
 			leadingOwnGoals = line
 		}
+	}
+	goalLeaders := topLeaderLines(leaders, team.Name, func(l *models.StatLine) int { return l.Goals }, 5)
+	assistLeaders := topLeaderLines(leaders, team.Name, func(l *models.StatLine) int { return l.Assists }, 5)
+
+	activeTab := r.URL.Query().Get("tab")
+	if activeTab != "roster" && activeTab != "leaders" {
+		activeTab = "matches"
 	}
 
 	// Default to goals-descending when there's a leaderboard to sort by,
@@ -335,7 +395,7 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 	// shown.
 	rosterSort, rosterOrder := r.URL.Query().Get("sort"), r.URL.Query().Get("order")
 	if !allowedRosterSorts[rosterSort] {
-		if currentSeason != nil {
+		if season != nil {
 			rosterSort, rosterOrder = "goals", "DESC"
 		} else {
 			rosterSort, rosterOrder = "name", "ASC"
@@ -393,13 +453,15 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		PendingJoinRequestCount: pendingJoinRequestCount,
 		Location:                location,
 		LocationAddress:         locationAddress,
-		CurrentSeason:           currentSeason,
+		Seasons:                 seasons,
+		Season:                  season,
+		ActiveTab:               activeTab,
 		Leaders:                 leaders,
 		LeadersByPlayer:         leadersByPlayer,
-		LeadingScorer:           leadingScorer,
-		LeadingAssister:         leadingAssister,
 		LeadingOwnGoals:         leadingOwnGoals,
-		Schedule:                schedule,
+		GoalLeaders:             goalLeaders,
+		AssistLeaders:           assistLeaders,
+		MatchDays:               matchDays,
 		HasAccount:              hasAccount,
 		RosterSort:              rosterSort,
 		RosterOrder:             rosterOrder,
@@ -642,7 +704,12 @@ func (app *application) teamForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app.renderTeamCreateForm(w, r, &services.TeamForm{}, http.StatusOK)
+	// leagueID pre-fills from the league page's own Add Team button
+	// (?leagueID=), so team-create.html can skip the league dropdown
+	// entirely for that flow — see its own leagueName lookup. Left at 0
+	// for the generic nav/home entry points, which still show the picker.
+	leagueID, _ := strconv.Atoi(r.URL.Query().Get("leagueID"))
+	app.renderTeamCreateForm(w, r, &services.TeamForm{LeagueID: leagueID}, http.StatusOK)
 }
 
 func (app *application) teamCreate(w http.ResponseWriter, r *http.Request) {
@@ -684,7 +751,7 @@ func (app *application) teamCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", form.Name+" has been created!")
-	http.Redirect(w, r, fmt.Sprintf("/team/%d", id), http.StatusSeeOther)
+	http.Redirect(w, r, fmt.Sprintf("/team/%d?tab=roster", id), http.StatusSeeOther)
 }
 
 // teamUpdateData wraps the team (for its current CaptainPlayerID, to
@@ -996,12 +1063,12 @@ func (app *application) teamAddScorekeeper(w http.ResponseWriter, r *http.Reques
 			app.serverError(w, err)
 			return
 		}
-		http.Redirect(w, r, fmt.Sprintf("/team/%d", teamID), http.StatusSeeOther)
+		http.Redirect(w, r, fmt.Sprintf("/team/%d?tab=roster", teamID), http.StatusSeeOther)
 		return
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", "Scorekeeper added.")
-	http.Redirect(w, r, fmt.Sprintf("/team/%d", teamID), http.StatusSeeOther)
+	http.Redirect(w, r, fmt.Sprintf("/team/%d?tab=roster", teamID), http.StatusSeeOther)
 }
 
 func (app *application) teamRemoveScorekeeper(w http.ResponseWriter, r *http.Request) {
@@ -1034,7 +1101,7 @@ func (app *application) teamRemoveScorekeeper(w http.ResponseWriter, r *http.Req
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", "Scorekeeper removed.")
-	http.Redirect(w, r, fmt.Sprintf("/team/%d", teamID), http.StatusSeeOther)
+	http.Redirect(w, r, fmt.Sprintf("/team/%d?tab=roster", teamID), http.StatusSeeOther)
 }
 
 // teamAddLegend and teamRemoveLegend move a roster member onto/off of the
@@ -1069,7 +1136,7 @@ func (app *application) teamAddLegend(w http.ResponseWriter, r *http.Request) {
 	if err := app.teamService.SetPlayerLegendStatus(teamID, playerID, true, app.getUserName(r)); err != nil {
 		if errors.Is(err, models.ErrBadData) {
 			app.sessionManager.Put(r.Context(), "flash", "That player isn't on this team's roster.")
-			http.Redirect(w, r, fmt.Sprintf("/team/%d", teamID), http.StatusSeeOther)
+			http.Redirect(w, r, fmt.Sprintf("/team/%d?tab=roster", teamID), http.StatusSeeOther)
 			return
 		}
 		app.serverError(w, err)
@@ -1077,7 +1144,7 @@ func (app *application) teamAddLegend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", "Moved to Legends.")
-	http.Redirect(w, r, fmt.Sprintf("/team/%d?tab=legends", teamID), http.StatusSeeOther)
+	http.Redirect(w, r, fmt.Sprintf("/team/%d?tab=roster&rosterTab=legends", teamID), http.StatusSeeOther)
 }
 
 func (app *application) teamRemoveLegend(w http.ResponseWriter, r *http.Request) {
@@ -1107,7 +1174,7 @@ func (app *application) teamRemoveLegend(w http.ResponseWriter, r *http.Request)
 	if err := app.teamService.SetPlayerLegendStatus(teamID, playerID, false, app.getUserName(r)); err != nil {
 		if errors.Is(err, models.ErrBadData) {
 			app.sessionManager.Put(r.Context(), "flash", "That player isn't on this team's roster.")
-			http.Redirect(w, r, fmt.Sprintf("/team/%d", teamID), http.StatusSeeOther)
+			http.Redirect(w, r, fmt.Sprintf("/team/%d?tab=roster", teamID), http.StatusSeeOther)
 			return
 		}
 		app.serverError(w, err)
@@ -1115,7 +1182,7 @@ func (app *application) teamRemoveLegend(w http.ResponseWriter, r *http.Request)
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", "Moved back to the active roster.")
-	http.Redirect(w, r, fmt.Sprintf("/team/%d", teamID), http.StatusSeeOther)
+	http.Redirect(w, r, fmt.Sprintf("/team/%d?tab=roster", teamID), http.StatusSeeOther)
 }
 
 func (app *application) joinRequestSubmit(w http.ResponseWriter, r *http.Request) {

@@ -26,17 +26,16 @@
                     {{range .Data.Teams}}
                         {{if .NextMatch}}
                         <div class="match-card">
-                            <a class="block no-underline text-slate-800" href="/match/{{.NextMatch.ID}}">
-                                <div class="flex items-center justify-center gap-2">
-                                    <span class="font-medium text-sm text-right flex-1 min-w-0">{{if .NextMatchIsHome}}{{.Team.Name}}{{else}}{{.NextMatchOpponent}}{{end}}</span>
-                                    <span class="text-xs text-gray-400 shrink-0">vs</span>
-                                    <span class="font-medium text-sm text-left flex-1 min-w-0">{{if .NextMatchIsHome}}{{.NextMatchOpponent}}{{else}}{{.Team.Name}}{{end}}</span>
-                                </div>
-                                <p class="text-center text-sm text-gray-500 mt-1">{{matchDateTimeShort .NextMatch.MatchDate}}</p>
-                            </a>
+                            <a class="match-card-overlay-link" href="/match/{{.NextMatch.ID}}" aria-label="View match: {{if .NextMatchIsHome}}{{.Team.Name}}{{else}}{{.NextMatchOpponent}}{{end}} vs {{if .NextMatchIsHome}}{{.NextMatchOpponent}}{{else}}{{.Team.Name}}{{end}}"></a>
+                            <div class="flex items-center justify-center gap-2">
+                                <span class="font-medium text-sm text-right flex-1 min-w-0">{{if .NextMatchIsHome}}{{.Team.Name}}{{else}}{{.NextMatchOpponent}}{{end}}</span>
+                                <span class="text-xs text-gray-400 shrink-0">vs</span>
+                                <span class="font-medium text-sm text-left flex-1 min-w-0">{{if .NextMatchIsHome}}{{.NextMatchOpponent}}{{else}}{{.Team.Name}}{{end}}</span>
+                            </div>
+                            <p class="text-center text-sm text-gray-500 mt-1">{{matchDateTimeShort .NextMatch.MatchDate}}</p>
                             {{if .NextMatchLocation}}
-                            <p class="text-center text-xs text-gray-500 mt-2 pt-2 border-t">
-                                <a href="{{mapsURL .NextMatchLocationAddress}}" target="_blank" rel="noopener noreferrer">{{.NextMatchLocation.Name}}</a>
+                            <p class="relative text-center text-xs text-gray-500 mt-2 pt-2 border-t">
+                                <a class="relative" href="{{mapsURL .NextMatchLocationAddress}}" target="_blank" rel="noopener noreferrer">{{.NextMatchLocation.Name}}</a>
                             </p>
                             {{end}}
                             <div class="flex justify-between text-xs text-gray-400 mt-1">

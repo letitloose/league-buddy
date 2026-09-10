@@ -75,23 +75,22 @@
                 <div class="card-grid">
                     {{range .Matches}}
                     <div class="match-card">
-                        <a class="block no-underline text-slate-800" href="/match/{{.Match.ID}}">
-                            <div class="flex items-center justify-center gap-2">
-                                <span class="font-medium text-sm text-right flex-1 min-w-0">{{.HomeTeamName}}</span>
-                                <span class="text-xs text-gray-400 shrink-0">vs</span>
-                                <span class="font-medium text-sm text-left flex-1 min-w-0">{{.AwayTeamName}}</span>
-                            </div>
-                            <p class="text-center text-sm mt-1">
-                                {{if and .Match.HomeScore.Valid .Match.AwayScore.Valid}}
-                                <span class="font-bold tabular-nums text-slate-800">{{.Match.HomeScore.Int32}}&ndash;{{.Match.AwayScore.Int32}}</span>
-                                {{else}}
-                                <span class="text-gray-500">{{matchKickoffTime .Match.MatchDate}}</span>
-                                {{end}}
-                            </p>
-                        </a>
+                        <a class="match-card-overlay-link" href="/match/{{.Match.ID}}" aria-label="View match: {{.HomeTeamName}} vs {{.AwayTeamName}}"></a>
+                        <div class="flex items-center justify-center gap-2">
+                            <span class="font-medium text-sm text-right flex-1 min-w-0">{{.HomeTeamName}}</span>
+                            <span class="text-xs text-gray-400 shrink-0">vs</span>
+                            <span class="font-medium text-sm text-left flex-1 min-w-0">{{.AwayTeamName}}</span>
+                        </div>
+                        <p class="text-center text-sm mt-1">
+                            {{if and .Match.HomeScore.Valid .Match.AwayScore.Valid}}
+                            <span class="font-bold tabular-nums text-slate-800">{{.Match.HomeScore.Int32}}&ndash;{{.Match.AwayScore.Int32}}</span>
+                            {{else}}
+                            <span class="text-gray-500">{{matchKickoffTime .Match.MatchDate}}</span>
+                            {{end}}
+                        </p>
                         {{if .Location}}
-                        <p class="text-center text-xs text-gray-500 mt-2 pt-2 border-t">
-                            <a href="{{mapsURL .LocationAddress}}" target="_blank" rel="noopener noreferrer">{{.Location.Name}}</a>
+                        <p class="relative text-center text-xs text-gray-500 mt-2 pt-2 border-t">
+                            <a class="relative" href="{{mapsURL .LocationAddress}}" target="_blank" rel="noopener noreferrer">{{.Location.Name}}</a>
                         </p>
                         {{end}}
                         <div class="flex justify-between text-xs text-gray-400 mt-1">

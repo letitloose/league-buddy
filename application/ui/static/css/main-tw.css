@@ -988,6 +988,7 @@ table tr:nth-child(even) {
 }
 
 .match-card {
+  position: relative;
   display: block;
   border-width: 1px;
   --tw-border-opacity: 1;
@@ -1011,6 +1012,21 @@ table tr:nth-child(even) {
 .match-card:hover {
   --tw-border-opacity: 1;
   border-color: rgb(59 107 79 / var(--tw-border-opacity));
+}
+
+/* Makes the whole card a click target via one full-card overlay <a>
+     (see match-card-overlay-link below) even though a location line
+     inside it needs its own, separate maps link — real anchors can't
+     nest, so the overlay is a sibling instead. Positioned elements paint
+     above static ones regardless of source order, so anything meant to
+     stay independently clickable over the overlay (the maps link's
+     wrapping element) just needs position:relative to join that same
+     paint layer; being later in the DOM than the overlay then wins it
+     the top spot. */
+
+.match-card-overlay-link {
+  position: absolute;
+  inset: 0px;
 }
 
 .brand-font {

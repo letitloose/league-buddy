@@ -203,7 +203,20 @@
   }
 
   .match-card {
-    @apply block bg-white border border-brand-line px-4 py-3 no-underline text-slate-800 hover:border-pitch-600 transition;
+    @apply relative block bg-white border border-brand-line px-4 py-3 no-underline text-slate-800 hover:border-pitch-600 transition;
+  }
+
+  /* Makes the whole card a click target via one full-card overlay <a>
+     (see match-card-overlay-link below) even though a location line
+     inside it needs its own, separate maps link — real anchors can't
+     nest, so the overlay is a sibling instead. Positioned elements paint
+     above static ones regardless of source order, so anything meant to
+     stay independently clickable over the overlay (the maps link's
+     wrapping element) just needs position:relative to join that same
+     paint layer; being later in the DOM than the overlay then wins it
+     the top spot. */
+  .match-card-overlay-link {
+    @apply absolute inset-0;
   }
 
   .result-header {

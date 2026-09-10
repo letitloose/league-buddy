@@ -173,7 +173,11 @@ func main() {
 		}
 	}
 
-	go app.runDailyReminderScheduler()
+	if reset != "true" {
+		go app.runDailyReminderScheduler()
+	} else {
+		app.infoLog.Println("RESETDB=true -- skipping reminder scheduler so a disposable dev DB never sends real notifications")
+	}
 
 	siteHost := os.Getenv("SITE_HOST")
 	sitePort := os.Getenv("SITE_PORT")

@@ -97,6 +97,29 @@ func (m *InviteModel) ListPendingByTeam(teamID int) ([]*Invite, error) {
 	return invites, nil
 }
 
+// GetPendingByEmail returns the most recent outstanding (not used, not
+// canceled) invite addressed to email, if any — the fallback path for a
+// signup that never carried the invite token at all: a forwarded email
+// with the link mangled, a bare URL copy-pasted without its query string,
+// or just navigating to the plain signup page and registering with the
+// same address the invite was sent to. Picks the newest match if more
+// than one team invited the same address.
+func (m *InviteModel) GetPendingByEmail(email string) (*Invite, error) {
+	stmt := `SELECT id, token, teamID, email, createdByUserID, createdAt, usedAt, usedByUserID, canceledAt, asCaptain
+		FROM invites WHERE email = ? AND usedAt IS NULL AND canceledAt IS NULL ORDER BY createdAt DESC LIMIT 1`
+
+	invite := &Invite{}
+	err := m.DB.QueryRow(stmt, email).Scan(&invite.ID, &invite.Token, &invite.TeamID, &invite.Email,
+		&invite.CreatedByUserID, &invite.CreatedAt, &invite.UsedAt, &invite.UsedByUserID, &invite.CanceledAt, &invite.AsCaptain)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoRecord
+		}
+		return nil, err
+	}
+	return invite, nil
+}
+
 func (m *InviteModel) MarkUsed(id, usedByUserID int) error {
 	statement := `UPDATE invites SET usedAt = UTC_TIMESTAMP(), usedByUserID = ? WHERE id = ?`
 

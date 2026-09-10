@@ -221,6 +221,95 @@ func TestActivateUserWithInviteAutoJoinsTeam(t *testing.T) {
 	}
 }
 
+// Many invitees never follow the exact tokenized link — a forwarded email
+// with the link mangled, or just navigating to the plain signup page and
+// registering with the same address the invite was sent to. Without a
+// fallback, that invite sits "pending" forever even though the invitee
+// did sign up: this test guards the email-based fallback in
+// linkOrCreatePlayer.
+func TestActivateUserFulfillsInviteByEmailWithoutToken(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	tm := &models.TeamModel{DB: db}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Tokenless Invite Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	users := &models.UserModel{DB: db}
+	creator, err := users.GetUserByEmail("player@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	im := &models.InviteModel{DB: db}
+	inviteID, err := im.Insert(&models.Invite{
+		Token:           "unused-token",
+		TeamID:          teamID,
+		Email:           "invitee-no-token@example.com",
+		CreatedByUserID: creator.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	userService := UserService{UserModel: users}
+
+	form := &UserForm{
+		Email:           "invitee-no-token@example.com",
+		Password:        "validpassword123",
+		ConfirmPassword: "validpassword123",
+	}
+	if err := userService.InsertUser(form); err != nil {
+		t.Fatal(err)
+	}
+
+	invitedUserSummary, err := users.GetUserByEmail("invitee-no-token@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	invitedUser, err := users.GetUser(invitedUserSummary.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invitedUser.PendingInviteID.Valid {
+		t.Fatal("expected no pendingInviteID to be set at signup time, since no token was given")
+	}
+
+	hash, err := userService.GetVerificationHashByEmail("invitee-no-token@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := userService.ActivateUser(hash); err != nil {
+		t.Fatal(err)
+	}
+
+	activatedUser, err := users.GetUser(invitedUserSummary.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !activatedUser.PlayerID.Valid {
+		t.Fatal("expected a player to have been linked")
+	}
+
+	tmm := &models.TeamMemberModel{DB: db}
+	isMember, err := tmm.IsMember(int(activatedUser.PlayerID.Int32), teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isMember {
+		t.Fatalf("expected player auto-joined to team %d via the email-based invite fallback", teamID)
+	}
+
+	invite, err := im.Get(inviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !invite.UsedAt.Valid {
+		t.Fatal("expected invite to be marked used even though the token was never presented at signup")
+	}
+}
+
 // A captain typically invites an existing roster placeholder by the email
 // already on file, but the invitee often signs up with a different,
 // personal email. That must claim the existing placeholder (updating its

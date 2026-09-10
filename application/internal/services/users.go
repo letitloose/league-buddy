@@ -302,6 +302,20 @@ func (service *UserService) linkOrCreatePlayer(userID int, email string) error {
 			return err
 		}
 	}
+	if invite == nil {
+		// No token-based invite — the signup never carried ?invite=<token>
+		// at all (a forwarded/mangled link, or just registering directly).
+		// Fall back to matching a still-outstanding invite by the email
+		// address they just registered with, so an invite doesn't sit
+		// "pending" forever just because the exact link wasn't used.
+		fallback, err := im.GetPendingByEmail(email)
+		if err != nil && !errors.Is(err, models.ErrNoRecord) {
+			return err
+		}
+		if err == nil {
+			invite = fallback
+		}
+	}
 
 	lookupEmail := email
 	if invite != nil && invite.Email != "" {

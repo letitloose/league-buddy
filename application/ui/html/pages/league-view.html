@@ -6,7 +6,7 @@
     {{with .Data.League.Motto.String}}<p class="italic text-gray-600 mb-2">&ldquo;{{.}}&rdquo;</p>{{end}}
     {{if .Data.League.EstablishedDate.Valid}}<p class="mb-4 text-sm text-gray-500">Est. {{humanDate .Data.League.EstablishedDate.Time}}</p>{{end}}
     {{if or .IsAdmin .Data.CanManage}}
-    <details class="bg-white border border-brand-line px-6 py-4 mt-2 mb-4 w-full md:w-2/3 mx-2 md:mx-0">
+    <details class="bg-white border border-brand-line px-6 py-4 mt-2 mb-4 w-full md:w-2/3 max-w-3xl mx-2 md:mx-0">
         <summary class="cursor-pointer text-center font-semibold">League Actions</summary>
         <div class="flex flex-col sm:flex-row sm:justify-center sm:flex-wrap items-stretch sm:items-center gap-2 w-full max-w-xs sm:max-w-none mx-auto mt-4">
             {{if .IsAdmin}}
@@ -36,7 +36,7 @@
     {{end}}
 
     {{if .Data.CanManage}}
-    <details class="bg-white border border-brand-line px-6 py-4 mt-2 mb-4 w-full md:w-2/3 mx-2 md:mx-0">
+    <details class="bg-white border border-brand-line px-6 py-4 mt-2 mb-4 w-full md:w-2/3 max-w-3xl mx-2 md:mx-0">
         <summary class="cursor-pointer text-center font-semibold">Season Actions</summary>
         <div class="flex flex-col sm:flex-row sm:justify-center sm:flex-wrap items-stretch sm:items-center gap-2 w-full max-w-xs sm:max-w-none mx-auto mt-4">
             <a class="btn-secondary text-center m-0" href="/admin/season/create?leagueID={{.Data.League.ID}}">Add Season</a>
@@ -59,7 +59,7 @@
     {{if eq .Data.ActiveTab "matches"}}
 
     {{if .Data.Season}}
-    <div class="w-full md:w-2/3 px-2 md:px-0">
+    <div class="w-full md:w-2/3 max-w-3xl px-2 md:px-0">
         {{if .Data.MatchDays}}
         <div class="space-y-6 mb-6">
             {{range .Data.MatchDays}}
@@ -70,7 +70,7 @@
                     <div class="match-card">
                         <a class="block no-underline text-slate-800" href="/match/{{.Match.ID}}">
                             <div class="flex items-center justify-between gap-2">
-                                <span class="font-medium text-sm text-right flex-1">{{.HomeTeamName}}</span>
+                                <span class="font-medium text-sm text-right flex-1 min-w-0">{{.HomeTeamName}}</span>
                                 <span class="text-base font-bold tabular-nums px-2 shrink-0">
                                     {{if and .Match.HomeScore.Valid .Match.AwayScore.Valid}}
                                     {{.Match.HomeScore.Int32}}&ndash;{{.Match.AwayScore.Int32}}
@@ -78,7 +78,7 @@
                                     {{with matchKickoffTime .Match.MatchDate}}{{.}}{{else}}<span class="text-gray-400">vs</span>{{end}}
                                     {{end}}
                                 </span>
-                                <span class="font-medium text-sm text-left flex-1">{{.AwayTeamName}}</span>
+                                <span class="font-medium text-sm text-left flex-1 min-w-0">{{.AwayTeamName}}</span>
                             </div>
                             {{if .Location}}<p class="text-center text-xs text-gray-500 mt-2">{{.Location.Name}}</p>{{end}}
                             <div class="flex justify-between text-xs text-gray-400 mt-1">
@@ -117,7 +117,7 @@
     {{else}}
 
     {{if .Data.Season}}
-    <div class="w-full md:w-2/3 px-2 md:px-0">
+    <div class="w-full md:w-2/3 max-w-3xl px-2 md:px-0">
         <div class="overflow-x-auto">
         <table class="text-left w-full mb-6">
             <tr>
@@ -148,7 +148,7 @@
         </div>
     </div>
     {{else}}
-    <div class="overflow-x-auto w-full md:w-2/3 px-2 md:px-0">
+    <div class="overflow-x-auto w-full md:w-2/3 max-w-3xl px-2 md:px-0">
     <table class="text-left w-full mb-4">
         <tr>
             <th>Team</th>
@@ -176,7 +176,7 @@
          league admins is deliberately never delegable, to avoid a
          privilege-escalation loop), so it's tucked out of the way rather
          than sitting open at the bottom of every league page. */}}
-    <details class="bg-white border border-brand-line px-6 py-4 mt-2 mb-6 w-full md:w-2/3 mx-2 md:mx-0">
+    <details class="bg-white border border-brand-line px-6 py-4 mt-2 mb-6 w-full md:w-2/3 max-w-3xl mx-2 md:mx-0">
         <summary class="cursor-pointer text-center font-semibold">League Admins</summary>
         <div class="mt-4">
             {{if .Data.Admins}}

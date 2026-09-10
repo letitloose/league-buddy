@@ -27,7 +27,9 @@
     <div class="w-full md:w-9/12 md:ml-12">
         <div class="text-center">
             <h2>Users</h2>
-            <p class="pb-3 text-center">{{len .Data}} users</p>
+            <p class="pb-3 text-center">
+                {{if .Data.TotalCount}}Showing {{.Data.RangeStart}}&ndash;{{.Data.RangeEnd}} of {{.Data.TotalCount}} users{{else}}No users found{{end}}
+            </p>
         </div>
         <div class="overflow-x-auto">
         <table class="text-left w-full mb-4">
@@ -48,7 +50,7 @@
                 <th>Admin</th>
                 <th>Actions</th>
             </tr>
-            {{range .Data}}
+            {{range .Data.Results}}
             <tr>
                 <td>
                     {{if .PlayerID.Valid}}<a href="/player/view/{{.PlayerID.Int32}}">{{.PlayerName.String}}</a>{{end}}
@@ -69,6 +71,12 @@
             {{end}}
         </table>
         </div>
+        {{if or .Data.PrevURL .Data.NextURL}}
+        <div class="flex justify-center gap-2 mb-4">
+            {{if .Data.PrevURL}}<a class="btn-secondary m-0" href="{{.Data.PrevURL}}">&larr; Prev</a>{{else}}<span class="btn-secondary m-0 opacity-50 pointer-events-none">&larr; Prev</span>{{end}}
+            {{if .Data.NextURL}}<a class="btn-secondary m-0" href="{{.Data.NextURL}}">Next &rarr;</a>{{else}}<span class="btn-secondary m-0 opacity-50 pointer-events-none">Next &rarr;</span>{{end}}
+        </div>
+        {{end}}
     </div>
 </div>
 {{end}}

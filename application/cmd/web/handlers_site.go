@@ -46,11 +46,6 @@ type homeData struct {
 	// a non-captain never sees it, and a captain who dismisses it never
 	// sees it again regardless of role.
 	ShowCaptainGuideBanner bool
-	// UpcomingMatchTeamCount is how many of Teams actually have a
-	// NextMatch — the Upcoming Matches table only shows which of the
-	// player's teams a row belongs to when this is more than 1, since a
-	// single-team player never needs that disambiguation.
-	UpcomingMatchTeamCount int
 }
 
 // privacyPolicy and termsConditions are plain public pages — no auth
@@ -132,7 +127,6 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 			hd.Teams = append(hd.Teams, card)
 			if card.NextMatch != nil {
 				hd.HasUpcomingMatch = true
-				hd.UpcomingMatchTeamCount++
 			}
 		}
 

@@ -402,30 +402,32 @@ type teammateOption struct {
 }
 
 type matchViewData struct {
-	Match           *models.Match
-	Season          *models.Season
-	League          *models.League
-	HomeTeam        *models.Team
-	AwayTeam        *models.Team
-	Location        *models.Location
-	LocationAddress *models.Address
-	HomeGoals       []*goalBoxScoreRow
-	AwayGoals       []*goalBoxScoreRow
-	HomeCards       []*cardBoxScoreRow
-	AwayCards       []*cardBoxScoreRow
-	CanManage       bool
-	CanRSVP         bool
-	IsPast          bool
-	HomeRSVPsIn     []*rsvpDisplayRow
-	AwayRSVPsIn     []*rsvpDisplayRow
-	HomeRSVPsOut    []*rsvpDisplayRow
-	AwayRSVPsOut    []*rsvpDisplayRow
-	HomeNote        *matchTeamNoteView
-	AwayNote        *matchTeamNoteView
-	HomeAttendance  *matchTeamAttendanceView
-	AwayAttendance  *matchTeamAttendanceView
-	ShowHomeBox     bool
-	ShowAwayBox     bool
+	Match               *models.Match
+	Season              *models.Season
+	League              *models.League
+	HomeTeam            *models.Team
+	AwayTeam            *models.Team
+	Location            *models.Location
+	LocationAddress     *models.Address
+	HomeGoals           []*goalBoxScoreRow
+	AwayGoals           []*goalBoxScoreRow
+	HomeCards           []*cardBoxScoreRow
+	AwayCards           []*cardBoxScoreRow
+	CanManage           bool
+	CanRSVP             bool
+	IsPast              bool
+	HomeRSVPsIn         []*rsvpDisplayRow
+	AwayRSVPsIn         []*rsvpDisplayRow
+	HomeRSVPsOut        []*rsvpDisplayRow
+	AwayRSVPsOut        []*rsvpDisplayRow
+	HomeRSVPsNoResponse []*rsvpDisplayRow
+	AwayRSVPsNoResponse []*rsvpDisplayRow
+	HomeNote            *matchTeamNoteView
+	AwayNote            *matchTeamNoteView
+	HomeAttendance      *matchTeamAttendanceView
+	AwayAttendance      *matchTeamAttendanceView
+	ShowHomeBox         bool
+	ShowAwayBox         bool
 }
 
 // matchAttendanceRow is one roster player's resolved attendance for the
@@ -471,6 +473,20 @@ func buildRSVPRows(roster []*models.Player, rsvpsByPlayer map[int]*models.RSVP, 
 			PlayerName: player.FirstName + " " + player.LastName,
 			Message:    rsvp.Message.String,
 		})
+	}
+	return rows
+}
+
+// buildNoResponseRows returns a row for every roster player who hasn't
+// RSVP'd at all — the complement of buildRSVPRows, so a captain can see at
+// a glance who still needs a nudge.
+func buildNoResponseRows(roster []*models.Player, rsvpsByPlayer map[int]*models.RSVP) []*rsvpDisplayRow {
+	rows := make([]*rsvpDisplayRow, 0, len(roster))
+	for _, player := range roster {
+		if _, ok := rsvpsByPlayer[player.ID]; ok {
+			continue
+		}
+		rows = append(rows, &rsvpDisplayRow{PlayerName: player.FirstName + " " + player.LastName})
 	}
 	return rows
 }
@@ -784,30 +800,32 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 	}
 
 	return &matchViewData{
-		Match:           match,
-		Season:          season,
-		League:          league,
-		HomeTeam:        homeTeam,
-		AwayTeam:        awayTeam,
-		Location:        location,
-		LocationAddress: locationAddress,
-		HomeGoals:       homeGoals,
-		AwayGoals:       awayGoals,
-		HomeCards:       homeCards,
-		AwayCards:       awayCards,
-		CanManage:       canManage,
-		CanRSVP:         canRSVP,
-		IsPast:          isPast,
-		HomeRSVPsIn:     buildRSVPRows(homeRoster, rsvpsByPlayer, "yes"),
-		AwayRSVPsIn:     buildRSVPRows(awayRoster, rsvpsByPlayer, "yes"),
-		HomeRSVPsOut:    buildRSVPRows(homeRoster, rsvpsByPlayer, "no"),
-		AwayRSVPsOut:    buildRSVPRows(awayRoster, rsvpsByPlayer, "no"),
-		HomeNote:        homeNote,
-		AwayNote:        awayNote,
-		HomeAttendance:  homeAttendance,
-		AwayAttendance:  awayAttendance,
-		ShowHomeBox:     showHomeBox,
-		ShowAwayBox:     showAwayBox,
+		Match:               match,
+		Season:              season,
+		League:              league,
+		HomeTeam:            homeTeam,
+		AwayTeam:            awayTeam,
+		Location:            location,
+		LocationAddress:     locationAddress,
+		HomeGoals:           homeGoals,
+		AwayGoals:           awayGoals,
+		HomeCards:           homeCards,
+		AwayCards:           awayCards,
+		CanManage:           canManage,
+		CanRSVP:             canRSVP,
+		IsPast:              isPast,
+		HomeRSVPsIn:         buildRSVPRows(homeRoster, rsvpsByPlayer, "yes"),
+		AwayRSVPsIn:         buildRSVPRows(awayRoster, rsvpsByPlayer, "yes"),
+		HomeRSVPsOut:        buildRSVPRows(homeRoster, rsvpsByPlayer, "no"),
+		AwayRSVPsOut:        buildRSVPRows(awayRoster, rsvpsByPlayer, "no"),
+		HomeRSVPsNoResponse: buildNoResponseRows(homeRoster, rsvpsByPlayer),
+		AwayRSVPsNoResponse: buildNoResponseRows(awayRoster, rsvpsByPlayer),
+		HomeNote:            homeNote,
+		AwayNote:            awayNote,
+		HomeAttendance:      homeAttendance,
+		AwayAttendance:      awayAttendance,
+		ShowHomeBox:         showHomeBox,
+		ShowAwayBox:         showAwayBox,
 	}, nil
 }
 

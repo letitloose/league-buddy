@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -390,11 +391,69 @@ func (app *application) userSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	totalCount := 0
+	if len(results) > 0 {
+		totalCount = int(results[0].FullCount.Int32)
+	}
+
+	ld := &userListData{Results: results, TotalCount: totalCount}
+	if totalCount > 0 {
+		ld.RangeStart = form.Offset + 1
+		ld.RangeEnd = form.Offset + len(results)
+	}
+	if form.Offset > 0 {
+		prevOffset := form.Offset - form.Limit
+		if prevOffset < 0 {
+			prevOffset = 0
+		}
+		ld.PrevURL = userSearchURL(form, prevOffset)
+	}
+	if form.Offset+len(results) < totalCount {
+		ld.NextURL = userSearchURL(form, form.Offset+form.Limit)
+	}
+
 	data := app.newTemplateData(r)
 	data.Form = form
-	data.Data = results
+	data.Data = ld
 
 	app.render(w, http.StatusOK, "user-list.html", data)
+}
+
+// userListData is user-list.html's shape — the raw search results plus
+// everything the pager needs. URLs are pre-built here rather than in the
+// template since html/template has no arithmetic helpers to compute the
+// next/prev offset itself.
+type userListData struct {
+	Results    []*models.UserSearchResult
+	TotalCount int
+	RangeStart int
+	RangeEnd   int
+	PrevURL    string
+	NextURL    string
+}
+
+// userSearchURL builds a /user/search link carrying form's criteria/sort
+// forward with a different offset — used for the Prev/Next pager links.
+func userSearchURL(form services.UserSearchForm, offset int) string {
+	v := url.Values{}
+	if form.FirstName != "" {
+		v.Set("firstname", form.FirstName)
+	}
+	if form.LastName != "" {
+		v.Set("lastname", form.LastName)
+	}
+	if form.Email != "" {
+		v.Set("email", form.Email)
+	}
+	if form.Sort != "" {
+		v.Set("sort", form.Sort)
+	}
+	if form.Order != "" {
+		v.Set("order", form.Order)
+	}
+	v.Set("limit", strconv.Itoa(form.Limit))
+	v.Set("offset", strconv.Itoa(offset))
+	return "/user/search?" + v.Encode()
 }
 
 func (app *application) userView(w http.ResponseWriter, r *http.Request) {

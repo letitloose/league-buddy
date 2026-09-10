@@ -22,7 +22,7 @@
     {{end}}
 
     {{if .Data.CanManage}}
-    <details class="bg-white border border-brand-line px-6 py-4 mt-2 mb-6 w-full md:w-2/3 mx-2 md:mx-0">
+    <details class="bg-white border border-brand-line px-6 py-4 mt-2 mb-6 w-full md:w-2/3 max-w-3xl mx-2 md:mx-0">
         <summary class="cursor-pointer text-center font-semibold">Team Actions</summary>
         <div class="flex flex-col sm:flex-row sm:justify-center sm:flex-wrap items-stretch sm:items-center gap-2 w-full max-w-xs sm:max-w-none mx-auto mt-4">
             <a class="btn-secondary text-center m-0" href="/admin/team/update/{{.Data.Team.ID}}">Edit Team</a>
@@ -66,7 +66,7 @@
     {{if eq .Data.ActiveTab "matches"}}
 
     {{if .Data.Season}}
-    <div class="w-full md:w-2/3 px-2 md:px-0">
+    <div class="w-full md:w-2/3 max-w-3xl px-2 md:px-0">
         {{if .Data.MatchDays}}
         <div class="space-y-6 mb-6">
             {{range .Data.MatchDays}}
@@ -77,18 +77,15 @@
                     <div class="match-card">
                         <a class="block no-underline text-slate-800" href="/match/{{.Match.ID}}">
                             <div class="flex items-center justify-between gap-2">
-                                {{if eq .Match.HomeTeamID $.Data.Team.ID}}
-                                <span class="font-medium text-sm">{{.AwayTeamName}}</span>
-                                {{else}}
-                                <span class="font-medium text-sm">@ {{.HomeTeamName}}</span>
-                                {{end}}
-                                <span class="text-base font-bold tabular-nums shrink-0">
+                                <span class="font-medium text-sm text-right flex-1 min-w-0">{{.HomeTeamName}}</span>
+                                <span class="text-base font-bold tabular-nums px-2 shrink-0">
                                     {{if and .Match.HomeScore.Valid .Match.AwayScore.Valid}}
                                     {{.Match.HomeScore.Int32}}&ndash;{{.Match.AwayScore.Int32}}
                                     {{else}}
-                                    {{with matchKickoffTime .Match.MatchDate}}{{.}}{{else}}<span class="text-gray-400">&mdash;</span>{{end}}
+                                    {{with matchKickoffTime .Match.MatchDate}}{{.}}{{else}}<span class="text-gray-400">vs</span>{{end}}
                                     {{end}}
                                 </span>
+                                <span class="font-medium text-sm text-left flex-1 min-w-0">{{.AwayTeamName}}</span>
                             </div>
                             <p class="text-center text-xs text-gray-400 mt-1">
                                 {{if eq .Match.HomeTeamID $.Data.Team.ID}}{{.HomeIn}} in / {{.HomeOut}} out{{else}}{{.AwayIn}} in / {{.AwayOut}} out{{end}}
@@ -124,7 +121,7 @@
 
     {{else}}
 
-    <div class="w-full md:w-2/3 px-2 md:px-0">
+    <div class="w-full md:w-2/3 max-w-3xl px-2 md:px-0">
         <div class="text-center">
             {{if .Data.PlayersWithAge}}
             <p class="text-sm text-gray-600 mb-3">Average age: {{.Data.AverageAge}}</p>

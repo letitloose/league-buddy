@@ -2182,7 +2182,7 @@ func TestMatchViewAndCaptainEditAccess(t *testing.T) {
 		}
 	})
 
-	t.Run("away team's schedule prefixes the opponent with @", func(t *testing.T) {
+	t.Run("away team's schedule shows both teams like the league matches page", func(t *testing.T) {
 		ts := newTestServer(t, app.routes())
 		ts.login(t, testActiveEmail, testActivePass)
 
@@ -2190,8 +2190,8 @@ func TestMatchViewAndCaptainEditAccess(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
-		if !strings.Contains(body, "@ Match View Home FC") {
-			t.Error("expected the away team's schedule to show '@ <home team>' rather than separate Home/Away columns")
+		if !strings.Contains(body, "Match View Home FC") || !strings.Contains(body, "Match View Away FC") {
+			t.Error("expected the away team's schedule card to show both the home and away team names")
 		}
 	})
 }
@@ -2691,10 +2691,11 @@ func TestMatchRSVPClosedForPastMatches(t *testing.T) {
 	}
 }
 
-// The match view's "Not Attending" list shows roster players who RSVP'd
-// "no" (with their message) while the match is still upcoming, but drops
-// off the page once the match has happened — only "Confirmed" (who
-// actually showed) matters in hindsight.
+// The match view's "Not Attending" and "Not Replied" lists show roster
+// players who RSVP'd "no" (with their message), or haven't RSVP'd at all,
+// while the match is still upcoming, but both drop off the page once the
+// match has happened — only "Confirmed" (who actually showed) matters in
+// hindsight.
 func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
 	app := newTestApplication(t)
 
@@ -2738,6 +2739,13 @@ func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
 	if err := tmm.AddMembership(outPlayerID, homeTeamID); err != nil {
 		t.Fatal(err)
 	}
+	noReplyPlayerID, err := pm.Insert(&models.Player{FirstName: "NoReply", LastName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(noReplyPlayerID, homeTeamID); err != nil {
+		t.Fatal(err)
+	}
 
 	mm := &models.MatchModel{DB: testDB}
 
@@ -2770,6 +2778,9 @@ func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
 		if !strings.Contains(body, "Not Attending") || !strings.Contains(body, "out of town") {
 			t.Error("expected the Not Attending list with the no-RSVP's message for an upcoming match")
 		}
+		if !strings.Contains(body, "Not Replied") || !strings.Contains(body, "NoReply Player") {
+			t.Error("expected the Not Replied list to show the roster player who hasn't RSVP'd at all")
+		}
 	})
 
 	t.Run("past match hides Not Attending, keeps Confirmed", func(t *testing.T) {
@@ -2800,6 +2811,9 @@ func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
 		}
 		if strings.Contains(body, "Not Attending") {
 			t.Error("expected no Not Attending list for a match that already happened")
+		}
+		if strings.Contains(body, "Not Replied") {
+			t.Error("expected no Not Replied list for a match that already happened")
 		}
 	})
 }
@@ -2904,10 +2918,69 @@ func TestUserListDefaultSortAndToggle(t *testing.T) {
 	})
 }
 
-// The home page's Upcoming Matches table only shows which of the player's
-// teams a row belongs to when they're on more than one team with an
-// upcoming match — a single-team player just sees Date/Opponent/Location,
-// no redundant team name.
+// The admin user list paginates rather than silently truncating at its
+// (default 20) page size — a small ?limit= here just makes the boundary
+// reachable with a handful of users instead of needing 20+.
+func TestUserListPagination(t *testing.T) {
+	app := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testAdminEmail, testAdminPass)
+
+	pm := &models.PlayerModel{DB: testDB}
+	um := &models.UserModel{DB: testDB}
+
+	for i := 0; i < 3; i++ {
+		playerID, err := pm.Insert(&models.Player{FirstName: "Pager", LastName: "PaginationSurname"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		userID, err := um.Insert(fmt.Sprintf("pagination-test-%d@test.com", i), "validpassword123")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := um.SetPlayerID(userID, playerID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("first page shows a Next link but no Prev", func(t *testing.T) {
+		code, _, body := ts.get(t, "/user/search?lastname=PaginationSurname&limit=2")
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "Showing 1&ndash;2 of 3 users") {
+			t.Error("expected the range summary to show 1-2 of 3")
+		}
+		if !strings.Contains(body, "offset=2") {
+			t.Error("expected a Next link to offset 2")
+		}
+		if strings.Contains(body, "Prev</a>") {
+			t.Error("expected no active Prev link on the first page")
+		}
+	})
+
+	t.Run("second page shows a Prev link but no Next", func(t *testing.T) {
+		code, _, body := ts.get(t, "/user/search?lastname=PaginationSurname&limit=2&offset=2")
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "Showing 3&ndash;3 of 3 users") {
+			t.Error("expected the range summary to show 3-3 of 3")
+		}
+		if !strings.Contains(body, "offset=0") {
+			t.Error("expected a Prev link back to offset 0")
+		}
+		if strings.Contains(body, "Next</a>") {
+			t.Error("expected no active Next link on the last page")
+		}
+	})
+}
+
+// The home page's Upcoming Matches cards show both teams (the player's own
+// team and the opponent, like the league matches page's cards) regardless
+// of how many teams the player is on — there's no separate disambiguation
+// mode for the multi-team case, since the player's own team name is always
+// part of the card now.
 func TestHomeUpcomingMatchesTeamDisambiguation(t *testing.T) {
 	app := newTestApplication(t)
 
@@ -2981,16 +3054,16 @@ func TestHomeUpcomingMatchesTeamDisambiguation(t *testing.T) {
 	ts := newTestServer(t, app.routes())
 	ts.login(t, "multi-team-home@test.com", "validpassword123")
 
-	t.Run("single team shows no team disambiguation", func(t *testing.T) {
+	t.Run("single team shows both the player's team and the opponent", func(t *testing.T) {
 		code, _, body := ts.get(t, "/")
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
 		if !strings.Contains(body, "Home Upcoming Opponent A") {
-			t.Error("expected the opponent's name in the Upcoming Matches table")
+			t.Error("expected the opponent's name in the Upcoming Matches card")
 		}
-		if strings.Contains(body, "(Home Upcoming Team A)") {
-			t.Error("expected no team-name disambiguation for a single-team player")
+		if !strings.Contains(body, "Home Upcoming Team A") {
+			t.Error("expected the player's own team name in the Upcoming Matches card")
 		}
 	})
 
@@ -3003,8 +3076,8 @@ func TestHomeUpcomingMatchesTeamDisambiguation(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
-		if !strings.Contains(body, "(Home Upcoming Team A)") || !strings.Contains(body, "(Home Upcoming Team B)") {
-			t.Error("expected both teams' names to disambiguate their rows once the player has two upcoming matches")
+		if !strings.Contains(body, "Home Upcoming Team A") || !strings.Contains(body, "Home Upcoming Team B") {
+			t.Error("expected both teams' own names to appear once the player has two upcoming matches")
 		}
 	})
 }

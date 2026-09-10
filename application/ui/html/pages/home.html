@@ -28,8 +28,11 @@
                         <div class="match-card">
                             <a class="block no-underline text-slate-800" href="/match/{{.NextMatch.ID}}">
                                 <p class="text-center text-xs text-gray-500">{{matchDateTimeShort .NextMatch.MatchDate}}</p>
-                                <p class="text-center font-medium text-sm mt-1">{{if not .NextMatchIsHome}}@ {{end}}{{.NextMatchOpponent}}</p>
-                                {{if gt $.Data.UpcomingMatchTeamCount 1}}<p class="text-center text-xs text-gray-500 mt-1">({{.Team.Name}})</p>{{end}}
+                                <div class="flex items-center justify-center gap-2 mt-1">
+                                    <span class="font-medium text-sm text-right flex-1 min-w-0">{{if .NextMatchIsHome}}{{.Team.Name}}{{else}}{{.NextMatchOpponent}}{{end}}</span>
+                                    <span class="text-xs text-gray-400 shrink-0">vs</span>
+                                    <span class="font-medium text-sm text-left flex-1 min-w-0">{{if .NextMatchIsHome}}{{.NextMatchOpponent}}{{else}}{{.Team.Name}}{{end}}</span>
+                                </div>
                             </a>
                             {{if .NextMatchLocation}}
                             <p class="text-center text-xs text-gray-500 mt-2 pt-2 border-t">
@@ -38,24 +41,6 @@
                             {{end}}
                         </div>
                         {{end}}
-                    {{end}}
-                </div>
-                {{end}}
-
-                {{with .Data.Leagues}}
-                <h3 class="px-0">My Leagues</h3>
-                <div class="card-grid mb-8">
-                    {{range .}}
-                    <a href="/league/{{.League.ID}}" class="block no-underline bg-white border border-brand-line hover:border-pitch-600 transition p-5">
-                        <h4 class="text-slate-800 p-0 mb-2">{{.League.Name}}</h4>
-                        {{with .League.Motto.String}}<p class="text-sm italic text-gray-600 mb-1">&ldquo;{{.}}&rdquo;</p>{{end}}
-                        <p class="text-sm text-gray-600 mb-1">{{.TeamCount}} team{{if ne .TeamCount 1}}s{{end}}</p>
-                        {{if .League.EstablishedDate.Valid}}
-                            <p class="text-xs text-gray-400 mt-3">Est. {{humanDate .League.EstablishedDate.Time}}</p>
-                        {{else}}
-                            <p class="text-xs text-gray-400 mt-3">Est. {{humanDate .League.Created}}</p>
-                        {{end}}
-                    </a>
                     {{end}}
                 </div>
                 {{end}}
@@ -73,6 +58,24 @@
                             <p class="text-xs text-gray-400 mt-3">Est. {{humanDate .Team.EstablishedDate.Time}}</p>
                         {{else}}
                             <p class="text-xs text-gray-400 mt-3">Est. {{humanDate .Team.Created}}</p>
+                        {{end}}
+                    </a>
+                    {{end}}
+                </div>
+                {{end}}
+
+                {{with .Data.Leagues}}
+                <h3 class="px-0">My Leagues</h3>
+                <div class="card-grid mb-8">
+                    {{range .}}
+                    <a href="/league/{{.League.ID}}" class="block no-underline bg-white border border-brand-line hover:border-pitch-600 transition p-5">
+                        <h4 class="text-slate-800 p-0 mb-2">{{.League.Name}}</h4>
+                        {{with .League.Motto.String}}<p class="text-sm italic text-gray-600 mb-1">&ldquo;{{.}}&rdquo;</p>{{end}}
+                        <p class="text-sm text-gray-600 mb-1">{{.TeamCount}} team{{if ne .TeamCount 1}}s{{end}}</p>
+                        {{if .League.EstablishedDate.Valid}}
+                            <p class="text-xs text-gray-400 mt-3">Est. {{humanDate .League.EstablishedDate.Time}}</p>
+                        {{else}}
+                            <p class="text-xs text-gray-400 mt-3">Est. {{humanDate .League.Created}}</p>
                         {{end}}
                     </a>
                     {{end}}

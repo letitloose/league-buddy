@@ -99,6 +99,14 @@
                 {{end}}
             </ul>
             {{end}}
+            {{if and (not .Data.IsPast) .Data.HomeRSVPsNoResponse}}
+            <p class="text-sm font-semibold text-gray-600 mb-1 mt-2">Not Replied ({{len .Data.HomeRSVPsNoResponse}})</p>
+            <ul class="text-sm mb-1">
+                {{range .Data.HomeRSVPsNoResponse}}
+                <li>{{.PlayerName}}</li>
+                {{end}}
+            </ul>
+            {{end}}
         </div>
         {{end}}
         {{if .Data.ShowAwayBox}}
@@ -144,6 +152,14 @@
             <ul class="text-sm mb-1">
                 {{range .Data.AwayRSVPsOut}}
                 <li>{{.PlayerName}}{{with .Message}} <span class="text-gray-500">&mdash; &ldquo;{{.}}&rdquo;</span>{{end}}</li>
+                {{end}}
+            </ul>
+            {{end}}
+            {{if and (not .Data.IsPast) .Data.AwayRSVPsNoResponse}}
+            <p class="text-sm font-semibold text-gray-600 mb-1 mt-2">Not Replied ({{len .Data.AwayRSVPsNoResponse}})</p>
+            <ul class="text-sm mb-1">
+                {{range .Data.AwayRSVPsNoResponse}}
+                <li>{{.PlayerName}}</li>
                 {{end}}
             </ul>
             {{end}}

@@ -1088,6 +1088,10 @@ table tr:nth-child(even) {
   border-width: 0;
 }
 
+.pointer-events-none {
+  pointer-events: none;
+}
+
 .visible {
   visibility: visible;
 }
@@ -1248,6 +1252,10 @@ table tr:nth-child(even) {
 
 .w-full {
   width: 100%;
+}
+
+.min-w-0 {
+  min-width: 0px;
 }
 
 .max-w-2xl {
@@ -1804,6 +1812,10 @@ table tr:nth-child(even) {
 
 .no-underline {
   text-decoration-line: none;
+}
+
+.opacity-50 {
+  opacity: 0.5;
 }
 
 .shadow-md {

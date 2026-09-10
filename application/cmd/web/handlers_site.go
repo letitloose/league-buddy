@@ -22,6 +22,10 @@ type homeTeamCard struct {
 	NextMatchIsHome          bool
 	NextMatchLocation        *models.Location
 	NextMatchLocationAddress *models.Address
+	NextMatchHomeIn          int
+	NextMatchHomeOut         int
+	NextMatchAwayIn          int
+	NextMatchAwayOut         int
 }
 
 // homeLeagueCard is one entry in the home page's "My Leagues" area — shown
@@ -227,6 +231,16 @@ func (app *application) buildHomeTeamCard(teamID int) (*homeTeamCard, error) {
 	card.NextMatchOpponent = opponent.Name
 	card.NextMatchOpponentID = opponent.ID
 	card.NextMatchIsHome = isHome
+
+	rm := &models.RSVPModel{DB: app.playerService.DB}
+	card.NextMatchHomeIn, card.NextMatchHomeOut, err = rm.CountsByMatchAndTeam(next.ID, next.HomeTeamID)
+	if err != nil {
+		return nil, err
+	}
+	card.NextMatchAwayIn, card.NextMatchAwayOut, err = rm.CountsByMatchAndTeam(next.ID, next.AwayTeamID)
+	if err != nil {
+		return nil, err
+	}
 
 	if next.LocationID.Valid {
 		locm := &models.LocationModel{DB: app.playerService.DB}

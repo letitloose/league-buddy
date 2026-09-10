@@ -69,18 +69,19 @@
                     {{range .Matches}}
                     <div class="match-card">
                         <a class="block no-underline text-slate-800" href="/match/{{.Match.ID}}">
-                            <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center justify-center gap-2">
                                 <span class="font-medium text-sm text-right flex-1 min-w-0">{{.HomeTeamName}}</span>
-                                <span class="text-base font-bold tabular-nums px-2 shrink-0">
-                                    {{if and .Match.HomeScore.Valid .Match.AwayScore.Valid}}
-                                    {{.Match.HomeScore.Int32}}&ndash;{{.Match.AwayScore.Int32}}
-                                    {{else}}
-                                    {{with matchKickoffTime .Match.MatchDate}}{{.}}{{else}}<span class="text-gray-400">vs</span>{{end}}
-                                    {{end}}
-                                </span>
+                                <span class="text-xs text-gray-400 shrink-0">vs</span>
                                 <span class="font-medium text-sm text-left flex-1 min-w-0">{{.AwayTeamName}}</span>
                             </div>
-                            {{if .Location}}<p class="text-center text-xs text-gray-500 mt-2">{{.Location.Name}}</p>{{end}}
+                            <p class="text-center text-sm mt-1">
+                                {{if and .Match.HomeScore.Valid .Match.AwayScore.Valid}}
+                                <span class="font-bold tabular-nums text-slate-800">{{.Match.HomeScore.Int32}}&ndash;{{.Match.AwayScore.Int32}}</span>
+                                {{else}}
+                                <span class="text-gray-500">{{matchKickoffTime .Match.MatchDate}}</span>
+                                {{end}}
+                            </p>
+                            {{if .Location}}<p class="text-center text-xs text-gray-500 mt-2 pt-2 border-t">{{.Location.Name}}</p>{{end}}
                             <div class="flex justify-between text-xs text-gray-400 mt-1">
                                 <span>{{.HomeIn}} in / {{.HomeOut}} out</span>
                                 <span>{{.AwayIn}} in / {{.AwayOut}} out</span>

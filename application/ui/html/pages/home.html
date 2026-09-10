@@ -27,18 +27,22 @@
                         {{if .NextMatch}}
                         <div class="match-card">
                             <a class="block no-underline text-slate-800" href="/match/{{.NextMatch.ID}}">
-                                <p class="text-center text-xs text-gray-500">{{matchDateTimeShort .NextMatch.MatchDate}}</p>
-                                <div class="flex items-center justify-center gap-2 mt-1">
+                                <div class="flex items-center justify-center gap-2">
                                     <span class="font-medium text-sm text-right flex-1 min-w-0">{{if .NextMatchIsHome}}{{.Team.Name}}{{else}}{{.NextMatchOpponent}}{{end}}</span>
                                     <span class="text-xs text-gray-400 shrink-0">vs</span>
                                     <span class="font-medium text-sm text-left flex-1 min-w-0">{{if .NextMatchIsHome}}{{.NextMatchOpponent}}{{else}}{{.Team.Name}}{{end}}</span>
                                 </div>
+                                <p class="text-center text-sm text-gray-500 mt-1">{{matchDateTimeShort .NextMatch.MatchDate}}</p>
                             </a>
                             {{if .NextMatchLocation}}
                             <p class="text-center text-xs text-gray-500 mt-2 pt-2 border-t">
                                 <a href="{{mapsURL .NextMatchLocationAddress}}" target="_blank" rel="noopener noreferrer">{{.NextMatchLocation.Name}}</a>
                             </p>
                             {{end}}
+                            <div class="flex justify-between text-xs text-gray-400 mt-1">
+                                <span>{{.NextMatchHomeIn}} in / {{.NextMatchHomeOut}} out</span>
+                                <span>{{.NextMatchAwayIn}} in / {{.NextMatchAwayOut}} out</span>
+                            </div>
                         </div>
                         {{end}}
                     {{end}}

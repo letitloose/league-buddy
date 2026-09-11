@@ -224,6 +224,16 @@ func (ts *testServer) get(t *testing.T, urlPath string) (int, http.Header, strin
 	return rs.StatusCode, rs.Header, string(body)
 }
 
+func (ts *testServer) head(t *testing.T, urlPath string) (int, http.Header) {
+	t.Helper()
+	rs, err := ts.Client().Head(ts.URL + urlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Body.Close()
+	return rs.StatusCode, rs.Header
+}
+
 var csrfTokenRX = regexp.MustCompile(`<input type='hidden' name='csrf_token' value='([^']+)'`)
 
 func extractCSRFToken(t *testing.T, body string) string {

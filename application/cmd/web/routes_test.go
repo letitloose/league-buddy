@@ -41,6 +41,22 @@ func TestPublicRoutes(t *testing.T) {
 			}
 		})
 	}
+
+	// A HEAD request must reach the same route a GET would -- httprouter
+	// returns 405 for a method that isn't explicitly registered on a path,
+	// and it doesn't fall back from HEAD to GET on its own. This matters
+	// for anyone who checks a URL with HEAD before GET-ing it, including
+	// (per a real Twilio toll-free verification rejection citing "URL Is
+	// Invalid" against every public page here) Twilio's own compliance
+	// crawler.
+	for _, tt := range tests {
+		t.Run(tt.name+" via HEAD", func(t *testing.T) {
+			code, _ := ts.head(t, tt.path)
+			if code != http.StatusOK {
+				t.Errorf("want %d; got %d", http.StatusOK, code)
+			}
+		})
+	}
 }
 
 // The footer's "Contact Us" link points to a real page (not a mailto:)

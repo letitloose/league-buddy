@@ -189,5 +189,33 @@ func (app *application) routes() http.Handler {
 
 	standard := alice.New(app.recoverPanic, app.logRequest, secureHeaders)
 
-	return standard.Then(router)
+	return standard.Then(headAsGet(router))
+}
+
+// headAsGet lets a HEAD request reach the same handler a GET request would.
+// httprouter, unlike some frameworks, doesn't fall back from HEAD to GET on
+// its own -- a path registered only for GET returns 405 for HEAD. That
+// matters for anyone who checks a URL with HEAD before GET-ing it (uptime
+// monitors, link-preview generators, and -- per a real Twilio toll-free
+// verification rejection citing "URL Is Invalid" against every public page
+// on this site -- Twilio's own compliance crawler).
+//
+// The swapped method only affects routing: net/http's own ResponseWriter
+// discards the response body for a HEAD request by checking the original
+// *http.Request it was bound to when the server started handling the
+// connection, not whatever request object a handler chain passes further
+// in -- so cloning the request here and only rewriting the clone's Method
+// still yields a spec-compliant, body-less HEAD response, with the real
+// handler logic (and its GET-shaped output) run unmodified and no changes
+// needed to any individual route registration.
+func headAsGet(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			next.ServeHTTP(w, r)
+			return
+		}
+		r2 := r.Clone(r.Context())
+		r2.Method = http.MethodGet
+		next.ServeHTTP(w, r2)
+	})
 }

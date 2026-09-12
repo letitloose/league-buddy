@@ -3193,6 +3193,72 @@ func TestTeamRosterDefaultSortAndToggle(t *testing.T) {
 	})
 }
 
+// Every link inside the Roster tab (the Active/Legends sub-tabs, and the
+// column sort headers) must carry tab=roster explicitly -- the team page
+// defaults to the Matches tab for any ?tab= value other than "roster" or
+// "leaders", so a roster-tab link missing that param bounces the viewer
+// back to Matches instead of switching sub-tabs or re-sorting. Regression
+// test for a real bug: clicking "Legends" reloaded the team page on the
+// Matches tab instead of showing the Legends roster.
+func TestTeamRosterTabLinksStayOnRosterTab(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Roster Tab Stickiness League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Roster Tab Stickiness Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	legendID, err := pm.Insert(&models.Player{FirstName: "Old", LastName: "Timer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(legendID, teamID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.SetLegendStatus(legendID, teamID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	code, _, body := ts.get(t, fmt.Sprintf("/team/%d?tab=roster", teamID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	for _, want := range []string{
+		fmt.Sprintf(`href="/team/%d?tab=roster&rosterTab=active"`, teamID),
+		fmt.Sprintf(`href="/team/%d?tab=roster&rosterTab=legends"`, teamID),
+		fmt.Sprintf(`href="/team/%d?tab=roster&sort=name&order=DESC&rosterTab=active"`, teamID),
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected roster tab body to contain %q", want)
+		}
+	}
+
+	// Actually follow the Legends link, the way a click would -- confirms
+	// the page really does land on the Roster tab showing Legends, not
+	// bounce to Matches.
+	code, _, legendsBody := ts.get(t, fmt.Sprintf("/team/%d?tab=roster&rosterTab=legends", teamID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if !strings.Contains(legendsBody, "Old Timer") {
+		t.Error("expected the Legends roster to list the legend player")
+	}
+	if strings.Contains(legendsBody, "matchday-heading") {
+		t.Error("expected the Legends link to land on the Roster tab, not Matches")
+	}
+}
+
 // The team page's Leaders tab calls out an Own goal leader above the
 // Goal/Assist Leaders tables, once someone on the roster has one.
 func TestTeamViewOwnGoalLeader(t *testing.T) {

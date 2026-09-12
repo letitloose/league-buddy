@@ -133,34 +133,34 @@
         </div>
 
         <div class="tab-bar">
-            <a class="{{if eq .Data.RosterTab "active"}}tab-link-active{{else}}tab-link{{end}}" href="/team/{{.Data.Team.ID}}?{{if .Data.Season}}season={{.Data.Season.ID}}&{{end}}rosterTab=active">Active ({{.Data.ActiveCount}})</a>
-            <a class="{{if eq .Data.RosterTab "legends"}}tab-link-active{{else}}tab-link{{end}}" href="/team/{{.Data.Team.ID}}?{{if .Data.Season}}season={{.Data.Season.ID}}&{{end}}rosterTab=legends">Legends ({{.Data.LegendsCount}})</a>
+            <a class="{{if eq .Data.RosterTab "active"}}tab-link-active{{else}}tab-link{{end}}" href="/team/{{.Data.Team.ID}}?{{if .Data.Season}}season={{.Data.Season.ID}}&{{end}}tab=roster&rosterTab=active">Active ({{.Data.ActiveCount}})</a>
+            <a class="{{if eq .Data.RosterTab "legends"}}tab-link-active{{else}}tab-link{{end}}" href="/team/{{.Data.Team.ID}}?{{if .Data.Season}}season={{.Data.Season.ID}}&{{end}}tab=roster&rosterTab=legends">Legends ({{.Data.LegendsCount}})</a>
         </div>
 
         <div class="overflow-x-auto">
         <table class="table-compact text-left w-full mb-4">
             <tr>
                 <th>
-                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?{{if .Data.Season}}season={{.Data.Season.ID}}&{{end}}sort=name&order={{if and (eq .Data.RosterSort "name") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">Name{{if eq .Data.RosterSort "name"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?{{if .Data.Season}}season={{.Data.Season.ID}}&{{end}}tab=roster&sort=name&order={{if and (eq .Data.RosterSort "name") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">Name{{if eq .Data.RosterSort "name"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
                 </th>
                 <th>
-                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?{{if .Data.Season}}season={{.Data.Season.ID}}&{{end}}sort=age&order={{if and (eq .Data.RosterSort "age") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">Age{{if eq .Data.RosterSort "age"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?{{if .Data.Season}}season={{.Data.Season.ID}}&{{end}}tab=roster&sort=age&order={{if and (eq .Data.RosterSort "age") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">Age{{if eq .Data.RosterSort "age"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
                 </th>
                 {{if .Data.Season}}
                 <th>
-                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?season={{.Data.Season.ID}}&sort=goals&order={{if and (eq .Data.RosterSort "goals") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">G{{if eq .Data.RosterSort "goals"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?season={{.Data.Season.ID}}&tab=roster&sort=goals&order={{if and (eq .Data.RosterSort "goals") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">G{{if eq .Data.RosterSort "goals"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
                 </th>
                 <th>
-                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?season={{.Data.Season.ID}}&sort=assists&order={{if and (eq .Data.RosterSort "assists") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">A{{if eq .Data.RosterSort "assists"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?season={{.Data.Season.ID}}&tab=roster&sort=assists&order={{if and (eq .Data.RosterSort "assists") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">A{{if eq .Data.RosterSort "assists"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
                 </th>
                 <th>
-                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?season={{.Data.Season.ID}}&sort=yellowcards&order={{if and (eq .Data.RosterSort "yellowcards") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">YC{{if eq .Data.RosterSort "yellowcards"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?season={{.Data.Season.ID}}&tab=roster&sort=yellowcards&order={{if and (eq .Data.RosterSort "yellowcards") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">YC{{if eq .Data.RosterSort "yellowcards"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
                 </th>
                 <th>
-                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?season={{.Data.Season.ID}}&sort=redcards&order={{if and (eq .Data.RosterSort "redcards") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">RC{{if eq .Data.RosterSort "redcards"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?season={{.Data.Season.ID}}&tab=roster&sort=redcards&order={{if and (eq .Data.RosterSort "redcards") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">RC{{if eq .Data.RosterSort "redcards"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
                 </th>
                 <th>
-                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?season={{.Data.Season.ID}}&sort=mp&order={{if and (eq .Data.RosterSort "mp") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">MP{{if eq .Data.RosterSort "mp"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                    <a class="no-underline" href="/team/{{.Data.Team.ID}}?season={{.Data.Season.ID}}&tab=roster&sort=mp&order={{if and (eq .Data.RosterSort "mp") (eq .Data.RosterOrder "ASC")}}DESC{{else}}ASC{{end}}&rosterTab={{.Data.RosterTab}}">MP{{if eq .Data.RosterSort "mp"}}{{if eq .Data.RosterOrder "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
                 </th>
                 {{end}}
                 {{if .Data.CanManage}}<th>Account</th><th>Actions</th>{{end}}

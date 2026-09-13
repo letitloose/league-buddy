@@ -491,16 +491,21 @@ func buildNoResponseRows(roster []*models.Player, rsvpsByPlayer map[int]*models.
 	return rows
 }
 
-// matchIsPast reports whether match's date is strictly before today — used
-// to close RSVPing once a match has already happened. Compared at day
-// granularity (today itself still counts as open) rather than exact
-// kickoff time, since MatchDate is a plain DATE with no time component.
-// "Now" is converted into MatchDate's own location before extracting the
-// year/month/day, rather than the server process's local location, so a
-// same-calendar-day match is never miscounted as past by a few hours of
-// UTC/local skew.
+// matchIsPast reports whether match's kickoff has already happened — once
+// true, RSVPing closes and the match view switches from RSVP lists over to
+// recording actual attendance. A match with a real kickoff time (see
+// hasMatchTime) is past as soon as "now" moves past that instant; one
+// stored with the midnight sentinel (no real time ever set, e.g. an
+// imported schedule with only a date) falls back to a day-granularity
+// cutoff, since there's no real kickoff instant to compare against.
+// "Now" is converted into MatchDate's own location before comparing,
+// rather than the server process's local location, so a match is never
+// miscounted as past by a few hours of UTC/local skew.
 func matchIsPast(match *models.Match) bool {
 	now := time.Now().In(match.MatchDate.Location())
+	if hasMatchTime(match.MatchDate) {
+		return now.After(match.MatchDate)
+	}
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, match.MatchDate.Location())
 	return match.MatchDate.Before(today)
 }

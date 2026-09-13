@@ -2425,6 +2425,47 @@ func TestMatchUpdateSavesGoalsAndCards(t *testing.T) {
 	})
 }
 
+// matchIsPast flips true the instant kickoff passes for a match with a
+// real kickoff time -- no day-granularity grace period, and no buffer
+// after kickoff either. A match stored with the midnight sentinel (no
+// real time ever set) has no kickoff instant to compare against, so it
+// falls back to the coarser day-based cutoff: today still counts as
+// upcoming, only a strictly earlier calendar date is past. No DB needed --
+// models.Match is a plain struct.
+func TestMatchIsPast(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name string
+		date time.Time
+		want bool
+	}{
+		{"an hour before kickoff is not past", now.Add(time.Hour), false},
+		{"an hour after kickoff is past", now.Add(-time.Hour), true},
+		{"a minute after kickoff is past", now.Add(-time.Minute), true},
+		{"a minute before kickoff is not past", now.Add(time.Minute), false},
+		{
+			"no real kickoff time, dated today, is not past",
+			time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()),
+			false,
+		},
+		{
+			"no real kickoff time, dated yesterday, is past",
+			time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -1),
+			true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			match := &models.Match{MatchDate: tt.date}
+			if got := matchIsPast(match); got != tt.want {
+				t.Errorf("matchIsPast(%v) = %v; want %v", tt.date, got, tt.want)
+			}
+		})
+	}
+}
+
 // A roster player on either side of a match can RSVP yes/no with an
 // optional message; resubmitting updates their existing response instead of
 // adding a duplicate; a plain active user with no roster tie to either team
@@ -2456,7 +2497,11 @@ func TestMatchRSVP(t *testing.T) {
 
 	mm := &models.MatchModel{DB: testDB}
 	matchID, err := mm.Insert(&models.Match{
-		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now(),
+		// An hour out, not merely "now" -- matchIsPast flips true the
+		// instant kickoff passes, so a match literally starting "now"
+		// would already read as past by the time this test's assertions
+		// run and RSVPing would incorrectly be closed.
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now().Add(time.Hour),
 		// Scored, though that's incidental now — the team page picks its
 		// current season by date (GetCurrentOrNext) regardless of results.
 		HomeScore: sql.NullInt32{Int32: 1, Valid: true}, AwayScore: sql.NullInt32{Int32: 0, Valid: true},
@@ -2766,7 +2811,9 @@ func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
 	mm := &models.MatchModel{DB: testDB}
 
 	t.Run("upcoming match shows both Confirmed and Not Attending to the team's own roster", func(t *testing.T) {
-		matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now()})
+		// An hour out -- matchIsPast flips true the instant kickoff
+		// passes, so "now" itself would already read as past.
+		matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now().Add(time.Hour)})
 		if err != nil {
 			t.Fatal(err)
 		}

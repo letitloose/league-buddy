@@ -131,7 +131,7 @@ func (app *application) teamHierarchyBreadcrumbs(w http.ResponseWriter, team *mo
 	}
 	rosterURL := ""
 	if len(extra) > 0 {
-		rosterURL = fmt.Sprintf("/team/%d", team.ID)
+		rosterURL = fmt.Sprintf("/team/%d?tab=roster", team.ID)
 	}
 	crumbs := append(app.teamBreadcrumbs(team, league, false), Breadcrumb{Label: "Roster", URL: rosterURL})
 	return append(crumbs, extra...), true
@@ -333,7 +333,7 @@ func (app *application) playerView(w http.ResponseWriter, r *http.Request) {
 	data.Data = profile
 	if team != nil {
 		data.Breadcrumbs = append(app.teamBreadcrumbs(team, league, false),
-			Breadcrumb{Label: "Roster", URL: fmt.Sprintf("/team/%d", team.ID)},
+			Breadcrumb{Label: "Roster", URL: fmt.Sprintf("/team/%d?tab=roster", team.ID)},
 			Breadcrumb{Label: player.FirstName + " " + player.LastName},
 		)
 	}
@@ -452,7 +452,7 @@ func (app *application) playerUpdate(w http.ResponseWriter, r *http.Request) {
 	playerLabel := player.FirstName + " " + player.LastName
 	if team != nil {
 		data.Breadcrumbs = append(app.teamBreadcrumbs(team, league, false),
-			Breadcrumb{Label: "Roster", URL: fmt.Sprintf("/team/%d", team.ID)},
+			Breadcrumb{Label: "Roster", URL: fmt.Sprintf("/team/%d?tab=roster", team.ID)},
 			Breadcrumb{Label: playerLabel, URL: fmt.Sprintf("/player/view/%d", player.ID)},
 			Breadcrumb{Label: "Edit"},
 		)

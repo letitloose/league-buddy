@@ -1568,8 +1568,8 @@ func TestLeagueAdminCanManageSeasonsAndMatches(t *testing.T) {
 		if code != http.StatusSeeOther {
 			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
 		}
-		if loc := headers.Get("Location"); loc != fmt.Sprintf("/league/1?season=%d", seasonID) {
-			t.Fatalf("want Location %q; got %q", fmt.Sprintf("/league/1?season=%d", seasonID), loc)
+		if loc := headers.Get("Location"); loc != fmt.Sprintf("/league/1?season=%d&tab=matches", seasonID) {
+			t.Fatalf("want Location %q; got %q", fmt.Sprintf("/league/1?season=%d&tab=matches", seasonID), loc)
 		}
 
 		mm := &models.MatchModel{DB: testDB}
@@ -2136,6 +2136,79 @@ func TestLeagueViewStandingsForSelectedSeason(t *testing.T) {
 	if winnerIdx < 0 || loserIdx < 0 || winnerIdx > loserIdx {
 		t.Errorf("expected the 4-1 winner ranked above the loser in this season's standings, got positions %d/%d", winnerIdx, loserIdx)
 	}
+}
+
+// A season/team breadcrumb link should return the viewer to whichever tab
+// they were actually working in, not the page's default tab -- otherwise
+// working through a stack of matches (entering scores one by one) or a
+// team's roster tools bounces back to Standings/Matches respectively on
+// every single "up a level" click. Regression test for that annoyance.
+func TestBreadcrumbsCarryTabParams(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Breadcrumb Tab League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Breadcrumb Tab Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Breadcrumb Tab Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Breadcrumb Tab Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setupTeamCaptain(t, homeTeamID, "breadcrumb-tab-captain@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "breadcrumb-tab-captain@test.com", "validpassword123")
+
+	t.Run("match view's season breadcrumb goes to the Matches tab", func(t *testing.T) {
+		_, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if !strings.Contains(body, fmt.Sprintf(`href="/league/%d?season=%d&amp;tab=matches"`, leagueID, seasonID)) {
+			t.Error("expected the season breadcrumb on the match view to link to the league page's Matches tab")
+		}
+	})
+
+	t.Run("admin match update's season breadcrumb goes to the Matches tab", func(t *testing.T) {
+		_, _, body := ts.get(t, fmt.Sprintf("/admin/match/update/%d", matchID))
+		if !strings.Contains(body, fmt.Sprintf(`href="/league/%d?season=%d&amp;tab=matches"`, leagueID, seasonID)) {
+			t.Error("expected the season breadcrumb on the match edit form to link to the league page's Matches tab")
+		}
+	})
+
+	t.Run("add match form's season breadcrumb goes to the Matches tab", func(t *testing.T) {
+		// /admin/match/create is league-admin/admin-only, unlike the match
+		// edit form above (open to a captain of either side too) -- needs
+		// its own login.
+		adminTS := newTestServer(t, app.routes())
+		adminTS.login(t, testAdminEmail, testAdminPass)
+
+		_, _, body := adminTS.get(t, fmt.Sprintf("/admin/match/create?seasonID=%d", seasonID))
+		if !strings.Contains(body, fmt.Sprintf(`href="/league/%d?season=%d&amp;tab=matches"`, leagueID, seasonID)) {
+			t.Error("expected the season breadcrumb on the add-match form to link to the league page's Matches tab")
+		}
+	})
+
+	t.Run("team invite form's team breadcrumb goes to the Roster tab", func(t *testing.T) {
+		_, _, body := ts.get(t, fmt.Sprintf("/team/%d/invite", homeTeamID))
+		if !strings.Contains(body, fmt.Sprintf(`href="/team/%d?tab=roster"`, homeTeamID)) {
+			t.Error("expected the team breadcrumb on the invite form to link to the team's Roster tab")
+		}
+	})
 }
 
 // The match view page is open to any active user, but the Edit Match link

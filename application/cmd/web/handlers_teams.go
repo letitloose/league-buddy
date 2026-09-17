@@ -20,7 +20,7 @@ import (
 // every page scoped under a team. Pass teamIsCurrent true when the team
 // itself is the page being rendered, so its crumb is left unlinked.
 func (app *application) teamBreadcrumbs(team *models.Team, league *models.League, teamIsCurrent bool) []Breadcrumb {
-	teamURL := fmt.Sprintf("/team/%d", team.ID)
+	teamURL := fmt.Sprintf("/team/%d?tab=roster", team.ID)
 	if teamIsCurrent {
 		teamURL = ""
 	}
@@ -807,7 +807,7 @@ func (app *application) renderTeamUpdateForm(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	breadcrumbs = append(breadcrumbs,
-		Breadcrumb{Label: form.Name, URL: fmt.Sprintf("/team/%d", form.ID)},
+		Breadcrumb{Label: form.Name, URL: fmt.Sprintf("/team/%d?tab=roster", form.ID)},
 		Breadcrumb{Label: "Edit"},
 	)
 	data.Breadcrumbs = breadcrumbs

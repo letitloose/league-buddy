@@ -31,7 +31,7 @@ func matchFormBreadcrumbs(season *models.Season, league *models.League) []Breadc
 	return []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},
 		{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)},
-		{Label: season.Name, URL: fmt.Sprintf("/league/%d?season=%d", league.ID, season.ID)},
+		{Label: season.Name, URL: fmt.Sprintf("/league/%d?season=%d&tab=matches", league.ID, season.ID)},
 		{Label: "Add Match"},
 	}
 }
@@ -142,7 +142,7 @@ func (app *application) matchCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.sessionManager.Put(r.Context(), "flash", "Match added.")
-	http.Redirect(w, r, fmt.Sprintf("/league/%d?season=%d", season.LeagueID, seasonID), http.StatusSeeOther)
+	http.Redirect(w, r, fmt.Sprintf("/league/%d?season=%d&tab=matches", season.LeagueID, seasonID), http.StatusSeeOther)
 }
 
 // goalFormRow/cardFormRow are match-update.html's template-friendly view of
@@ -279,7 +279,7 @@ func (app *application) renderMatchUpdateForm(w http.ResponseWriter, r *http.Req
 	data.Breadcrumbs = []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},
 		{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)},
-		{Label: season.Name, URL: fmt.Sprintf("/league/%d?season=%d", league.ID, season.ID)},
+		{Label: season.Name, URL: fmt.Sprintf("/league/%d?season=%d&tab=matches", league.ID, season.ID)},
 		{Label: fmt.Sprintf("%s vs %s", homeTeam.Name, awayTeam.Name)},
 	}
 
@@ -838,7 +838,7 @@ func matchViewBreadcrumbs(league *models.League, season *models.Season, homeTeam
 	return []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},
 		{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)},
-		{Label: season.Name, URL: fmt.Sprintf("/league/%d?season=%d", league.ID, season.ID)},
+		{Label: season.Name, URL: fmt.Sprintf("/league/%d?season=%d&tab=matches", league.ID, season.ID)},
 		{Label: fmt.Sprintf("%s vs %s", homeTeam.Name, awayTeam.Name)},
 	}
 }

@@ -366,7 +366,7 @@ func (app *application) seasonScheduleImportForm(w http.ResponseWriter, r *http.
 	data.Breadcrumbs = []Breadcrumb{
 		{Label: "Leagues", URL: "/league"},
 		{Label: league.Name, URL: fmt.Sprintf("/league/%d", league.ID)},
-		{Label: season.Name, URL: fmt.Sprintf("/league/%d?season=%d", league.ID, season.ID)},
+		{Label: season.Name, URL: fmt.Sprintf("/league/%d?season=%d&tab=matches", league.ID, season.ID)},
 		{Label: "Import Schedule"},
 	}
 

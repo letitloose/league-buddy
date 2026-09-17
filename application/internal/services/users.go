@@ -22,6 +22,8 @@ type UserForm struct {
 	Email               string `form:"email"`
 	Password            string `form:"password"`
 	ConfirmPassword     string
+	FirstName           string `form:"firstName"`
+	LastName            string `form:"lastName"`
 	InviteToken         string `form:"-"` // from ?invite= at signup, threaded through as a hidden field
 	RememberMe          bool   `form:"-"` // login-only, checkbox — see userLoginPost
 	validator.Validator `form:"-"`
@@ -103,6 +105,14 @@ func (service *UserService) insertUser(uf *UserForm, sendEmail bool) error {
 	uf.CheckField(validator.NotBlank(uf.Password), "password", "This field cannot be blank")
 	uf.CheckField(validator.MinChars(uf.Password, 8), "password", "This field must be at least 8 characters long")
 	uf.CheckField(validator.Equals(uf.Password, uf.ConfirmPassword), "confirmPassword", "Passwords must match!")
+	// Required for a real signup (sendEmail) but not internal seeding
+	// (InsertSeedUser, main.go's dev/admin-bootstrap seed) -- the site's
+	// own admin bootstrap predates this field and shouldn't start failing
+	// if its LEAGUEBUDDYFIRSTNAME/LASTNAME env vars ever go unset.
+	if sendEmail {
+		uf.CheckField(validator.NotBlank(uf.FirstName), "firstName", "This field cannot be blank")
+		uf.CheckField(validator.NotBlank(uf.LastName), "lastName", "This field cannot be blank")
+	}
 
 	if !uf.Valid() {
 		return models.ErrBadData
@@ -110,6 +120,9 @@ func (service *UserService) insertUser(uf *UserForm, sendEmail bool) error {
 
 	userID, err := service.Insert(uf.Email, uf.Password)
 	if err != nil {
+		return err
+	}
+	if err := service.UserModel.SetName(userID, uf.FirstName, uf.LastName); err != nil {
 		return err
 	}
 
@@ -401,9 +414,25 @@ func (service *UserService) linkOrCreatePlayer(userID int, email string, invite 
 			return err
 		}
 	} else if errors.Is(err, models.ErrNoRecord) {
+		// Prefer the name captured at signup (see UserForm.FirstName/
+		// LastName and SetName) over the generic placeholder -- falls
+		// back to it only for an account that skipped that (created
+		// before this field existed, or a seed/test fixture that never
+		// set one).
+		firstName, lastName := models.PlaceholderFirstName, models.PlaceholderLastName
+		if signupUser, nerr := service.GetUser(userID); nerr == nil {
+			if signupUser.FirstName.Valid {
+				firstName = signupUser.FirstName.String
+			}
+			if signupUser.LastName.Valid {
+				lastName = signupUser.LastName.String
+			}
+		} else if !errors.Is(nerr, models.ErrNoRecord) {
+			return nerr
+		}
 		newPlayer := &models.Player{
-			FirstName: models.PlaceholderFirstName,
-			LastName:  models.PlaceholderLastName,
+			FirstName: firstName,
+			LastName:  lastName,
 			Email:     sql.NullString{String: email, Valid: true},
 		}
 		playerID, err := pm.Insert(newPlayer)

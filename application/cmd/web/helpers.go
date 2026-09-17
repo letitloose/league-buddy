@@ -29,6 +29,18 @@ func (app *application) newTemplateData(r *http.Request) *templateData {
 		SMSFeatureEnabled: app.smsFeatureEnabled(),
 	}
 
+	if app.isActive(r) {
+		userID := app.sessionManager.GetInt(r.Context(), "authenticatedUserID")
+		tfm := &models.TeamFanModel{DB: app.playerService.DB}
+		if followedTeams, err := tfm.GetFollowedTeams(userID); err == nil {
+			for _, team := range followedTeams {
+				data.MyFollowedTeams = append(data.MyFollowedTeams, NavTeamInfo{ID: team.ID, Name: team.Name})
+			}
+		} else {
+			app.errorLog.Println(err)
+		}
+	}
+
 	if playerID := app.getPlayerID(r); app.isActive(r) && playerID > 0 {
 		tmm := &models.TeamMemberModel{DB: app.playerService.DB}
 		if teams, err := tmm.GetTeamsForPlayer(playerID); err == nil {

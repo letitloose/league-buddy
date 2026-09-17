@@ -55,6 +55,11 @@ type templateData struct {
 	// all with leagues their own team competes in).
 	MyLeagues         []NavLeagueInfo
 	MyAdminLeagues    []NavLeagueInfo
+	// MyFollowedTeams is every team this account follows as a fan (see
+	// TeamFanModel) — the nav's "Following" dropdown, populated for any
+	// active account regardless of PlayerID (a person can be a player on
+	// some teams and a fan of others at once).
+	MyFollowedTeams   []NavTeamInfo
 	CSRFToken         string
 	Breadcrumbs       []Breadcrumb
 	NextURL           string

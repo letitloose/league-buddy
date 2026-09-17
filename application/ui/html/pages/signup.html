@@ -11,8 +11,30 @@
                 <p class="error-message-big">{{.}}</p>
             {{end}}
             <div class="mb-4">
-                <label class="field-label" for="email">Email</label>
+                <label class="field-label">First Name</label>
                 {{$errorClass := ""}}
+                {{if .Form.FieldErrors.firstName }}
+                    {{$errorClass = "error-border"}}
+                {{end}}
+                <input class="form-field {{$errorClass}}" type='text' name='firstName' value='{{.Form.FirstName}}' required>
+                {{with .Form.FieldErrors.firstName}}
+                    <p class="error-message">{{.}}</p>
+                {{end}}
+            </div>
+            <div class="mb-4">
+                <label class="field-label">Last Name</label>
+                {{$errorClass = ""}}
+                {{if .Form.FieldErrors.lastName }}
+                    {{$errorClass = "error-border"}}
+                {{end}}
+                <input class="form-field {{$errorClass}}" type='text' name='lastName' value='{{.Form.LastName}}' required>
+                {{with .Form.FieldErrors.lastName}}
+                    <p class="error-message">{{.}}</p>
+                {{end}}
+            </div>
+            <div class="mb-4">
+                <label class="field-label" for="email">Email</label>
+                {{$errorClass = ""}}
                 {{if .Form.FieldErrors.email }}
                     {{$errorClass = "error-border"}}
                 {{end}}

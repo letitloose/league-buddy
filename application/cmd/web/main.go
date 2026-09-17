@@ -296,7 +296,10 @@ func (app *application) reset() error {
 		app.errorLog.Println(err)
 	}
 
-	uf := &services.UserForm{Email: leagueBuddyUser, Password: leagueBuddyPassword, ConfirmPassword: leagueBuddyPassword}
+	uf := &services.UserForm{
+		Email: leagueBuddyUser, Password: leagueBuddyPassword, ConfirmPassword: leagueBuddyPassword,
+		FirstName: os.Getenv("LEAGUEBUDDYFIRSTNAME"), LastName: os.Getenv("LEAGUEBUDDYLASTNAME"),
+	}
 	err = app.userService.InsertSeedUser(uf)
 	if err != nil {
 		app.errorLog.Println(err)
@@ -391,7 +394,7 @@ func (app *application) seedRoleUser(firstName, lastName, email, password string
 		return err
 	}
 
-	uf := &services.UserForm{Email: email, Password: password, ConfirmPassword: password}
+	uf := &services.UserForm{Email: email, Password: password, ConfirmPassword: password, FirstName: firstName, LastName: lastName}
 	if err := app.userService.InsertSeedUser(uf); err != nil {
 		return err
 	}

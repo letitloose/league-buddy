@@ -903,6 +903,8 @@ func TestInviteSignupAutoJoinsTeam(t *testing.T) {
 		"email":           {"invited-signup@test.com"},
 		"password":        {"validpassword123"},
 		"confirmPassword": {"validpassword123"},
+		"firstName":       {"Invited"},
+		"lastName":        {"Signup"},
 		"inviteToken":     {"route-test-invite-token"},
 		"csrf_token":      {csrfToken},
 	})
@@ -944,6 +946,35 @@ func TestInviteSignupAutoJoinsTeam(t *testing.T) {
 	}
 	if !invite.UsedAt.Valid {
 		t.Fatal("expected invite to be marked used")
+	}
+}
+
+// Signup requires a first and last name, for both a plain player-track
+// signup and a fan-track (invite) one -- the site owner wanted these
+// captured up front rather than left as generic placeholders.
+func TestUserSignupRequiresFirstAndLastName(t *testing.T) {
+	app := newTestApplication(t)
+	ts := newTestServer(t, app.routes())
+
+	_, _, body := ts.get(t, "/user/signup")
+	csrfToken := extractCSRFToken(t, body)
+
+	code, _, body := ts.postForm(t, "/user/signup", url.Values{
+		"email":           {"missing-name-signup@test.com"},
+		"password":        {"validpassword123"},
+		"confirmPassword": {"validpassword123"},
+		"csrf_token":      {csrfToken},
+	})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("want %d; got %d", http.StatusUnprocessableEntity, code)
+	}
+	if !strings.Contains(body, "firstName") && !strings.Contains(body, "This field cannot be blank") {
+		t.Error("expected a field error for the missing name")
+	}
+
+	um := &models.UserModel{DB: testDB}
+	if _, err := um.GetUserByEmail("missing-name-signup@test.com"); err != models.ErrNoRecord {
+		t.Fatalf("expected no user to have been created, got %v", err)
 	}
 }
 
@@ -1432,6 +1463,8 @@ func TestCanceledInviteSignupDoesNotAutoJoin(t *testing.T) {
 		"email":           {"canceled-invite-signup@test.com"},
 		"password":        {"validpassword123"},
 		"confirmPassword": {"validpassword123"},
+		"firstName":       {"Canceled"},
+		"lastName":        {"Signup"},
 		"inviteToken":     {"canceled-signup-token"},
 		"csrf_token":      {csrfToken},
 	})
@@ -5705,8 +5738,21 @@ func TestTeamFansTab(t *testing.T) {
 	if err := tfm.Follow(fanUserID, teamID); err != nil {
 		t.Fatal(err)
 	}
+	if err := um.SetName(fanUserID, "Fan", "Tabtester"); err != nil {
+		t.Fatal(err)
+	}
 
-	t.Run("the captain sees the fan's email and a Remove action", func(t *testing.T) {
+	// A second fan with no name set -- the list falls back to email for
+	// them, while the named fan above shows their name instead.
+	unnamedFanUserID, err := um.Insert("fans-tab-unnamed@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tfm.Follow(unnamedFanUserID, teamID); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("the captain sees the fan's name (falling back to email), and a Remove action", func(t *testing.T) {
 		ts := newTestServer(t, app.routes())
 		ts.login(t, "fans-tab-captain@test.com", "validpassword123")
 
@@ -5714,11 +5760,17 @@ func TestTeamFansTab(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
-		if !strings.Contains(body, "1 fan following this team") {
+		if !strings.Contains(body, "2 fans following this team") {
 			t.Error("expected the fan count to show")
 		}
-		if !strings.Contains(body, "fans-tab-fan@test.com") {
-			t.Error("expected the captain to see the fan's email")
+		if !strings.Contains(body, "Fan Tabtester") {
+			t.Error("expected the captain to see the named fan's name instead of their email")
+		}
+		if strings.Contains(body, "<td>fans-tab-fan@test.com</td>") {
+			t.Error("expected the named fan's email not to show once they have a name")
+		}
+		if !strings.Contains(body, "fans-tab-unnamed@test.com") {
+			t.Error("expected the nameless fan's row to fall back to their email")
 		}
 		if !strings.Contains(body, fmt.Sprintf(`data-delete-url="/team/%d/fan/%d/remove"`, teamID, fanUserID)) {
 			t.Error("expected a Remove action for the captain")
@@ -5790,6 +5842,81 @@ func TestTeamFanRemoveAllowedForCaptain(t *testing.T) {
 	}
 }
 
+// A sys admin can fix up a Fan account's name (no linked Player to edit
+// it via instead) from the admin user-view page.
+func TestAdminUpdateFanName(t *testing.T) {
+	app := newTestApplication(t)
+
+	um := &models.UserModel{DB: testDB}
+	fanUserID, err := um.Insert("admin-name-fix@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.Activate(fanUserID); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testAdminEmail, testAdminPass)
+
+	_, _, body := ts.get(t, fmt.Sprintf("/user/view/%d", fanUserID))
+	if !strings.Contains(body, "(not set)") {
+		t.Error("expected the name to show as not set before it's edited")
+	}
+	csrfToken := extractCSRFToken(t, body)
+
+	code, headers, _ := ts.postForm(t, fmt.Sprintf("/admin/user/%d/updateName", fanUserID), url.Values{
+		"firstName":  {"Fixed"},
+		"lastName":   {"Name"},
+		"csrf_token": {csrfToken},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+	if loc := headers.Get("Location"); loc != fmt.Sprintf("/user/view/%d", fanUserID) {
+		t.Errorf("want Location %q; got %q", fmt.Sprintf("/user/view/%d", fanUserID), loc)
+	}
+
+	_, _, body = ts.get(t, fmt.Sprintf("/user/view/%d", fanUserID))
+	if !strings.Contains(body, "Fixed Name") {
+		t.Error("expected the updated name to show")
+	}
+}
+
+// A non-admin can't reach the admin name-fix route.
+func TestAdminUpdateFanNameRequiresAdmin(t *testing.T) {
+	app := newTestApplication(t)
+
+	um := &models.UserModel{DB: testDB}
+	fanUserID, err := um.Insert("admin-name-fix-protected@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	_, _, body := ts.get(t, "/")
+	csrfToken := extractCSRFToken(t, body)
+
+	code, _, _ := ts.postForm(t, fmt.Sprintf("/admin/user/%d/updateName", fanUserID), url.Values{
+		"firstName":  {"Should"},
+		"lastName":   {"Fail"},
+		"csrf_token": {csrfToken},
+	})
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+
+	user, err := um.GetUser(fanUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.FirstName.Valid {
+		t.Fatal("expected the name to remain unset for a non-admin's request")
+	}
+}
+
 // The home page's "Teams You Follow" section shows a fan's followed
 // team(s) with an Unfollow control, mirroring "My Teams" for players.
 func TestHomeShowsFollowedTeams(t *testing.T) {
@@ -5835,6 +5962,25 @@ func TestHomeShowsFollowedTeams(t *testing.T) {
 	if !strings.Contains(body, fmt.Sprintf(`action="/team/%d/unfollow"`, teamID)) {
 		t.Error("expected an Unfollow control for the followed team")
 	}
+	if !strings.Contains(body, ">Following<") {
+		t.Error("expected the nav's Following dropdown to appear")
+	}
+	if !strings.Contains(body, fmt.Sprintf(`href="/team/%d">Home Fan Team</a>`, teamID)) {
+		t.Error("expected the followed team to be linked from the nav's Following dropdown")
+	}
+
+	t.Run("a non-fan sees no Following dropdown", func(t *testing.T) {
+		ts2 := newTestServer(t, app.routes())
+		ts2.login(t, testActiveEmail, testActivePass)
+
+		code, _, body := ts2.get(t, "/")
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if strings.Contains(body, ">Following<") {
+			t.Error("expected no Following dropdown for an account that follows no teams")
+		}
+	})
 }
 
 func TestMatchScreenBoxVisibilityBeforeResult(t *testing.T) {

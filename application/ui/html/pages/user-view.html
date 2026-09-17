@@ -12,10 +12,23 @@
             {{if .PlayerID.Valid}}
             <span class="text-right font-semibold">Player Profile:</span>
             <span><a href="/player/view/{{.PlayerID.Int32}}">{{.PlayerName.String}}</a></span>
+            {{else}}
+            <span class="text-right font-semibold">Name:</span>
+            <span>{{if .FirstName.Valid}}{{.FirstName.String}} {{.LastName.String}}{{else}}<span class="text-gray-400">(not set)</span>{{end}}</span>
             {{end}}
             <span class="text-right font-semibold">Sign-up Date:</span>
             <span>{{humanDate .Created}}</span>
         </div>
+        {{if not .PlayerID.Valid}}
+        <form action="/admin/user/{{.UserID}}/updateName" method="POST" class="mt-4 text-left max-w-xs mx-auto">
+            <input type='hidden' name='csrf_token' value='{{$.CSRFToken}}'>
+            <label class="field-label">First Name</label>
+            <input class="form-field" type="text" name="firstName" value="{{.FirstName.String}}" required>
+            <label class="field-label mt-2">Last Name</label>
+            <input class="form-field" type="text" name="lastName" value="{{.LastName.String}}" required>
+            <div class="mt-2 text-center"><input class="btn-secondary m-0" type="submit" value="Save Name"></div>
+        </form>
+        {{end}}
         <div class="flex justify-center items-center gap-4 mt-4">
             <label class="field-label">Active
                 <input type="checkbox" class="ml-1" value="{{.Active}}" data-toggle-url="/user/toggleActive" data-user-id="{{.UserID}}">

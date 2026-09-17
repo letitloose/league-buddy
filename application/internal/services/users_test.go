@@ -13,7 +13,7 @@ func TestInsertUser(t *testing.T) {
 	users := &models.UserModel{DB: db}
 	userService := UserService{UserModel: users} // Email left nil: signup must not require it
 
-	form := &UserForm{Email: "new-signup@example.com", Password: "validpassword123", ConfirmPassword: "validpassword123"}
+	form := &UserForm{Email: "new-signup@example.com", Password: "validpassword123", ConfirmPassword: "validpassword123", FirstName: "New", LastName: "Signup"}
 	if err := userService.InsertUser(form); err != nil {
 		t.Fatal(err)
 	}
@@ -64,13 +64,18 @@ func TestInsertUserBadData(t *testing.T) {
 	}
 }
 
+// A brand-new signup's placeholder player takes the real name captured at
+// signup (see UserForm.FirstName/LastName and SetName) rather than the
+// generic PlaceholderFirstName/LastName -- a captain no longer has to
+// manually rename an auto-created placeholder just because it was never
+// pre-added to the roster with a real name.
 func TestActivateUserCreatesPlaceholderPlayer(t *testing.T) {
 	db := models.NewTestDB(t)
 
 	users := &models.UserModel{DB: db}
 	userService := UserService{UserModel: users}
 
-	form := &UserForm{Email: "activate-me@example.com", Password: "validpassword123", ConfirmPassword: "validpassword123"}
+	form := &UserForm{Email: "activate-me@example.com", Password: "validpassword123", ConfirmPassword: "validpassword123", FirstName: "Activate", LastName: "Me"}
 	if err := userService.InsertUser(form); err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +99,15 @@ func TestActivateUserCreatesPlaceholderPlayer(t *testing.T) {
 	if !user.PlayerID.Valid {
 		t.Fatal("expected a placeholder player to have been linked")
 	}
+
+	pm := &models.PlayerModel{DB: db}
+	player, err := pm.Get(int(user.PlayerID.Int32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if player.FirstName != "Activate" || player.LastName != "Me" {
+		t.Fatalf("expected the placeholder player to use the signup name, got %q %q", player.FirstName, player.LastName)
+	}
 }
 
 func TestActivateUserLinksExistingPlayerByEmail(t *testing.T) {
@@ -112,7 +126,7 @@ func TestActivateUserLinksExistingPlayerByEmail(t *testing.T) {
 	users := &models.UserModel{DB: db}
 	userService := UserService{UserModel: users}
 
-	form := &UserForm{Email: "pre-added@example.com", Password: "validpassword123", ConfirmPassword: "validpassword123"}
+	form := &UserForm{Email: "pre-added@example.com", Password: "validpassword123", ConfirmPassword: "validpassword123", FirstName: "Pre", LastName: "Added"}
 	if err := userService.InsertUser(form); err != nil {
 		t.Fatal(err)
 	}
@@ -166,6 +180,8 @@ func TestActivateUserWithInviteAutoJoinsTeam(t *testing.T) {
 		Email:           "invitee@example.com",
 		Password:        "validpassword123",
 		ConfirmPassword: "validpassword123",
+		FirstName:       "Invitee",
+		LastName:        "Person",
 		InviteToken:     "test-invite-token",
 	}
 	if err := userService.InsertUser(form); err != nil {
@@ -257,6 +273,8 @@ func TestActivateUserWithFanInviteFollowsTeamNoPlayer(t *testing.T) {
 		Email:           "fan-invitee@example.com",
 		Password:        "validpassword123",
 		ConfirmPassword: "validpassword123",
+		FirstName:       "Fan",
+		LastName:        "Invitee",
 		InviteToken:     "test-fan-invite-token",
 	}
 	if err := userService.InsertUser(form); err != nil {
@@ -343,6 +361,8 @@ func TestActivateUserFulfillsInviteByEmailWithoutToken(t *testing.T) {
 		Email:           "invitee-no-token@example.com",
 		Password:        "validpassword123",
 		ConfirmPassword: "validpassword123",
+		FirstName:       "NoToken",
+		LastName:        "Invitee",
 	}
 	if err := userService.InsertUser(form); err != nil {
 		t.Fatal(err)
@@ -441,6 +461,8 @@ func TestActivateUserWithInviteClaimsPlaceholderByInviteEmailNotSignupEmail(t *t
 		Email:           "new-personal-email@example.com",
 		Password:        "validpassword123",
 		ConfirmPassword: "validpassword123",
+		FirstName:       "New",
+		LastName:        "Personal",
 		InviteToken:     "mismatched-email-token",
 	}
 	if err := userService.InsertUser(form); err != nil {
@@ -533,6 +555,8 @@ func TestActivateUserWithCaptainInviteSetsCaptain(t *testing.T) {
 		Email:           "new-captain@example.com",
 		Password:        "validpassword123",
 		ConfirmPassword: "validpassword123",
+		FirstName:       "New",
+		LastName:        "Captain",
 		InviteToken:     "captain-invite-token",
 	}
 	if err := userService.InsertUser(form); err != nil {
@@ -615,6 +639,8 @@ func TestActivateUserWithInviteSkipsAutoJoinOnLeagueConflict(t *testing.T) {
 		Email:           "conflict@example.com",
 		Password:        "validpassword123",
 		ConfirmPassword: "validpassword123",
+		FirstName:       "Conflict",
+		LastName:        "Person",
 		InviteToken:     "conflict-invite-token",
 	}
 	if err := userService.InsertUser(form); err != nil {

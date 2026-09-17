@@ -165,6 +165,12 @@ func (app *application) routes() http.Handler {
 	admin := dynamic.Append(app.requireAdmin)
 	router.Handler(http.MethodGet, "/user/search", admin.ThenFunc(app.userSearch))
 	router.Handler(http.MethodGet, "/user/view/:id", admin.ThenFunc(app.userView))
+	// Under /admin/... rather than /user/:id/updateName -- every other POST
+	// under /user/... (signup, login, toggleActive, etc.) is a static
+	// second segment, and httprouter panics at startup if a wildcard
+	// (:id) shares that same depth with them (same conflict class as the
+	// /admin/league/... comment below).
+	router.Handler(http.MethodPost, "/admin/user/:id/updateName", admin.ThenFunc(app.userUpdateName))
 	router.Handler(http.MethodPost, "/user/toggleActive", admin.ThenFunc(app.toggleActive))
 	router.Handler(http.MethodPost, "/user/toggleAdmin", admin.ThenFunc(app.toggleAdmin))
 	router.Handler(http.MethodDelete, "/user/delete/:id", admin.ThenFunc(app.deleteUser))

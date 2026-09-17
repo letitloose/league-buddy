@@ -40,6 +40,16 @@
                             </div>
                         </div>
                     {{end}}
+                    {{if .MyFollowedTeams}}
+                        <div class="dropdown text-brand-ink hover:text-pitch-600 mr-4">
+                            <button class="dropbtn">Following</button>
+                            <div class="dropdown-content">
+                                {{range .MyFollowedTeams}}
+                                    <a href="/team/{{.ID}}">{{.Name}}</a>
+                                {{end}}
+                            </div>
+                        </div>
+                    {{end}}
                 {{end}}
             </div>
         </div>
@@ -99,6 +109,9 @@
             {{end}}
             {{range .MyAdminLeagues}}
                 <a href="/league/{{.ID}}" class="block px-4 py-2 text-brand-ink">{{.Name}} (Admin)</a>
+            {{end}}
+            {{range .MyFollowedTeams}}
+                <a href="/team/{{.ID}}" class="block px-4 py-2 text-brand-ink">{{.Name}} (Following)</a>
             {{end}}
         {{end}}
         {{if .IsAdmin}}

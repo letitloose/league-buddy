@@ -31,6 +31,12 @@ type User struct {
 	IsAdmin          bool
 	VerificationHash []byte
 	PendingInviteID  sql.NullInt32
+	// FirstName/LastName are captured at signup and are this account's
+	// only name once linked to a Player, whose own firstname/lastname
+	// take over everywhere a name is shown (see GetAuthContext's
+	// UserName and SetName's doc comment).
+	FirstName sql.NullString
+	LastName  sql.NullString
 }
 
 type UserModel struct {
@@ -81,6 +87,28 @@ func (m *UserModel) Insert(email, password string) (int, error) {
 	}
 
 	return int(id), nil
+}
+
+// SetName stores userID's first/last name, captured at signup (see
+// UserService.insertUser). It's this account's only name unless/until a
+// Player gets linked (see linkOrCreatePlayer) -- GetAuthContext's UserName
+// and every other "show a name" query below prefer the Player's own
+// firstname/lastname first, falling back to this. A blank firstName or
+// lastName is stored as SQL NULL rather than an empty string, so an
+// account that skipped this (any account created before this field
+// existed, or a seed/test fixture that never set one) falls through to
+// the next name source in COALESCE chains instead of showing a blank.
+func (m *UserModel) SetName(userID int, firstName, lastName string) error {
+	var fn, ln sql.NullString
+	if firstName != "" {
+		fn = sql.NullString{String: firstName, Valid: true}
+	}
+	if lastName != "" {
+		ln = sql.NullString{String: lastName, Valid: true}
+	}
+	statement := `update users set firstName = ?, lastName = ? where id = ?`
+	_, err := m.DB.Exec(statement, fn, ln, userID)
+	return err
 }
 
 // Delete removes userID's account. fk_invites_createdby is NOT NULL, so an
@@ -135,13 +163,15 @@ func (m *UserModel) GetUser(id int) (*User, error) {
 				u.active,
 				exists(Select 1 from userRole ur where ur.userID = u.id and ur.roleID = "ADMIN") as isAdmin,
 				verification_hash,
-				u.pendingInviteID
+				u.pendingInviteID,
+				u.firstName,
+				u.lastName
 			from users u
 			left join players p on p.id = u.playerID
 			where u.id = ?;`
 
 	user := &User{}
-	err := m.DB.QueryRow(stmt, id).Scan(&user.UserID, &user.PlayerID, &user.PlayerName, &user.Email, &user.Created, &user.LastLogin, &user.Active, &user.IsAdmin, &user.VerificationHash, &user.PendingInviteID)
+	err := m.DB.QueryRow(stmt, id).Scan(&user.UserID, &user.PlayerID, &user.PlayerName, &user.Email, &user.Created, &user.LastLogin, &user.Active, &user.IsAdmin, &user.VerificationHash, &user.PendingInviteID, &user.FirstName, &user.LastName)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -190,13 +220,15 @@ func (m *UserModel) GetByFanCalendarToken(token string) (*User, error) {
 				u.active,
 				exists(Select 1 from userRole ur where ur.userID = u.id and ur.roleID = "ADMIN") as isAdmin,
 				verification_hash,
-				u.pendingInviteID
+				u.pendingInviteID,
+				u.firstName,
+				u.lastName
 			from users u
 			left join players p on p.id = u.playerID
 			where u.fanCalendarToken = ?;`
 
 	user := &User{}
-	err := m.DB.QueryRow(stmt, token).Scan(&user.UserID, &user.PlayerID, &user.PlayerName, &user.Email, &user.Created, &user.LastLogin, &user.Active, &user.IsAdmin, &user.VerificationHash, &user.PendingInviteID)
+	err := m.DB.QueryRow(stmt, token).Scan(&user.UserID, &user.PlayerID, &user.PlayerName, &user.Email, &user.Created, &user.LastLogin, &user.Active, &user.IsAdmin, &user.VerificationHash, &user.PendingInviteID, &user.FirstName, &user.LastName)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -215,13 +247,15 @@ func (m *UserModel) GetUserByEmail(email string) (*User, error) {
 				u.created,
 				u.lastlogin,
 				u.active,
-				exists(Select 1 from userRole ur where ur.userID = u.id and ur.roleID = "ADMIN") as isAdmin
+				exists(Select 1 from userRole ur where ur.userID = u.id and ur.roleID = "ADMIN") as isAdmin,
+				u.firstName,
+				u.lastName
 			from users u
 			left join players p on p.id = u.playerID
 			where u.email = ?;`
 
 	user := &User{}
-	err := m.DB.QueryRow(stmt, email).Scan(&user.UserID, &user.PlayerID, &user.PlayerName, &user.Email, &user.Created, &user.LastLogin, &user.Active, &user.IsAdmin)
+	err := m.DB.QueryRow(stmt, email).Scan(&user.UserID, &user.PlayerID, &user.PlayerName, &user.Email, &user.Created, &user.LastLogin, &user.Active, &user.IsAdmin, &user.FirstName, &user.LastName)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoRecord
@@ -324,7 +358,7 @@ func (m *UserModel) GetAuthContext(id int) (*AuthContext, error) {
 		u.active,
 		EXISTS(SELECT 1 FROM userRole WHERE userID = u.id AND roleID = 'ADMIN'),
 		p.id,
-		COALESCE(CONCAT(p.firstname, ' ', p.lastname), u.email)
+		COALESCE(CONCAT(p.firstname, ' ', p.lastname), CONCAT(u.firstName, ' ', u.lastName), u.email)
 	FROM users u
 	LEFT JOIN players p ON p.id = u.playerID
 	WHERE u.id = ?`

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -130,6 +131,8 @@ func (app *application) userSignupPost(w http.ResponseWriter, r *http.Request) {
 		Email:           r.PostForm.Get("email"),
 		Password:        r.PostForm.Get("password"),
 		ConfirmPassword: r.PostForm.Get("confirmPassword"),
+		FirstName:       r.PostForm.Get("firstName"),
+		LastName:        r.PostForm.Get("lastName"),
 		InviteToken:     r.PostForm.Get("inviteToken"),
 	}
 
@@ -480,4 +483,37 @@ func (app *application) userView(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.render(w, http.StatusOK, "user-view.html", data)
+}
+
+// userUpdateName lets an admin fix up an account's first/last name --
+// mainly for a Fan (no linked Player, so there's no player-edit page to
+// fix a typo'd or missing name on instead) but works for any account.
+func (app *application) userUpdateName(w http.ResponseWriter, r *http.Request) {
+	params := httprouter.ParamsFromContext(r.Context())
+	id, err := strconv.Atoi(params.ByName("id"))
+	if err != nil || id < 1 {
+		http.NotFound(w, r)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	firstName := r.PostForm.Get("firstName")
+	lastName := r.PostForm.Get("lastName")
+	if firstName == "" || lastName == "" {
+		app.sessionManager.Put(r.Context(), "flash", "First and last name can't be blank.")
+		http.Redirect(w, r, fmt.Sprintf("/user/view/%d", id), http.StatusSeeOther)
+		return
+	}
+
+	if err := app.userService.SetName(id, firstName, lastName); err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", "Name updated.")
+	http.Redirect(w, r, fmt.Sprintf("/user/view/%d", id), http.StatusSeeOther)
 }

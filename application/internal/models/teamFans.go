@@ -21,10 +21,13 @@ type TeamFan struct {
 }
 
 // FanListRow is one row of a team's fan list — just enough for the
-// manager-facing "Fans (N)" panel on team-view.html.
+// manager-facing "Fans (N)" panel on team-view.html. Name is blank for a
+// fan who signed up before first/last name was captured at signup (see
+// UserModel.SetName) — the template falls back to Email for those.
 type FanListRow struct {
 	UserID     int
 	Email      string
+	Name       string
 	FollowedAt time.Time
 }
 
@@ -101,7 +104,7 @@ func (m *TeamFanModel) GetFollowedTeams(userID int) ([]*Team, error) {
 // ListFansForTeam returns every fan of teamID, most-recently-followed
 // first, for the manager-facing "Fans (N)" panel.
 func (m *TeamFanModel) ListFansForTeam(teamID int) ([]*FanListRow, error) {
-	stmt := `SELECT u.id, u.email, tf.followedAt
+	stmt := `SELECT u.id, u.email, COALESCE(CONCAT(u.firstName, ' ', u.lastName), ''), tf.followedAt
 		FROM teamFans tf
 		JOIN users u ON u.id = tf.userID
 		WHERE tf.teamID = ?
@@ -116,7 +119,7 @@ func (m *TeamFanModel) ListFansForTeam(teamID int) ([]*FanListRow, error) {
 	fans := []*FanListRow{}
 	for rows.Next() {
 		fan := &FanListRow{}
-		if err := rows.Scan(&fan.UserID, &fan.Email, &fan.FollowedAt); err != nil {
+		if err := rows.Scan(&fan.UserID, &fan.Email, &fan.Name, &fan.FollowedAt); err != nil {
 			return nil, err
 		}
 		fans = append(fans, fan)

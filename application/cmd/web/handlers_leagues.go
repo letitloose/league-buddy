@@ -163,6 +163,9 @@ func buildStandings(db *sql.DB, teams []*models.Team, seasonID int) ([]*standing
 
 // sortStandings sorts rows in place by sortKey (validated against
 // validStandingsSortKeys by the caller), descending unless dir is "asc".
+// The default points sort breaks ties on goal difference (GF - GA), the
+// standard secondary standings criterion -- ties on any other column just
+// keep their prior relative order (SliceStable).
 func sortStandings(rows []*standingRow, sortKey, dir string) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		var a, b int
@@ -180,10 +183,21 @@ func sortStandings(rows []*standingRow, sortKey, dir string) {
 		default:
 			a, b = rows[i].Points, rows[j].Points
 		}
-		if dir == "asc" {
-			return a < b
+		if a != b {
+			if dir == "asc" {
+				return a < b
+			}
+			return a > b
 		}
-		return a > b
+		if sortKey != "points" && sortKey != "" {
+			return false
+		}
+		diffA := rows[i].GoalsFor - rows[i].GoalsAgainst
+		diffB := rows[j].GoalsFor - rows[j].GoalsAgainst
+		if dir == "asc" {
+			return diffA < diffB
+		}
+		return diffA > diffB
 	})
 }
 

@@ -1754,6 +1754,25 @@ func TestTeamAndHomeRenderWithoutSeason(t *testing.T) {
 // by that column instead. Goals-against ranks these three teams in a
 // different order than points does, by construction, so the two page
 // renders are checked against two different expected orderings.
+// The default points sort breaks ties on goal difference (GF - GA) --
+// the standard secondary standings criterion -- rather than leaving
+// tied teams in whatever order they happened to come back from the DB
+// in. No DB needed -- standingRow is a plain struct.
+func TestSortStandingsPointsTiebreakOnGoalDifference(t *testing.T) {
+	rows := []*standingRow{
+		{TeamID: 1, TeamName: "Worse Goal Difference", Points: 6, GoalsFor: 4, GoalsAgainst: 4},
+		{TeamID: 2, TeamName: "Better Goal Difference", Points: 6, GoalsFor: 10, GoalsAgainst: 2},
+		{TeamID: 3, TeamName: "Fewer Points", Points: 3, GoalsFor: 20, GoalsAgainst: 0},
+	}
+
+	sortStandings(rows, "points", "desc")
+
+	if rows[0].TeamID != 2 || rows[1].TeamID != 1 || rows[2].TeamID != 3 {
+		t.Fatalf("expected order [2, 1, 3] (points desc, ties broken by goal difference desc), got [%d, %d, %d]",
+			rows[0].TeamID, rows[1].TeamID, rows[2].TeamID)
+	}
+}
+
 func TestLeagueStandingsSortingAndLeaderTables(t *testing.T) {
 	app := newTestApplication(t)
 
@@ -1875,6 +1894,69 @@ func TestLeagueStandingsSortingAndLeaderTables(t *testing.T) {
 			t.Error("expected the seeded scorer/assister to appear in the leader tables")
 		}
 	})
+}
+
+// Two teams tied on points fall back to goal difference on the league
+// page's default (points) standings sort, end to end through the real
+// route -- not just the sortStandings unit test above.
+func TestLeagueStandingsPointsTiebreakEndToEnd(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Standings Tiebreak League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamA, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Tiebreak Big Margin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamB, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Tiebreak Small Margin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Standings Tiebreak Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mm := &models.MatchModel{DB: testDB}
+	// Both teams win once and lose once against unrelated opponents, so
+	// both sit at 3 points -- but A's win was by a wider margin, giving it
+	// the better goal difference (+4 vs +1).
+	opponent1, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Tiebreak Opponent 1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opponent2, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Tiebreak Opponent 2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamA, AwayTeamID: opponent1, MatchDate: time.Now(),
+		HomeScore: sql.NullInt32{Int32: 5, Valid: true}, AwayScore: sql.NullInt32{Int32: 1, Valid: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamB, AwayTeamID: opponent2, MatchDate: time.Now(),
+		HomeScore: sql.NullInt32{Int32: 2, Valid: true}, AwayScore: sql.NullInt32{Int32: 1, Valid: true}}); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	code, _, body := ts.get(t, fmt.Sprintf("/league/%d", leagueID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	posA, posB := strings.Index(body, "Tiebreak Big Margin"), strings.Index(body, "Tiebreak Small Margin")
+	if posA < 0 || posB < 0 {
+		t.Fatalf("expected both tied teams in the standings table, got positions %d/%d", posA, posB)
+	}
+	if !(posA < posB) {
+		t.Fatalf("expected the better goal difference (Big Margin) to rank above the tied team with the worse one; got positions %d/%d", posA, posB)
+	}
 }
 
 // The league page's Matches tab groups a season's matches into per-day

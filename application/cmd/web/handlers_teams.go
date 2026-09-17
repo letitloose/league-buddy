@@ -447,12 +447,13 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// IsRosterMember gates the "Invite a Fan" action (see
-	// canSendFanInvite) — any roster player, not just a manager. IsFan is
+	// canSendFanInvite) and, along with CanManage, who gets the actual
+	// fan list below — any roster player, not just a manager. IsFan is
 	// for a viewer with no player at all (a Fan can't also be on the
 	// roster). FanCount is public (shown on the Fans tab to anyone, same
-	// as the roster's own headline counts); Fans (the actual email list)
-	// is only queried for a manager, mirroring hasAccount/isScorekeeper's
-	// "only fetch this for managers" pattern.
+	// as the roster's own headline counts); Fans (the list itself) is
+	// queried for anyone who can see it, but only a manager gets the
+	// Remove action in the template.
 	isRosterMember := app.getPlayerID(r) > 0 && app.isMemberOfTeam(r, team.ID)
 	tfm := &models.TeamFanModel{DB: app.playerService.DB}
 	isFan := false
@@ -469,7 +470,7 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var fans []*models.FanListRow
-	if canManage {
+	if canManage || isRosterMember {
 		fans, err = tfm.ListFansForTeam(team.ID)
 		if err != nil {
 			app.serverError(w, err)

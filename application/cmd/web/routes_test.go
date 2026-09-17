@@ -5867,6 +5867,24 @@ func TestTeamFansTab(t *testing.T) {
 			t.Error("expected a non-manager not to see the fan email list")
 		}
 	})
+
+	t.Run("a plain roster member sees the fan names but no Remove action", func(t *testing.T) {
+		setupRosterMember(t, teamID, "fans-tab-rostermember@test.com", "validpassword123")
+
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "fans-tab-rostermember@test.com", "validpassword123")
+
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d?tab=fans", teamID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "Fan Tabtester") {
+			t.Error("expected a plain roster member to see the fan list")
+		}
+		if strings.Contains(body, fmt.Sprintf(`data-delete-url="/team/%d/fan/%d/remove"`, teamID, fanUserID)) {
+			t.Error("expected no Remove action for a plain roster member")
+		}
+	})
 }
 
 // A captain (not just an admin/league admin) can remove a fan -- the same

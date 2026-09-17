@@ -141,18 +141,20 @@
         </div>
         {{end}}
 
-        {{if .Data.CanManage}}
+        {{if or .Data.IsRosterMember .Data.CanManage}}
         {{if .Data.Fans}}
         <div class="overflow-x-auto">
         <table class="text-left w-full mb-4">
-            <tr><th>Fan</th><th>Following Since</th><th>Actions</th></tr>
+            <tr><th>Fan</th><th>Following Since</th>{{if .Data.CanManage}}<th>Actions</th>{{end}}</tr>
             {{range .Data.Fans}}
             <tr>
                 <td>{{if .Name}}{{.Name}}{{else}}{{.Email}}{{end}}</td>
                 <td>{{humanDate .FollowedAt}}</td>
+                {{if $.Data.CanManage}}
                 <td>
                     <button class="text-red-600" data-delete-url="/team/{{$.Data.Team.ID}}/fan/{{.UserID}}/remove" data-confirm-message="Remove {{.Email}} from {{$.Data.Team.Name}}'s fans?" data-redirect-url="/team/{{$.Data.Team.ID}}?tab=fans">Remove</button>
                 </td>
+                {{end}}
             </tr>
             {{end}}
         </table>

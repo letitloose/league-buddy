@@ -33,3 +33,24 @@ func (app *application) calendarFeed(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(feed)
 }
+
+// fanCalendarFeed is calendarFeed's fan counterpart — same deal, just
+// backed by CalendarService.BuildFanFeed/RegenerateFanToken.
+func (app *application) fanCalendarFeed(w http.ResponseWriter, r *http.Request) {
+	params := httprouter.ParamsFromContext(r.Context())
+	token := params.ByName("token")
+
+	feed, err := app.calendarService.BuildFanFeed(token)
+	if err != nil {
+		if errors.Is(err, models.ErrNoRecord) {
+			app.notFound(w)
+			return
+		}
+		app.serverError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write(feed)
+}

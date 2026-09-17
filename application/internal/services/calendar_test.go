@@ -89,6 +89,101 @@ func TestEnsureAndRegenerateCalendarToken(t *testing.T) {
 	}
 }
 
+func TestEnsureAndRegenerateFanCalendarToken(t *testing.T) {
+	db := models.NewTestDB(t)
+	um := &models.UserModel{DB: db}
+	userID, err := um.Insert("fan-calendar-token@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &CalendarService{DB: db}
+
+	token1, err := service.EnsureFanToken(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token1 == "" {
+		t.Fatal("expected a non-empty token")
+	}
+
+	token2, err := service.EnsureFanToken(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token1 != token2 {
+		t.Fatalf("expected EnsureFanToken to be idempotent, got %q then %q", token1, token2)
+	}
+
+	token3, err := service.RegenerateFanToken(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token3 == token1 {
+		t.Fatal("expected RegenerateFanToken to issue a different token")
+	}
+
+	if _, err := um.GetByFanCalendarToken(token1); err != models.ErrNoRecord {
+		t.Fatalf("expected the old token to no longer resolve, got %v", err)
+	}
+}
+
+func TestBuildFanFeedUnknownToken(t *testing.T) {
+	db := models.NewTestDB(t)
+	service := &CalendarService{DB: db}
+
+	_, err := service.BuildFanFeed("no-such-token")
+	if err != models.ErrNoRecord {
+		t.Fatalf("expected ErrNoRecord, got %v", err)
+	}
+}
+
+// A fan's feed covers every team they follow, the same "upcoming matches
+// only" and multi-team behavior BuildFeed already has for a player —
+// exercised here at a lighter weight since the ICS-building itself
+// (buildFeedForTeams) is already covered thoroughly by the BuildFeed
+// tests above/below.
+func TestBuildFanFeedAcrossFollowedTeams(t *testing.T) {
+	db := models.NewTestDB(t)
+	_, teamAID, teamBID, seasonID := newCalendarFixtures(t, db)
+
+	mm := &models.MatchModel{DB: db}
+	if _, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamAID, AwayTeamID: teamBID, MatchDate: time.Date(2099, 5, 1, 14, 30, 0, 0, time.UTC)}); err != nil {
+		t.Fatal(err)
+	}
+	// A past match — must be excluded from the feed.
+	if _, err := mm.Insert(&models.Match{SeasonID: seasonID, HomeTeamID: teamAID, AwayTeamID: teamBID, MatchDate: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatal(err)
+	}
+
+	um := &models.UserModel{DB: db}
+	userID, err := um.Insert("fan-feed@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tfm := &models.TeamFanModel{DB: db}
+	if err := tfm.Follow(userID, teamAID); err != nil {
+		t.Fatal(err)
+	}
+
+	service := &CalendarService{DB: db}
+	token, err := service.EnsureFanToken(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, err := service.BuildFanFeed(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(feed)
+
+	if strings.Count(body, "BEGIN:VEVENT") != 1 {
+		t.Fatalf("expected exactly 1 VEVENT (past match excluded), got:\n%s", body)
+	}
+	if !strings.Contains(body, "SUMMARY:Team A vs Team B") {
+		t.Fatalf("expected a Team A vs Team B SUMMARY, got:\n%s", body)
+	}
+}
+
 func TestBuildFeedUnknownToken(t *testing.T) {
 	db := models.NewTestDB(t)
 	service := &CalendarService{DB: db}

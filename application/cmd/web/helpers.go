@@ -363,6 +363,14 @@ func (app *application) canManageTeam(r *http.Request, teamID int) bool {
 	return app.isAdmin(r) || app.isCaptainOfTeam(r, teamID) || app.isLeagueAdminOfTeam(r, teamID)
 }
 
+// canSendFanInvite reports whether the current request's user may invite a
+// fan to follow teamID — deliberately wider than canManageTeam: any
+// roster player can invite a fan, not just a captain/admin/league admin,
+// since following a team carries none of the trust a roster invite does.
+func (app *application) canSendFanInvite(r *http.Request, teamID int) bool {
+	return app.canManageTeam(r, teamID) || app.isMemberOfTeam(r, teamID)
+}
+
 // canInviteAsCaptain reports whether the current request's user may mark an
 // Invite Players submission as "invite as team captain" — deliberately
 // narrower than canManageTeam: a system admin or a league admin of teamID's

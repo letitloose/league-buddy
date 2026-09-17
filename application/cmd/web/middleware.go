@@ -127,6 +127,30 @@ func (app *application) requireTeamManager(next http.Handler) http.Handler {
 	})
 }
 
+// requireTeamMember allows anyone requireTeamManager already would, plus
+// any plain roster member of :teamID — used only for sending a fan invite,
+// where the trust bar is much lower than the rest of team management.
+// Chain after app.authenticate + app.requireActive.
+func (app *application) requireTeamMember(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		params := httprouter.ParamsFromContext(r.Context())
+		teamID, err := strconv.Atoi(params.ByName("teamID"))
+		if err != nil || teamID < 1 {
+			app.notFound(w)
+			return
+		}
+
+		if !app.canSendFanInvite(r, teamID) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+
+		w.Header().Add("Cache-Control", "no-store")
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 // requireLeagueManager allows Admins through unconditionally, and league
 // admins through when they administer the league that owns the :teamID in
 // the current route. Unlike requireTeamManager, a plain team captain is not

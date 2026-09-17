@@ -315,6 +315,121 @@ func (service *InviteService) addExistingAccountToRoster(team *models.Team, user
 	return cs.InsertAuditLog(actorEmail, time.Now(), "added existing account "+user.Email+" to team: "+team.Name)
 }
 
+// FanInviteForm is SendFanInvite's input — no AsCaptain, since a fan
+// invite never grants captaincy.
+type FanInviteForm struct {
+	Emails string // raw textarea, newline/comma separated
+	validator.Validator
+}
+
+// SendFanInvite parses form.Emails and validates each address (same
+// parseEmailList/ValidEmail rules SendInvites uses), then either follows
+// the team on behalf of an address that already has a User account (see
+// TeamFanModel.Follow — mirrors addExistingAccountToRoster's "skip the
+// token flow, they'll never sign up again" reasoning) or sends a fan
+// invite token/signup link (sendOneFanInvite). Unlike SendInvites, there's
+// no "already on the roster" rejection — following a team has nothing to
+// do with roster membership. Returns the addresses actually
+// invited/followed.
+func (service *InviteService) SendFanInvite(teamID, createdByUserID int, actorEmail string, form *FanInviteForm) ([]string, error) {
+	emails := parseEmailList(form.Emails)
+	if len(emails) == 0 {
+		form.AddFieldError("emails", "You must enter at least one email address.")
+	}
+	for _, addr := range emails {
+		if !validator.ValidEmail(addr) {
+			form.AddFieldError("emails", "You must enter a valid email: name@domain.ext")
+			break
+		}
+	}
+	if !form.Valid() {
+		return nil, models.ErrBadData
+	}
+
+	tm := &models.TeamModel{DB: service.DB}
+	team, err := tm.Get(teamID)
+	if err != nil {
+		return nil, err
+	}
+
+	um := &models.UserModel{DB: service.DB}
+	tfm := &models.TeamFanModel{DB: service.DB}
+	invited := []string{}
+	for _, addr := range emails {
+		user, err := um.GetUserByEmail(addr)
+		if err != nil && !errors.Is(err, models.ErrNoRecord) {
+			return invited, err
+		}
+		if err == nil {
+			isFollowing, err := tfm.IsFollowing(user.UserID, teamID)
+			if err != nil {
+				return invited, err
+			}
+			if isFollowing {
+				form.AddFieldError("emails", addr+" is already following this team.")
+				return invited, models.ErrBadData
+			}
+			if err := tfm.Follow(user.UserID, teamID); err != nil && !errors.Is(err, models.ErrDuplicateFollow) {
+				return invited, err
+			}
+			cs := &CommonService{DB: service.DB}
+			if err := cs.InsertAuditLog(actorEmail, time.Now(), "added existing account "+addr+" as a fan of team: "+team.Name); err != nil {
+				return invited, err
+			}
+			invited = append(invited, addr)
+			continue
+		}
+
+		if err := service.sendOneFanInvite(team, createdByUserID, addr, actorEmail); err != nil {
+			return invited, err
+		}
+		invited = append(invited, addr)
+	}
+
+	return invited, nil
+}
+
+// sendOneFanInvite generates a token, records an AsFan invite, sends (or
+// logs) the signup email, and audit-logs it — the fan-follow counterpart
+// to sendOneInvite. Accepting it runs UserService.followTeamFromInvite at
+// activation time instead of linkOrCreatePlayer.
+func (service *InviteService) sendOneFanInvite(team *models.Team, createdByUserID int, addr, actorEmail string) error {
+	token, err := generateSecretToken()
+	if err != nil {
+		return err
+	}
+
+	_, err = service.Insert(&models.Invite{
+		Token:           token,
+		TeamID:          team.ID,
+		Email:           addr,
+		CreatedByUserID: createdByUserID,
+		AsFan:           true,
+	})
+	if err != nil {
+		return err
+	}
+
+	invitationText := fmt.Sprintf("You've been invited to follow %s on Blame the Ball.", team.Name)
+	signupLink := fmt.Sprintf("https://%s/user/signup?invite=%s", os.Getenv("PUBLIC_HOST"), token)
+	if service.Email != nil {
+		body := fmt.Sprintf(
+			`<html>
+				<body>
+					<p>%s <a href="%s">Sign up here</a>.</p>
+				</body>
+			</html>`, invitationText, signupLink)
+		if err := service.SendEmailV2(fmt.Sprintf("You're invited to follow %s", team.Name), "", body, addr); err != nil {
+			return err
+		}
+	} else if service.InfoLog != nil {
+		service.InfoLog.Printf("no email configured -- fan invite link for %s (team %d): %s", addr, team.ID, signupLink)
+	}
+
+	cs := &CommonService{DB: service.DB}
+	return cs.InsertAuditLog(actorEmail, time.Now(), "invited "+addr+" to follow team: "+team.Name)
+}
+
 // CancelInvite revokes an outstanding invite so its signup link no longer
 // works. No-ops (returns ErrNoRecord) if it was already used or canceled.
 func (service *InviteService) CancelInvite(id int, actorEmail string) error {

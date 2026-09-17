@@ -82,6 +82,7 @@
             {{end}}
             {{template "team-note-panel" (teamNoteSideData $ .Data.HomeNote)}}
             {{template "team-test-reminder" (teamNoteSideData $ .Data.HomeNote)}}
+            {{if .Data.ShowHomeRoster}}
             {{if .Data.IsPast}}
             {{template "team-attendance" (matchAttendanceSideData $ .Data.HomeAttendance)}}
             {{else}}
@@ -108,6 +109,7 @@
                 <li>{{.PlayerName}}</li>
                 {{end}}
             </ul>
+            {{end}}
             {{end}}
             {{end}}
         </div>
@@ -141,6 +143,7 @@
             {{end}}
             {{template "team-note-panel" (teamNoteSideData $ .Data.AwayNote)}}
             {{template "team-test-reminder" (teamNoteSideData $ .Data.AwayNote)}}
+            {{if .Data.ShowAwayRoster}}
             {{if .Data.IsPast}}
             {{template "team-attendance" (matchAttendanceSideData $ .Data.AwayAttendance)}}
             {{else}}
@@ -167,6 +170,7 @@
                 <li>{{.PlayerName}}</li>
                 {{end}}
             </ul>
+            {{end}}
             {{end}}
             {{end}}
         </div>

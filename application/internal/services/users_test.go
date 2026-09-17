@@ -221,6 +221,90 @@ func TestActivateUserWithInviteAutoJoinsTeam(t *testing.T) {
 	}
 }
 
+// A fan invite (Invite.AsFan) must never create a Player row or a
+// teamMembers row -- it should only add a teamFans row and consume the
+// invite, exactly the same closing steps a roster invite takes, just
+// without any of the player/roster work.
+func TestActivateUserWithFanInviteFollowsTeamNoPlayer(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	tm := &models.TeamModel{DB: db}
+	teamID, err := tm.Insert(&models.Team{LeagueID: 1, Name: "Fan Invite Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	users := &models.UserModel{DB: db}
+	creator, err := users.GetUserByEmail("player@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	im := &models.InviteModel{DB: db}
+	inviteID, err := im.Insert(&models.Invite{
+		Token:           "test-fan-invite-token",
+		TeamID:          teamID,
+		Email:           "fan-invitee@example.com",
+		CreatedByUserID: creator.UserID,
+		AsFan:           true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	userService := UserService{UserModel: users}
+	form := &UserForm{
+		Email:           "fan-invitee@example.com",
+		Password:        "validpassword123",
+		ConfirmPassword: "validpassword123",
+		InviteToken:     "test-fan-invite-token",
+	}
+	if err := userService.InsertUser(form); err != nil {
+		t.Fatal(err)
+	}
+
+	invitedUserSummary, err := users.GetUserByEmail("fan-invitee@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hash, err := userService.GetVerificationHashByEmail("fan-invitee@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := userService.ActivateUser(hash); err != nil {
+		t.Fatal(err)
+	}
+
+	activatedUser, err := users.GetUser(invitedUserSummary.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activatedUser.PlayerID.Valid {
+		t.Fatal("expected no player to have been created/linked for a fan invite")
+	}
+	if activatedUser.PendingInviteID.Valid {
+		t.Fatal("expected pendingInviteID to be cleared after activation")
+	}
+
+	tfm := &models.TeamFanModel{DB: db}
+	isFollowing, err := tfm.IsFollowing(activatedUser.UserID, teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isFollowing {
+		t.Fatalf("expected the activated user to follow team %d", teamID)
+	}
+
+	invite, err := im.Get(inviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !invite.UsedAt.Valid {
+		t.Fatal("expected the fan invite to be marked used")
+	}
+}
+
 // Many invitees never follow the exact tokenized link — a forwarded email
 // with the link mangled, or just navigating to the plain signup page and
 // registering with the same address the invite was sent to. Without a

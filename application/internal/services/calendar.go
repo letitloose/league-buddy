@@ -10,9 +10,12 @@ import (
 	"github.com/letitloose/league-buddy/internal/models"
 )
 
-// CalendarService builds each player's personal iCalendar (RFC 5545) feed
-// — every upcoming match across every active-roster team they're on —
-// and manages the secret token a phone's calendar app uses to fetch it.
+// CalendarService builds a personal iCalendar (RFC 5545) feed — every
+// upcoming match across every team someone is tied to — and manages the
+// secret token a phone's calendar app uses to fetch it. Two parallel
+// flavors: BuildFeed/EnsureToken for a player (every active-roster team
+// they're on), BuildFanFeed/EnsureFanToken for a fan (every team they
+// follow) — both funnel into the shared buildFeedForTeams.
 type CalendarService struct {
 	DB *sql.DB
 }
@@ -43,6 +46,35 @@ func (service *CalendarService) RegenerateToken(playerID int) (string, error) {
 	}
 	pm := &models.PlayerModel{DB: service.DB}
 	if err := pm.SetCalendarToken(playerID, token); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+// EnsureFanToken is EnsureToken's fan counterpart, backed by
+// users.fanCalendarToken instead of players.calendarToken.
+func (service *CalendarService) EnsureFanToken(userID int) (string, error) {
+	um := &models.UserModel{DB: service.DB}
+	token, err := um.GetFanCalendarToken(userID)
+	if err != nil {
+		return "", err
+	}
+	if token.Valid {
+		return token.String, nil
+	}
+	return service.RegenerateFanToken(userID)
+}
+
+// RegenerateFanToken is RegenerateToken's fan counterpart — always issues
+// and saves a fresh token, invalidating whatever URL the fan previously
+// subscribed with.
+func (service *CalendarService) RegenerateFanToken(userID int) (string, error) {
+	token, err := generateSecretToken()
+	if err != nil {
+		return "", err
+	}
+	um := &models.UserModel{DB: service.DB}
+	if err := um.SetFanCalendarToken(userID, token); err != nil {
 		return "", err
 	}
 	return token, nil
@@ -140,6 +172,33 @@ func (service *CalendarService) BuildFeed(token string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return service.buildFeedForTeams(teams, player.FirstName+" "+player.LastName+" - Matches")
+}
+
+// BuildFanFeed is BuildFeed's fan counterpart: resolves token to a Fan
+// account (a User with no Player row) and returns the upcoming-match
+// schedule across every team they follow. Returns models.ErrNoRecord for
+// an unknown or revoked token.
+func (service *CalendarService) BuildFanFeed(token string) ([]byte, error) {
+	um := &models.UserModel{DB: service.DB}
+	user, err := um.GetByFanCalendarToken(token)
+	if err != nil {
+		return nil, err
+	}
+
+	tfm := &models.TeamFanModel{DB: service.DB}
+	teams, err := tfm.GetFollowedTeams(user.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	return service.buildFeedForTeams(teams, "My Followed Teams")
+}
+
+// buildFeedForTeams is the shared core of BuildFeed/BuildFanFeed: every
+// upcoming match across teams, as raw iCalendar bytes under calendarName.
+func (service *CalendarService) buildFeedForTeams(teams []*models.Team, calendarName string) ([]byte, error) {
 	teamsByID := make(map[int]*models.Team, len(teams))
 	teamIDs := make([]int, len(teams))
 	for i, team := range teams {
@@ -163,7 +222,7 @@ func (service *CalendarService) BuildFeed(token string) ([]byte, error) {
 	b.WriteString("VERSION:2.0\r\n")
 	b.WriteString("PRODID:-//Blame the Ball//Match Schedule//EN\r\n")
 	b.WriteString("CALSCALE:GREGORIAN\r\n")
-	fmt.Fprintf(&b, "X-WR-CALNAME:%s\r\n", icsEscape(player.FirstName+" "+player.LastName+" - Matches"))
+	fmt.Fprintf(&b, "X-WR-CALNAME:%s\r\n", icsEscape(calendarName))
 
 	for _, match := range matches {
 		homeTeam := teamsByID[match.HomeTeamID]

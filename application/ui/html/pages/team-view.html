@@ -61,6 +61,7 @@
         <a class="{{if eq .Data.ActiveTab "roster"}}tab-link-active{{else}}tab-link{{end}}" href="/team/{{.Data.Team.ID}}?{{if .Data.Season}}season={{.Data.Season.ID}}&{{end}}tab=roster">Roster</a>
         <a class="{{if eq .Data.ActiveTab "matches"}}tab-link-active{{else}}tab-link{{end}}" href="/team/{{.Data.Team.ID}}?{{if .Data.Season}}season={{.Data.Season.ID}}&{{end}}tab=matches">Matches</a>
         <a class="{{if eq .Data.ActiveTab "leaders"}}tab-link-active{{else}}tab-link{{end}}" href="/team/{{.Data.Team.ID}}?{{if .Data.Season}}season={{.Data.Season.ID}}&{{end}}tab=leaders">Leaders</a>
+        <a class="{{if eq .Data.ActiveTab "fans"}}tab-link-active{{else}}tab-link{{end}}" href="/team/{{.Data.Team.ID}}?{{if .Data.Season}}season={{.Data.Season.ID}}&{{end}}tab=fans">Fans ({{.Data.FanCount}})</a>
     </div>
 
     {{if eq .Data.ActiveTab "matches"}}
@@ -119,6 +120,48 @@
     {{else}}
     <p class="text-center text-gray-600 mb-6">No seasons yet.</p>
     {{end}}
+
+    {{else if eq .Data.ActiveTab "fans"}}
+
+    <div class="w-full md:w-2/3 max-w-3xl px-2 md:px-0 text-center">
+        <p class="text-gray-600 mb-4">{{.Data.FanCount}} fan{{if ne .Data.FanCount 1}}s{{end}} following this team.</p>
+
+        {{if or .Data.IsRosterMember .Data.CanManage}}
+        <div class="mb-4">
+            <a class="btn-secondary m-0" href="/team/{{.Data.Team.ID}}/inviteFan">Invite a Fan</a>
+        </div>
+        {{end}}
+
+        {{if .Data.IsFan}}
+        <div class="mb-4">
+            <form action="/team/{{.Data.Team.ID}}/unfollow" method="POST" class="m-0 inline">
+                <input type='hidden' name='csrf_token' value='{{.CSRFToken}}'>
+                <button class="btn-secondary text-red-600 m-0" type="submit">Unfollow</button>
+            </form>
+        </div>
+        {{end}}
+
+        {{if .Data.CanManage}}
+        {{if .Data.Fans}}
+        <div class="overflow-x-auto">
+        <table class="text-left w-full mb-4">
+            <tr><th>Email</th><th>Following Since</th><th>Actions</th></tr>
+            {{range .Data.Fans}}
+            <tr>
+                <td>{{.Email}}</td>
+                <td>{{humanDate .FollowedAt}}</td>
+                <td>
+                    <button class="text-red-600" data-delete-url="/team/{{$.Data.Team.ID}}/fan/{{.UserID}}/remove" data-confirm-message="Remove {{.Email}} from {{$.Data.Team.Name}}'s fans?" data-redirect-url="/team/{{$.Data.Team.ID}}?tab=fans">Remove</button>
+                </td>
+            </tr>
+            {{end}}
+        </table>
+        </div>
+        {{else}}
+        <p class="text-gray-500 mb-4">No fans yet.</p>
+        {{end}}
+        {{end}}
+    </div>
 
     {{else}}
 

@@ -152,6 +152,60 @@ func (m *UserModel) GetUser(id int) (*User, error) {
 	return user, nil
 }
 
+// GetFanCalendarToken returns userID's fan calendar-feed token, if one's
+// been generated yet — see CalendarService.EnsureFanToken. Mirrors
+// PlayerModel.GetCalendarToken, just scoped to users instead of players
+// since a Fan account has no Player row to hang this off of.
+func (m *UserModel) GetFanCalendarToken(userID int) (sql.NullString, error) {
+	var token sql.NullString
+	err := m.DB.QueryRow(`select fanCalendarToken from users where id = ?`, userID).Scan(&token)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return sql.NullString{}, ErrNoRecord
+		}
+		return sql.NullString{}, err
+	}
+	return token, nil
+}
+
+// SetFanCalendarToken stores userID's newly (re)generated fan calendar-feed
+// token — see CalendarService.EnsureFanToken/RegenerateFanToken, which
+// generate the token itself; this just persists it.
+func (m *UserModel) SetFanCalendarToken(userID int, token string) error {
+	statement := `update users set fanCalendarToken = ? where id = ?`
+	_, err := m.DB.Exec(statement, token, userID)
+	return err
+}
+
+// GetByFanCalendarToken resolves a fan calendar-feed URL's secret token
+// back to its user — the same shape as GetUser, just a different WHERE
+// clause. ErrNoRecord for an unknown or revoked token.
+func (m *UserModel) GetByFanCalendarToken(token string) (*User, error) {
+	stmt := `select u.id as userid,
+				p.id as playerid,
+				CONCAT(p.firstname, " ", p.lastname) as playername,
+				u.email,
+				u.created,
+				u.lastlogin,
+				u.active,
+				exists(Select 1 from userRole ur where ur.userID = u.id and ur.roleID = "ADMIN") as isAdmin,
+				verification_hash,
+				u.pendingInviteID
+			from users u
+			left join players p on p.id = u.playerID
+			where u.fanCalendarToken = ?;`
+
+	user := &User{}
+	err := m.DB.QueryRow(stmt, token).Scan(&user.UserID, &user.PlayerID, &user.PlayerName, &user.Email, &user.Created, &user.LastLogin, &user.Active, &user.IsAdmin, &user.VerificationHash, &user.PendingInviteID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoRecord
+		}
+		return nil, err
+	}
+	return user, nil
+}
+
 func (m *UserModel) GetUserByEmail(email string) (*User, error) {
 
 	stmt := `select u.id as userid,

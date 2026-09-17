@@ -127,6 +127,107 @@ func TestSendInvitesAllowsNewEmail(t *testing.T) {
 	}
 }
 
+// SendFanInvite for a brand-new email creates an AsFan invite (a
+// token-based signup link) rather than following the team immediately —
+// there's no account yet to follow with.
+func TestSendFanInviteAllowsNewEmail(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	im := &models.InviteModel{DB: db}
+	inviteService := InviteService{InviteModel: im, DB: db}
+
+	form := &FanInviteForm{Emails: "brand-new-fan@example.com"}
+	invited, err := inviteService.SendFanInvite(1, 1, "admin@example.com", form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(invited) != 1 || invited[0] != "brand-new-fan@example.com" {
+		t.Fatalf("expected to invite brand-new-fan@example.com, got %v", invited)
+	}
+
+	pending, err := im.ListPendingByTeam(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || !pending[0].AsFan {
+		t.Fatalf("expected one outstanding AsFan invite, got %v", pending)
+	}
+}
+
+// SendFanInvite for an email that already has a User account follows the
+// team immediately, skipping the token/signup-link flow entirely — that
+// flow only ever gets consumed by a brand-new signup, so an invite for an
+// existing account would otherwise dangle forever (mirrors
+// TestSendInvitesAddsExistingAccountWithPlayerDirectly's reasoning for
+// roster invites).
+func TestSendFanInviteFollowsExistingAccountDirectly(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	um := &models.UserModel{DB: db}
+	tfm := &models.TeamFanModel{DB: db}
+	im := &models.InviteModel{DB: db}
+	inviteService := InviteService{InviteModel: im, DB: db}
+
+	userID, err := um.Insert("already-has-account-fan@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	form := &FanInviteForm{Emails: "already-has-account-fan@example.com"}
+	invited, err := inviteService.SendFanInvite(1, 1, "admin@example.com", form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(invited) != 1 || invited[0] != "already-has-account-fan@example.com" {
+		t.Fatalf("expected already-has-account-fan@example.com to be added, got %v", invited)
+	}
+
+	isFollowing, err := tfm.IsFollowing(userID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isFollowing {
+		t.Fatal("expected the existing account to follow the team immediately")
+	}
+
+	pending, err := im.ListPendingByTeam(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected no dangling invite to be created for an existing account, got %v", pending)
+	}
+}
+
+// A second SendFanInvite for an email that's already following the team
+// fails validation instead of silently no-op'ing, so the sender knows
+// their invite didn't do anything new.
+func TestSendFanInviteRejectsAlreadyFollowing(t *testing.T) {
+	db := models.NewTestDB(t)
+
+	um := &models.UserModel{DB: db}
+	tfm := &models.TeamFanModel{DB: db}
+	im := &models.InviteModel{DB: db}
+	inviteService := InviteService{InviteModel: im, DB: db}
+
+	userID, err := um.Insert("already-following@example.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tfm.Follow(userID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	form := &FanInviteForm{Emails: "already-following@example.com"}
+	_, err = inviteService.SendFanInvite(1, 1, "admin@example.com", form)
+	if err != models.ErrBadData {
+		t.Fatalf("expected ErrBadData, got %v", err)
+	}
+	if form.FieldErrors["emails"] == "" {
+		t.Fatal("expected a field error on emails")
+	}
+}
+
 func TestSendInvitesAddsExistingAccountWithPlayerDirectly(t *testing.T) {
 	db := models.NewTestDB(t)
 

@@ -31,6 +31,14 @@ func (app *application) routes() http.Handler {
 	// /admin/league/... comment below explains).
 	router.Handler(http.MethodGet, "/calendar/:token/schedule.ics", http.HandlerFunc(app.calendarFeed))
 
+	// A fan's calendar feed, same deal as the player one above — public,
+	// token-only access control. Registered under its own /fancalendar/...
+	// prefix rather than /calendar/fan/:token/schedule.ics: a static "fan"
+	// segment can't share a path depth with the wildcard ":token" sibling
+	// already registered right above (the same httprouter conflict the
+	// comment above explains).
+	router.Handler(http.MethodGet, "/fancalendar/:token/schedule.ics", http.HandlerFunc(app.fanCalendarFeed))
+
 	dynamic := alice.New(app.sessionManager.LoadAndSave, noSurf, app.authenticate)
 
 	// public routes
@@ -68,10 +76,12 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodPost, "/player/notifications/:id/sms/optOut", active.ThenFunc(app.playerSMSOptOut))
 	router.Handler(http.MethodPost, "/player/notifications/:id/preferences", active.ThenFunc(app.playerNotificationPreferencesSave))
 	router.Handler(http.MethodPost, "/player/notifications/:id/calendar/regenerate", active.ThenFunc(app.playerCalendarRegenerate))
+	router.Handler(http.MethodPost, "/fan/calendar/regenerate", active.ThenFunc(app.fanCalendarRegenerate))
 	router.Handler(http.MethodGet, "/league", active.ThenFunc(app.leagueList))
 	router.Handler(http.MethodGet, "/league/:id", active.ThenFunc(app.leagueView))
 	router.Handler(http.MethodGet, "/team/:teamID", active.ThenFunc(app.teamView))
 	router.Handler(http.MethodPost, "/team/:teamID/joinRequest", active.ThenFunc(app.joinRequestSubmit))
+	router.Handler(http.MethodPost, "/team/:teamID/unfollow", active.ThenFunc(app.teamUnfollow))
 	router.Handler(http.MethodGet, "/location", active.ThenFunc(app.locationList))
 	router.Handler(http.MethodGet, "/season/:id/scheduleImport", active.ThenFunc(app.seasonScheduleImportForm))
 	router.Handler(http.MethodPost, "/season/:id/scheduleImport", active.ThenFunc(app.seasonScheduleImportSubmit))
@@ -100,6 +110,16 @@ func (app *application) routes() http.Handler {
 	router.Handler(http.MethodGet, "/team/:teamID/rosterExport", teamManager.ThenFunc(app.teamRosterExport))
 	router.Handler(http.MethodGet, "/team/:teamID/rosterImport", teamManager.ThenFunc(app.teamRosterImportForm))
 	router.Handler(http.MethodPost, "/team/:teamID/rosterImport", teamManager.ThenFunc(app.teamRosterImportSubmit))
+	router.Handler(http.MethodDelete, "/team/:teamID/fan/:userID/remove", teamManager.ThenFunc(app.teamFanRemove))
+
+	// fan-invite route (logged in + active + any roster member of :teamID,
+	// or anyone requireTeamManager already allows — see canSendFanInvite) —
+	// deliberately a lower bar than teamManager above, since inviting
+	// someone to follow the team carries none of the trust a roster invite
+	// does.
+	teamMember := dynamic.Append(app.requireActive, app.requireTeamMember)
+	router.Handler(http.MethodGet, "/team/:teamID/inviteFan", teamMember.ThenFunc(app.teamInviteFanForm))
+	router.Handler(http.MethodPost, "/team/:teamID/inviteFan", teamMember.ThenFunc(app.teamInviteFanSend))
 	// GET /admin/team/update/:teamID edits a team's own info (name/motto/
 	// established date) — allowed to the same tier as roster management
 	// (admin, captain, or league admin), unlike team creation/deletion below.

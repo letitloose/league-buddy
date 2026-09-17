@@ -3017,8 +3017,13 @@ func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		// A team member, not the generic testActiveEmail -- attendance is
+		// team-internal (see ShowHomeRoster/ShowAwayRoster), so a
+		// non-member wouldn't see it regardless of IsPast (covered by the
+		// "not a roster member" subtest below).
+		setupRosterMember(t, homeTeamID, "attendance-visibility-member@test.com", "validpassword123")
 		ts := newTestServer(t, app.routes())
-		ts.login(t, testActiveEmail, testActivePass)
+		ts.login(t, "attendance-visibility-member@test.com", "validpassword123")
 
 		code, _, body := ts.get(t, fmt.Sprintf("/match/%d", pastMatchID))
 		if code != http.StatusOK {
@@ -3034,7 +3039,29 @@ func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
 			t.Error("expected no Not Replied list for a match that already happened")
 		}
 		if !strings.Contains(body, "Attendance:") {
-			t.Error("expected the Attendance section to show for a match that already happened")
+			t.Error("expected a roster member to still see the Attendance section for a match that already happened")
+		}
+	})
+
+	t.Run("a non-member sees neither RSVP list nor Attendance, even for a past match", func(t *testing.T) {
+		pastMatchID, err := mm.Insert(&models.Match{
+			SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID,
+			MatchDate: time.Now().AddDate(0, 0, -3),
+			HomeScore: sql.NullInt32{Int32: 3, Valid: true}, AwayScore: sql.NullInt32{Int32: 1, Valid: true},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testActiveEmail, testActivePass)
+
+		code, _, body := ts.get(t, fmt.Sprintf("/match/%d", pastMatchID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if strings.Contains(body, "Attendance:") {
+			t.Error("expected no Attendance section for a non-member, even once the match is past")
 		}
 	})
 }
@@ -5444,6 +5471,372 @@ func TestViewAsPlayerToggle(t *testing.T) {
 // the other side ahead of time. A captain (or any other manager) is
 // unaffected and always sees both; once the match has a score, the
 // restriction lifts for everyone.
+// A Fan (an active user following a team, with no Player of their own)
+// sees the same public match content a roster member does once there's a
+// result -- the box itself, including the score -- but never the RSVP
+// roll-call or attendance list, unlike a genuine roster member who still
+// sees both. Regression guard for the ShowHomeRoster/ShowAwayRoster split
+// (see handlers_matches.go) added alongside the Fan feature.
+func TestMatchViewHidesRosterDetailsFromFans(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Fan Privacy League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Fan Privacy Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Fan Privacy Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Fan Privacy Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{
+		// An hour out, not "now" -- matchIsPast flips true the instant
+		// kickoff passes, and this test wants the still-upcoming RSVP
+		// list (Confirmed), not the past-match Attendance list, to prove
+		// the roster gate applies regardless of hasResult.
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now().Add(time.Hour),
+		HomeScore: sql.NullInt32{Int32: 2, Valid: true}, AwayScore: sql.NullInt32{Int32: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	scorerID, err := pm.Insert(&models.Player{FirstName: "Fan", LastName: "Scorer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(scorerID, homeTeamID); err != nil {
+		t.Fatal(err)
+	}
+	setupRosterMember(t, homeTeamID, "fan-privacy-rostermember@test.com", "validpassword123")
+
+	rm := &models.RSVPModel{DB: testDB}
+	if err := rm.Upsert(&models.RSVP{MatchID: matchID, PlayerID: scorerID, TeamID: homeTeamID, Status: "yes", RespondedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	um := &models.UserModel{DB: testDB}
+	fanUserID, err := um.Insert("match-privacy-fan@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.Activate(fanUserID); err != nil {
+		t.Fatal(err)
+	}
+	tfm := &models.TeamFanModel{DB: testDB}
+	if err := tfm.Follow(fanUserID, homeTeamID); err != nil {
+		t.Fatal(err)
+	}
+
+	homeBoxMarker := fmt.Sprintf(`<a href="/team/%d">Fan Privacy Home FC</a></h4>`, homeTeamID)
+
+	t.Run("a fan sees the box but not the RSVP list", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "match-privacy-fan@test.com", "validpassword123")
+
+		code, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, homeBoxMarker) {
+			t.Error("expected the fan to see the home box (a result is recorded)")
+		}
+		if strings.Contains(body, "Confirmed") {
+			t.Error("expected the fan not to see the Confirmed RSVP list")
+		}
+	})
+
+	t.Run("a genuine roster member still sees the RSVP list", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "fan-privacy-rostermember@test.com", "validpassword123")
+
+		code, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "Confirmed") {
+			t.Error("expected a roster member to still see the Confirmed RSVP list")
+		}
+	})
+}
+
+// A Fan viewing a player's profile never sees the private demographic
+// card (email/phone/DOB/address) -- confirmed to already work with zero
+// code changes (CanViewPrivateInfo requires CanManage or a shared
+// teamMembers row, and a Fan has neither), kept here purely as a
+// regression guard for the Fan feature.
+func TestPlayerViewHidesPrivateInfoFromFan(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Fan Player Privacy League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Fan Player Privacy Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	playerID, err := pm.Insert(&models.Player{
+		FirstName: "Private", LastName: "Player",
+		Email:       sql.NullString{String: "private-player@example.com", Valid: true},
+		PhoneNumber: sql.NullString{String: "555-0100", Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(playerID, teamID); err != nil {
+		t.Fatal(err)
+	}
+
+	um := &models.UserModel{DB: testDB}
+	fanUserID, err := um.Insert("player-privacy-fan@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.Activate(fanUserID); err != nil {
+		t.Fatal(err)
+	}
+	tfm := &models.TeamFanModel{DB: testDB}
+	if err := tfm.Follow(fanUserID, teamID); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "player-privacy-fan@test.com", "validpassword123")
+
+	code, _, body := ts.get(t, fmt.Sprintf("/player/view/%d", playerID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if !strings.Contains(body, "Private Player") {
+		t.Error("expected the player's name to still be visible to a fan")
+	}
+	if strings.Contains(body, "private-player@example.com") || strings.Contains(body, "555-0100") {
+		t.Error("expected the fan not to see the player's private email/phone")
+	}
+}
+
+// A fan invite lets any roster member send it, not just a captain/admin;
+// a non-member active user is turned away.
+func TestTeamInviteFanAccessControl(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Fan Invite Access League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Fan Invite Access Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupRosterMember(t, teamID, "fan-invite-access-member@test.com", "validpassword123")
+
+	t.Run("a plain roster member can reach the fan-invite form", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "fan-invite-access-member@test.com", "validpassword123")
+
+		code, _, _ := ts.get(t, fmt.Sprintf("/team/%d/inviteFan", teamID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+	})
+
+	t.Run("a non-member active user is turned away", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, testActiveEmail, testActivePass)
+
+		code, headers, _ := ts.get(t, fmt.Sprintf("/team/%d/inviteFan", teamID))
+		if code != http.StatusSeeOther {
+			t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+		}
+		if loc := headers.Get("Location"); loc != "/" {
+			t.Errorf("want Location %q; got %q", "/", loc)
+		}
+	})
+}
+
+// The team page's Fans tab shows the public follower count and an Invite
+// a Fan link to any roster member, the actual email list only to a
+// manager, and an Unfollow control to a viewer who's a fan themselves.
+func TestTeamFansTab(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Fans Tab League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Fans Tab Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupTeamCaptain(t, teamID, "fans-tab-captain@test.com", "validpassword123")
+
+	um := &models.UserModel{DB: testDB}
+	fanUserID, err := um.Insert("fans-tab-fan@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.Activate(fanUserID); err != nil {
+		t.Fatal(err)
+	}
+	tfm := &models.TeamFanModel{DB: testDB}
+	if err := tfm.Follow(fanUserID, teamID); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("the captain sees the fan's email and a Remove action", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "fans-tab-captain@test.com", "validpassword123")
+
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d?tab=fans", teamID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, "1 fan following this team") {
+			t.Error("expected the fan count to show")
+		}
+		if !strings.Contains(body, "fans-tab-fan@test.com") {
+			t.Error("expected the captain to see the fan's email")
+		}
+		if !strings.Contains(body, fmt.Sprintf(`data-delete-url="/team/%d/fan/%d/remove"`, teamID, fanUserID)) {
+			t.Error("expected a Remove action for the captain")
+		}
+	})
+
+	t.Run("the fan sees an Unfollow control but not the email list", func(t *testing.T) {
+		ts := newTestServer(t, app.routes())
+		ts.login(t, "fans-tab-fan@test.com", "validpassword123")
+
+		code, _, body := ts.get(t, fmt.Sprintf("/team/%d?tab=fans", teamID))
+		if code != http.StatusOK {
+			t.Fatalf("want %d; got %d", http.StatusOK, code)
+		}
+		if !strings.Contains(body, fmt.Sprintf(`action="/team/%d/unfollow"`, teamID)) {
+			t.Error("expected an Unfollow control for the fan")
+		}
+		// The viewer's own email legitimately appears in the nav's account
+		// dropdown -- checking for the <td> wrapper specifically confirms
+		// the fans *table* itself didn't render, not just that the string
+		// is absent from the whole page.
+		if strings.Contains(body, "<td>fans-tab-fan@test.com</td>") {
+			t.Error("expected a non-manager not to see the fan email list")
+		}
+	})
+}
+
+// A captain (not just an admin/league admin) can remove a fan -- the same
+// canManageTeam tier "Remove from Team" already uses for roster removal.
+func TestTeamFanRemoveAllowedForCaptain(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Fan Remove Captain League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Fan Remove Captain Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupTeamCaptain(t, teamID, "fan-remove-captain@test.com", "validpassword123")
+
+	um := &models.UserModel{DB: testDB}
+	fanUserID, err := um.Insert("fan-remove-target@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tfm := &models.TeamFanModel{DB: testDB}
+	if err := tfm.Follow(fanUserID, teamID); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "fan-remove-captain@test.com", "validpassword123")
+
+	code, _, _ := ts.delete(t, fmt.Sprintf("/team/%d/fan/%d/remove", teamID, fanUserID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+
+	isFollowing, err := tfm.IsFollowing(fanUserID, teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isFollowing {
+		t.Fatal("expected the captain's removal to actually drop the fan")
+	}
+}
+
+// The home page's "Teams You Follow" section shows a fan's followed
+// team(s) with an Unfollow control, mirroring "My Teams" for players.
+func TestHomeShowsFollowedTeams(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Home Fan League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	teamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Home Fan Team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	um := &models.UserModel{DB: testDB}
+	fanUserID, err := um.Insert("home-fan@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.Activate(fanUserID); err != nil {
+		t.Fatal(err)
+	}
+	tfm := &models.TeamFanModel{DB: testDB}
+	if err := tfm.Follow(fanUserID, teamID); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "home-fan@test.com", "validpassword123")
+
+	code, _, body := ts.get(t, "/")
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if !strings.Contains(body, "Teams You Follow") {
+		t.Error("expected a Teams You Follow section")
+	}
+	if !strings.Contains(body, "Home Fan Team") {
+		t.Error("expected the followed team to appear")
+	}
+	if !strings.Contains(body, fmt.Sprintf(`action="/team/%d/unfollow"`, teamID)) {
+		t.Error("expected an Unfollow control for the followed team")
+	}
+}
+
 func TestMatchScreenBoxVisibilityBeforeResult(t *testing.T) {
 	app := newTestApplication(t)
 

@@ -2,7 +2,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"html/template"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/letitloose/league-buddy/internal/models"
@@ -50,6 +53,14 @@ type homeData struct {
 	// a non-captain never sees it, and a captain who dismisses it never
 	// sees it again regardless of role.
 	ShowCaptainGuideBanner bool
+	// FollowedTeams is "Teams You Follow" — every team this account
+	// follows as a fan (see TeamFanModel), reusing the exact same
+	// homeTeamCard/buildHomeTeamCard as the player "My Teams" section
+	// above, since a fan card needs nothing player-specific. A single
+	// person can be both a player on some teams and a fan of others.
+	FollowedTeams        []*homeTeamCard
+	FanCalendarFeedURL   template.URL
+	FanCalendarFeedHTTPS string
 }
 
 // privacyPolicy and termsConditions are plain public pages — no auth
@@ -157,10 +168,53 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 			hd.Leagues = append(hd.Leagues, card)
 		}
 
+		userID := app.sessionManager.GetInt(r.Context(), "authenticatedUserID")
+		tfm := &models.TeamFanModel{DB: app.playerService.DB}
+		followedTeams, err := tfm.GetFollowedTeams(userID)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+		for _, team := range followedTeams {
+			card, err := app.buildHomeTeamCard(team.ID)
+			if err != nil {
+				app.serverError(w, err)
+				return
+			}
+			hd.FollowedTeams = append(hd.FollowedTeams, card)
+			if card.NextMatch != nil {
+				hd.HasUpcomingMatch = true
+			}
+		}
+		if len(hd.FollowedTeams) > 0 {
+			token, err := app.calendarService.EnsureFanToken(userID)
+			if err != nil {
+				app.serverError(w, err)
+				return
+			}
+			feedPath := fmt.Sprintf("/fancalendar/%s/schedule.ics", token)
+			hd.FanCalendarFeedURL = template.URL("webcal://" + os.Getenv("PUBLIC_HOST") + feedPath)
+			hd.FanCalendarFeedHTTPS = "https://" + os.Getenv("PUBLIC_HOST") + feedPath
+		}
+
 		data.Data = hd
 	}
 
 	app.render(w, http.StatusOK, "home.html", data)
+}
+
+// fanCalendarRegenerate is the fan-follower counterpart to
+// playerCalendarRegenerate — no :id route param, since it always acts on
+// the logged-in user's own fan calendar token, not a player's.
+func (app *application) fanCalendarRegenerate(w http.ResponseWriter, r *http.Request) {
+	userID := app.sessionManager.GetInt(r.Context(), "authenticatedUserID")
+	if _, err := app.calendarService.RegenerateFanToken(userID); err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", "Calendar link regenerated — you'll need to re-subscribe on your phone.")
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // buildHomeLeagueCard loads the display data for one "My Leagues" card: the

@@ -18,7 +18,7 @@
             </div>
         </div>
         {{end}}
-        {{if or .Data.Leagues .Data.Teams .IsAdmin}}
+        {{if or .Data.Leagues .Data.Teams .Data.FollowedTeams .IsAdmin}}
             <div class="max-w-3xl mx-auto px-4 pt-2 text-left">
                 {{if .Data.HasUpcomingMatch}}
                 <h3 class="px-0">Upcoming Matches</h3>
@@ -44,6 +44,59 @@
                             </div>
                         </div>
                         {{end}}
+                    {{end}}
+                    {{range .Data.FollowedTeams}}
+                        {{if .NextMatch}}
+                        <div class="match-card">
+                            <a class="match-card-overlay-link" href="/match/{{.NextMatch.ID}}" aria-label="View match: {{if .NextMatchIsHome}}{{.Team.Name}}{{else}}{{.NextMatchOpponent}}{{end}} vs {{if .NextMatchIsHome}}{{.NextMatchOpponent}}{{else}}{{.Team.Name}}{{end}}"></a>
+                            <div class="flex items-center justify-center gap-2">
+                                <span class="font-medium text-sm text-right flex-1 min-w-0">{{if .NextMatchIsHome}}{{.Team.Name}}{{else}}{{.NextMatchOpponent}}{{end}}</span>
+                                <span class="text-xs text-gray-400 shrink-0">vs</span>
+                                <span class="font-medium text-sm text-left flex-1 min-w-0">{{if .NextMatchIsHome}}{{.NextMatchOpponent}}{{else}}{{.Team.Name}}{{end}}</span>
+                            </div>
+                            <p class="text-center text-sm text-gray-500 mt-1">{{matchDateTimeShort .NextMatch.MatchDate}}</p>
+                            {{if .NextMatchLocation}}
+                            <p class="relative text-center text-xs text-gray-500 mt-2 pt-2 border-t">
+                                <a class="relative" href="{{mapsURL .NextMatchLocationAddress}}" target="_blank" rel="noopener noreferrer">{{.NextMatchLocation.Name}}</a>
+                            </p>
+                            {{end}}
+                            <div class="flex justify-between text-xs text-gray-400 mt-1">
+                                <span>{{.NextMatchHomeIn}} in / {{.NextMatchHomeOut}} out</span>
+                                <span>{{.NextMatchAwayIn}} in / {{.NextMatchAwayOut}} out</span>
+                            </div>
+                        </div>
+                        {{end}}
+                    {{end}}
+                </div>
+                {{end}}
+
+                {{with .Data.FollowedTeams}}
+                <h3 class="px-0">Teams You Follow</h3>
+                <p class="text-sm text-gray-500 mb-3">
+                    <a class="underline" href="{{$.Data.FanCalendarFeedURL}}">Add to Calendar</a>
+                    <span class="text-gray-400"> &middot; </span>
+                    <span class="text-xs">Only Safari on iPhone opens Calendar directly — on any other browser/phone, copy this link instead: <span class="font-mono">{{$.Data.FanCalendarFeedHTTPS}}</span></span>
+                    <span class="text-gray-400"> &middot; </span>
+                    <form action="/fan/calendar/regenerate" method="POST" class="inline">
+                        <input type='hidden' name='csrf_token' value='{{$.CSRFToken}}'>
+                        <button class="underline" type="submit">Regenerate Link</button>
+                    </form>
+                </p>
+                <div class="card-grid mb-8">
+                    {{range .}}
+                    <div class="relative block bg-white border border-brand-line hover:border-pitch-600 transition p-5">
+                        <a class="match-card-overlay-link" href="/team/{{.Team.ID}}"></a>
+                        <p class="text-xs uppercase tracking-wide text-gray-500 mb-1">{{.League.Name}}</p>
+                        <h4 class="text-slate-800 p-0 mb-2">{{.Team.Name}}</h4>
+                        {{with .Team.Motto.String}}<p class="text-sm italic text-gray-600 mb-1">&ldquo;{{.}}&rdquo;</p>{{end}}
+                        <p class="text-sm text-gray-600 mb-1">Captain: {{if .CaptainName}}{{.CaptainName}}{{else}}Unassigned{{end}}</p>
+                        <div class="relative mt-3">
+                            <form action="/team/{{.Team.ID}}/unfollow" method="POST" class="m-0">
+                                <input type='hidden' name='csrf_token' value='{{$.CSRFToken}}'>
+                                <button class="relative btn-secondary text-red-600 m-0" type="submit">Unfollow</button>
+                            </form>
+                        </div>
+                    </div>
                     {{end}}
                 </div>
                 {{end}}

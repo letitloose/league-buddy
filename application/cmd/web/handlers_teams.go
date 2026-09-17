@@ -87,6 +87,15 @@ type teamViewData struct {
 	// (rather than show a misleading average of zero) when it's 0.
 	AverageAge     float64
 	PlayersWithAge int
+	// IsRosterMember gates the "Invite a Fan" action to any roster player,
+	// not just CanManage (see canSendFanInvite). IsFan is true when the
+	// viewer themselves follows this team as a fan. FanCount/Fans are
+	// only populated for CanManage, same convention as HasAccount/
+	// IsScorekeeper above.
+	IsRosterMember bool
+	IsFan          bool
+	FanCount       int
+	Fans           []*models.FanListRow
 }
 
 // allowedRosterSorts are the roster table's sortable columns.
@@ -385,7 +394,7 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 	assistLeaders := topLeaderLines(leaders, team.Name, func(l *models.StatLine) int { return l.Assists }, 5)
 
 	activeTab := r.URL.Query().Get("tab")
-	if activeTab != "roster" && activeTab != "leaders" {
+	if activeTab != "roster" && activeTab != "leaders" && activeTab != "fans" {
 		activeTab = "matches"
 	}
 
@@ -437,6 +446,37 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// IsRosterMember gates the "Invite a Fan" action (see
+	// canSendFanInvite) — any roster player, not just a manager. IsFan is
+	// for a viewer with no player at all (a Fan can't also be on the
+	// roster). FanCount is public (shown on the Fans tab to anyone, same
+	// as the roster's own headline counts); Fans (the actual email list)
+	// is only queried for a manager, mirroring hasAccount/isScorekeeper's
+	// "only fetch this for managers" pattern.
+	isRosterMember := app.getPlayerID(r) > 0 && app.isMemberOfTeam(r, team.ID)
+	tfm := &models.TeamFanModel{DB: app.playerService.DB}
+	isFan := false
+	if userID := app.sessionManager.GetInt(r.Context(), "authenticatedUserID"); userID > 0 && app.getPlayerID(r) == 0 {
+		isFan, err = tfm.IsFollowing(userID, team.ID)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+	}
+	fanCount, err := tfm.CountForTeam(team.ID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	var fans []*models.FanListRow
+	if canManage {
+		fans, err = tfm.ListFansForTeam(team.ID)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
+	}
+
 	data := app.newTemplateData(r)
 	data.Data = &teamViewData{
 		Team:                    team,
@@ -468,6 +508,10 @@ func (app *application) teamView(w http.ResponseWriter, r *http.Request) {
 		IsScorekeeper:           isScorekeeper,
 		AverageAge:              averageAge,
 		PlayersWithAge:          playersWithAge,
+		IsRosterMember:          isRosterMember,
+		IsFan:                   isFan,
+		FanCount:                fanCount,
+		Fans:                    fans,
 	}
 	data.Breadcrumbs = app.teamBreadcrumbs(team, league, true)
 
@@ -1354,6 +1398,140 @@ func (app *application) teamInviteSend(w http.ResponseWriter, r *http.Request) {
 
 	app.sessionManager.Put(r.Context(), "flash", fmt.Sprintf("Invited %d player(s) to %s.", len(invited), team.Name))
 	http.Redirect(w, r, fmt.Sprintf("/team/%d", team.ID), http.StatusSeeOther)
+}
+
+// teamInviteFanData is team-invite-fan.html's shape — much smaller than
+// teamInviteData since a fan invite has no captain toggle and no
+// roster-picker section (it never targets an existing player row).
+type teamInviteFanData struct {
+	Team           *models.Team
+	PendingInvites []*models.Invite
+}
+
+func (app *application) teamInviteFanForm(w http.ResponseWriter, r *http.Request) {
+	team, ok := app.getRouteTeam(w, r)
+	if !ok {
+		return
+	}
+
+	im := &models.InviteModel{DB: app.playerService.DB}
+	pending, err := im.ListPendingByTeam(team.ID)
+	if err != nil {
+		app.serverError(w, err)
+		return
+	}
+	fanPending := make([]*models.Invite, 0, len(pending))
+	for _, invite := range pending {
+		if invite.AsFan {
+			fanPending = append(fanPending, invite)
+		}
+	}
+
+	breadcrumbs, ok := app.teamActionBreadcrumbs(w, team, Breadcrumb{Label: "Invite a Fan"})
+	if !ok {
+		return
+	}
+
+	data := app.newTemplateData(r)
+	data.Data = &teamInviteFanData{Team: team, PendingInvites: fanPending}
+	data.Form = services.FanInviteForm{}
+	data.Breadcrumbs = breadcrumbs
+
+	app.render(w, http.StatusOK, "team-invite-fan.html", data)
+}
+
+func (app *application) teamInviteFanSend(w http.ResponseWriter, r *http.Request) {
+	team, ok := app.getRouteTeam(w, r)
+	if !ok {
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	form := &services.FanInviteForm{Emails: r.PostForm.Get("emails")}
+	loggedInUserID := app.sessionManager.GetInt(r.Context(), "authenticatedUserID")
+
+	invited, err := app.inviteService.SendFanInvite(team.ID, loggedInUserID, app.getUserName(r), form)
+	if err != nil {
+		if errors.Is(err, models.ErrBadData) {
+			im := &models.InviteModel{DB: app.playerService.DB}
+			pending, perr := im.ListPendingByTeam(team.ID)
+			if perr != nil {
+				app.serverError(w, perr)
+				return
+			}
+			fanPending := make([]*models.Invite, 0, len(pending))
+			for _, invite := range pending {
+				if invite.AsFan {
+					fanPending = append(fanPending, invite)
+				}
+			}
+			breadcrumbs, ok := app.teamActionBreadcrumbs(w, team, Breadcrumb{Label: "Invite a Fan"})
+			if !ok {
+				return
+			}
+			data := app.newTemplateData(r)
+			data.Data = &teamInviteFanData{Team: team, PendingInvites: fanPending}
+			data.Form = form
+			data.Breadcrumbs = breadcrumbs
+			app.render(w, http.StatusUnprocessableEntity, "team-invite-fan.html", data)
+			return
+		}
+		app.serverError(w, err)
+		return
+	}
+
+	app.sessionManager.Put(r.Context(), "flash", fmt.Sprintf("Invited %d fan(s) to follow %s.", len(invited), team.Name))
+	http.Redirect(w, r, fmt.Sprintf("/team/%d?tab=roster", team.ID), http.StatusSeeOther)
+}
+
+// teamFanRemove drops a fan from teamID's follower list — a manager
+// action (DELETE, driven by the data-delete-url confirm-dialog pattern,
+// same as "Remove from Team"), unlike teamUnfollow's self-service POST
+// version below.
+func (app *application) teamFanRemove(w http.ResponseWriter, r *http.Request) {
+	team, ok := app.getRouteTeam(w, r)
+	if !ok {
+		return
+	}
+
+	params := httprouter.ParamsFromContext(r.Context())
+	userID, err := strconv.Atoi(params.ByName("userID"))
+	if err != nil || userID < 1 {
+		http.NotFound(w, r)
+		return
+	}
+
+	tfm := &models.TeamFanModel{DB: app.playerService.DB}
+	if err := tfm.Unfollow(userID, team.ID); err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// teamUnfollow is a fan's own self-service "stop following this team"
+// action, reachable from their home page's "Teams You Follow" card or the
+// team page itself — any active user may call it, since it only ever
+// removes the caller's own fan relationship.
+func (app *application) teamUnfollow(w http.ResponseWriter, r *http.Request) {
+	team, ok := app.getRouteTeam(w, r)
+	if !ok {
+		return
+	}
+
+	userID := app.sessionManager.GetInt(r.Context(), "authenticatedUserID")
+	tfm := &models.TeamFanModel{DB: app.playerService.DB}
+	if err := tfm.Unfollow(userID, team.ID); err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // teamInviteFromRoster invites specific roster players (selected by

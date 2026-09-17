@@ -17,4 +17,5 @@ var (
 	ErrDuplicateLocation    = errors.New("models: a location with this address already exists")
 	ErrDuplicateScorekeeper = errors.New("models: player is already a scorekeeper of this team")
 	ErrVerificationCooldown = errors.New("models: verification code requested too recently")
+	ErrDuplicateFollow      = errors.New("models: user is already a fan of this team")
 )

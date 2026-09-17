@@ -230,8 +230,7 @@ func (service *UserService) ToggleActive(userID, loggedInUserID int) error {
 	}
 
 	if !user.PlayerID.Valid {
-		err := service.linkOrCreatePlayer(user.UserID, user.Email)
-		if err != nil {
+		if err := service.resolveActivationInvite(user.UserID, user.Email); err != nil {
 			return err
 		}
 	}
@@ -256,7 +255,77 @@ func (service *UserService) ActivateUser(hash string) error {
 		return err
 	}
 
-	return service.linkOrCreatePlayer(user.UserID, user.Email)
+	return service.resolveActivationInvite(user.UserID, user.Email)
+}
+
+// resolveActivationInvite is the shared entry point Activate/ToggleActive
+// both call once a user has no Player linked yet: it resolves whatever
+// pending invite (if any) got them here, then dispatches to the fan path
+// (followTeamFromInvite — no Player row at all) or the roster path
+// (linkOrCreatePlayer, unchanged) depending on the invite's kind. A user
+// with no invite at all always takes the roster path, exactly as before
+// this split existed.
+func (service *UserService) resolveActivationInvite(userID int, email string) error {
+	invite, err := service.resolvePendingInvite(userID, email)
+	if err != nil {
+		return err
+	}
+	if invite != nil && invite.AsFan {
+		return service.followTeamFromInvite(userID, invite)
+	}
+	return service.linkOrCreatePlayer(userID, email, invite)
+}
+
+// resolvePendingInvite finds whatever invite got userID here, if any: the
+// one named by users.pendingInviteID (set at signup time from ?invite=
+// <token> — see InsertUser), falling back to matching a still-outstanding
+// invite by email when there's no token-based one (a forwarded/mangled
+// link, or just registering directly) — an invite shouldn't sit "pending"
+// forever just because the exact link wasn't used. Returns (nil, nil) if
+// there's no invite of any kind.
+func (service *UserService) resolvePendingInvite(userID int, email string) (*models.Invite, error) {
+	im := models.InviteModel{DB: service.DB}
+
+	user, err := service.GetUser(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	var invite *models.Invite
+	if user.PendingInviteID.Valid {
+		invite, err = im.Get(int(user.PendingInviteID.Int32))
+		if err != nil && !errors.Is(err, models.ErrNoRecord) {
+			return nil, err
+		}
+	}
+	if invite == nil {
+		fallback, err := im.GetPendingByEmail(email)
+		if err != nil && !errors.Is(err, models.ErrNoRecord) {
+			return nil, err
+		}
+		if err == nil {
+			invite = fallback
+		}
+	}
+	return invite, nil
+}
+
+// followTeamFromInvite accepts a fan invite: adds userID as a fan of
+// invite.TeamID (tolerating ErrDuplicateFollow, the same "already there,
+// fine" tolerance linkOrCreatePlayer gives ErrDuplicateMembership) and
+// closes out the invite exactly like linkOrCreatePlayer does for a roster
+// invite — no Player row, no teamMembers row, ever created for a Fan.
+func (service *UserService) followTeamFromInvite(userID int, invite *models.Invite) error {
+	tfm := &models.TeamFanModel{DB: service.DB}
+	if err := tfm.Follow(userID, invite.TeamID); err != nil && !errors.Is(err, models.ErrDuplicateFollow) {
+		return err
+	}
+
+	im := &models.InviteModel{DB: service.DB}
+	if err := im.MarkUsed(invite.ID, userID); err != nil {
+		return err
+	}
+	return service.UserModel.ClearPendingInvite(userID)
 }
 
 // linkOrCreatePlayer links a user account to a roster player record: it
@@ -285,37 +354,10 @@ func (service *UserService) ActivateUser(hash string) error {
 // this way, its stored email is updated to the one actually signed up
 // with, so reminder emails and future lookups follow the real account
 // rather than the stale invited address.
-func (service *UserService) linkOrCreatePlayer(userID int, email string) error {
+func (service *UserService) linkOrCreatePlayer(userID int, email string, invite *models.Invite) error {
 	pm := models.PlayerModel{DB: service.DB}
 	im := models.InviteModel{DB: service.DB}
 	tmm := models.TeamMemberModel{DB: service.DB}
-
-	user, err := service.GetUser(userID)
-	if err != nil {
-		return err
-	}
-
-	var invite *models.Invite
-	if user.PendingInviteID.Valid {
-		invite, err = im.Get(int(user.PendingInviteID.Int32))
-		if err != nil && !errors.Is(err, models.ErrNoRecord) {
-			return err
-		}
-	}
-	if invite == nil {
-		// No token-based invite — the signup never carried ?invite=<token>
-		// at all (a forwarded/mangled link, or just registering directly).
-		// Fall back to matching a still-outstanding invite by the email
-		// address they just registered with, so an invite doesn't sit
-		// "pending" forever just because the exact link wasn't used.
-		fallback, err := im.GetPendingByEmail(email)
-		if err != nil && !errors.Is(err, models.ErrNoRecord) {
-			return err
-		}
-		if err == nil {
-			invite = fallback
-		}
-	}
 
 	lookupEmail := email
 	if invite != nil && invite.Email != "" {

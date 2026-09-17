@@ -428,6 +428,13 @@ type matchViewData struct {
 	AwayAttendance      *matchTeamAttendanceView
 	ShowHomeBox         bool
 	ShowAwayBox         bool
+	// ShowHomeRoster/ShowAwayRoster gate the RSVP roll-call and attendance
+	// sections specifically — narrower than ShowHomeBox/ShowAwayBox, which
+	// a recorded result alone unlocks for anyone; these two never do,
+	// since RSVP responses and attendance are team-internal regardless of
+	// whether the match has a result yet.
+	ShowHomeRoster bool
+	ShowAwayRoster bool
 }
 
 // matchAttendanceRow is one roster player's resolved attendance for the
@@ -693,6 +700,14 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 	showHomeBox := canManage || hasResult || app.isMemberOfTeam(r, match.HomeTeamID)
 	showAwayBox := canManage || hasResult || app.isMemberOfTeam(r, match.AwayTeamID)
 
+	// RSVP roll-calls and attendance are team-internal regardless of
+	// result — unlike the box score/goals/cards above, a recorded result
+	// never unlocks them for a non-member (a Fan included): individual
+	// players' RSVP responses/messages and who actually showed up aren't
+	// "public results," just team business.
+	showHomeRoster := canManage || app.isMemberOfTeam(r, match.HomeTeamID)
+	showAwayRoster := canManage || app.isMemberOfTeam(r, match.AwayTeamID)
+
 	mtnm := &models.MatchTeamNoteModel{DB: app.playerService.DB}
 	um := &models.UserModel{DB: app.playerService.DB}
 	buildNoteView := func(teamID int, roster []*models.Player, canManageSide, canSendTestReminder bool) (*matchTeamNoteView, error) {
@@ -831,6 +846,8 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 		AwayAttendance:      awayAttendance,
 		ShowHomeBox:         showHomeBox,
 		ShowAwayBox:         showAwayBox,
+		ShowHomeRoster:      showHomeRoster,
+		ShowAwayRoster:      showAwayRoster,
 	}, nil
 }
 

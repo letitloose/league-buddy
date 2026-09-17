@@ -608,10 +608,14 @@ func buildUserSearchStatement(criteria *UserSearchCriteria) (string, []any) {
 		"lastlogin":  "u.lastlogin",
 	}
 
+	// A Fan (no linked player) falls back to the account's own
+	// firstName/lastName (see UserModel.SetName) for both display and
+	// search here -- without the COALESCE, a Fan's name never showed up
+	// in this list at all, only ever their (blank) player name.
 	base := `SELECT
 		u.id AS userid,
 		p.id AS playerid,
-		CONCAT(IFNULL(p.firstname, ''), ' ', IFNULL(p.lastname, '')) AS playername,
+		CONCAT(IFNULL(COALESCE(p.firstname, u.firstName), ''), ' ', IFNULL(COALESCE(p.lastname, u.lastName), '')) AS playername,
 		u.email,
 		u.created,
 		u.lastlogin,
@@ -626,11 +630,11 @@ func buildUserSearchStatement(criteria *UserSearchCriteria) (string, []any) {
 	where := ""
 
 	if criteria.FirstName != "" {
-		where += " AND UPPER(p.firstname) LIKE CONCAT('%', ?, '%')"
+		where += " AND UPPER(COALESCE(p.firstname, u.firstName)) LIKE CONCAT('%', ?, '%')"
 		queryParams = append(queryParams, strings.ToUpper(criteria.FirstName))
 	}
 	if criteria.LastName != "" {
-		where += " AND UPPER(p.lastname) LIKE CONCAT('%', ?, '%')"
+		where += " AND UPPER(COALESCE(p.lastname, u.lastName)) LIKE CONCAT('%', ?, '%')"
 		queryParams = append(queryParams, strings.ToUpper(criteria.LastName))
 	}
 	if criteria.Email != "" {

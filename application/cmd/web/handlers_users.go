@@ -517,3 +517,41 @@ func (app *application) userUpdateName(w http.ResponseWriter, r *http.Request) {
 	app.sessionManager.Put(r.Context(), "flash", "Name updated.")
 	http.Redirect(w, r, fmt.Sprintf("/user/view/%d", id), http.StatusSeeOther)
 }
+
+// userUnlinkPlayer disconnects an account from its linked Player without
+// deleting the Player record itself (see UserModel.ClearPlayerID, which
+// already existed for the player-deletion path) -- mainly for an account
+// that predates the Fan concept and got the old "every activated account
+// becomes a Player" placeholder even though they never actually joined a
+// roster. Unlinking clears the account's "looks like a player" Profile
+// link/page; the now-orphaned placeholder Player row is left in place
+// (still deletable separately via the roster tools if it's truly unused).
+func (app *application) userUnlinkPlayer(w http.ResponseWriter, r *http.Request) {
+	params := httprouter.ParamsFromContext(r.Context())
+	id, err := strconv.Atoi(params.ByName("id"))
+	if err != nil || id < 1 {
+		http.NotFound(w, r)
+		return
+	}
+
+	user, err := app.userService.GetUser(id)
+	if err != nil {
+		if errors.Is(err, models.ErrNoRecord) {
+			http.NotFound(w, r)
+		} else {
+			app.serverError(w, err)
+		}
+		return
+	}
+	if !user.PlayerID.Valid {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if err := app.userService.ClearPlayerID(int(user.PlayerID.Int32)); err != nil {
+		app.serverError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}

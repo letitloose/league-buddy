@@ -171,6 +171,7 @@ func (app *application) routes() http.Handler {
 	// (:id) shares that same depth with them (same conflict class as the
 	// /admin/league/... comment below).
 	router.Handler(http.MethodPost, "/admin/user/:id/updateName", admin.ThenFunc(app.userUpdateName))
+	router.Handler(http.MethodDelete, "/admin/user/:id/unlinkPlayer", admin.ThenFunc(app.userUnlinkPlayer))
 	router.Handler(http.MethodPost, "/user/toggleActive", admin.ThenFunc(app.toggleActive))
 	router.Handler(http.MethodPost, "/user/toggleAdmin", admin.ThenFunc(app.toggleAdmin))
 	router.Handler(http.MethodDelete, "/user/delete/:id", admin.ThenFunc(app.deleteUser))

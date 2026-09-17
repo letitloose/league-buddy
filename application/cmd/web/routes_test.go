@@ -5988,6 +5988,113 @@ func TestAdminUpdateFanNameRequiresAdmin(t *testing.T) {
 	}
 }
 
+// The admin Users list falls back to an account's own firstName/lastName
+// (see UserModel.SetName) when there's no linked Player -- without that
+// fallback, a Fan's name never showed up in this list at all, only their
+// (blank) player name. Regression test for a real bug.
+func TestAdminUserListShowsFanName(t *testing.T) {
+	app := newTestApplication(t)
+
+	um := &models.UserModel{DB: testDB}
+	fanUserID, err := um.Insert("user-list-fan@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetName(fanUserID, "Listed", "Fan"); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testAdminEmail, testAdminPass)
+
+	code, _, body := ts.get(t, "/user/search?email=user-list-fan@test.com")
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if !strings.Contains(body, "Listed Fan") {
+		t.Error("expected the fan's name to show in the admin Users list")
+	}
+}
+
+// A sys admin can unlink a Player from an account without deleting the
+// Player record -- mainly for an account that predates the Fan concept
+// and got the old "every activated account becomes a Player" placeholder
+// even though they never actually joined a roster, so their account
+// incorrectly still looks like it has a player profile.
+func TestAdminUnlinkPlayer(t *testing.T) {
+	app := newTestApplication(t)
+
+	pm := &models.PlayerModel{DB: testDB}
+	playerID, err := pm.Insert(&models.Player{FirstName: "Legacy", LastName: "Placeholder"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	um := &models.UserModel{DB: testDB}
+	userID, err := um.Insert("legacy-fan@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetPlayerID(userID, playerID); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testAdminEmail, testAdminPass)
+
+	code, _, _ := ts.delete(t, fmt.Sprintf("/admin/user/%d/unlinkPlayer", userID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+
+	user, err := um.GetUser(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.PlayerID.Valid {
+		t.Fatal("expected the player to be unlinked from the account")
+	}
+
+	// The player record itself is untouched, not deleted.
+	if _, err := pm.Get(playerID); err != nil {
+		t.Fatalf("expected the player record to still exist, got %v", err)
+	}
+}
+
+// A non-admin can't reach the unlink-player route.
+func TestAdminUnlinkPlayerRequiresAdmin(t *testing.T) {
+	app := newTestApplication(t)
+
+	pm := &models.PlayerModel{DB: testDB}
+	playerID, err := pm.Insert(&models.Player{FirstName: "Protected", LastName: "Placeholder"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	um := &models.UserModel{DB: testDB}
+	userID, err := um.Insert("legacy-fan-protected@test.com", "validpassword123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := um.SetPlayerID(userID, playerID); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, testActiveEmail, testActivePass)
+
+	code, _, _ := ts.delete(t, fmt.Sprintf("/admin/user/%d/unlinkPlayer", userID))
+	if code != http.StatusSeeOther {
+		t.Fatalf("want %d; got %d", http.StatusSeeOther, code)
+	}
+
+	user, err := um.GetUser(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !user.PlayerID.Valid {
+		t.Fatal("expected the player to remain linked for a non-admin's request")
+	}
+}
+
 // The home page's "Teams You Follow" section shows a fan's followed
 // team(s) with an Unfollow control, mirroring "My Teams" for players.
 func TestHomeShowsFollowedTeams(t *testing.T) {

@@ -35,7 +35,7 @@
         <table class="text-left w-full mb-4">
             <tr>
                 <th>
-                    <a class="no-underline" href="/user/search?firstname={{.Form.FirstName}}&lastname={{.Form.LastName}}&email={{.Form.Email}}&sort=playername&order={{if and (eq .Form.Sort "playername") (eq .Form.Order "ASC")}}DESC{{else}}ASC{{end}}">Player{{if eq .Form.Sort "playername"}}{{if eq .Form.Order "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
+                    <a class="no-underline" href="/user/search?firstname={{.Form.FirstName}}&lastname={{.Form.LastName}}&email={{.Form.Email}}&sort=playername&order={{if and (eq .Form.Sort "playername") (eq .Form.Order "ASC")}}DESC{{else}}ASC{{end}}">Name{{if eq .Form.Sort "playername"}}{{if eq .Form.Order "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
                 </th>
                 <th>
                     <a class="no-underline" href="/user/search?firstname={{.Form.FirstName}}&lastname={{.Form.LastName}}&email={{.Form.Email}}&sort=email&order={{if and (eq .Form.Sort "email") (eq .Form.Order "ASC")}}DESC{{else}}ASC{{end}}">Email{{if eq .Form.Sort "email"}}{{if eq .Form.Order "DESC"}} &#9660;{{else}} &#9650;{{end}}{{end}}</a>
@@ -53,7 +53,7 @@
             {{range .Data.Results}}
             <tr>
                 <td>
-                    {{if .PlayerID.Valid}}<a href="/player/view/{{.PlayerID.Int32}}">{{.PlayerName.String}}</a>{{end}}
+                    {{if .PlayerID.Valid}}<a href="/player/view/{{.PlayerID.Int32}}">{{.PlayerName.String}}</a>{{else}}{{.PlayerName.String}}{{end}}
                 </td>
                 <td><a href="/user/view/{{.UserID}}">{{.Email}}</a></td>
                 <td>{{humanDate .Created}}</td>

@@ -19,7 +19,11 @@
             <span class="text-right font-semibold">Sign-up Date:</span>
             <span>{{humanDate .Created}}</span>
         </div>
-        {{if not .PlayerID.Valid}}
+        {{if .PlayerID.Valid}}
+        <div class="mt-4">
+            <button class="btn-secondary text-red-600 m-0" data-delete-url="/admin/user/{{.UserID}}/unlinkPlayer" data-confirm-message="Unlink the player profile &quot;{{.PlayerName.String}}&quot; from this account? The player record and its stats aren't deleted, just disconnected from this login -- for an account that never actually joined a roster (e.g. one predating the Fan feature)." data-redirect-url="/user/view/{{.UserID}}">Unlink Player Profile</button>
+        </div>
+        {{else}}
         <form action="/admin/user/{{.UserID}}/updateName" method="POST" class="mt-4 text-left max-w-xs mx-auto">
             <input type='hidden' name='csrf_token' value='{{$.CSRFToken}}'>
             <label class="field-label">First Name</label>

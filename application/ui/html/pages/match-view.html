@@ -56,9 +56,6 @@
         {{if .Data.ShowHomeBox}}
         <div class="bg-white border border-brand-line px-4 py-4">
             <h4 class="pt-0 text-center"><a href="/team/{{.Data.HomeTeam.ID}}">{{.Data.HomeTeam.Name}}</a></h4>
-            {{template "team-note-panel" (teamNoteSideData $ .Data.HomeNote)}}
-            {{template "team-test-reminder" (teamNoteSideData $ .Data.HomeNote)}}
-            {{if .Data.IsPast}}{{template "team-attendance" (matchAttendanceSideData $ .Data.HomeAttendance)}}{{end}}
             {{if .Data.HomeGoals}}
             <ul class="text-sm mb-3">
                 {{range .Data.HomeGoals}}
@@ -83,6 +80,11 @@
                 {{end}}
             </ul>
             {{end}}
+            {{template "team-note-panel" (teamNoteSideData $ .Data.HomeNote)}}
+            {{template "team-test-reminder" (teamNoteSideData $ .Data.HomeNote)}}
+            {{if .Data.IsPast}}
+            {{template "team-attendance" (matchAttendanceSideData $ .Data.HomeAttendance)}}
+            {{else}}
             {{if .Data.HomeRSVPsIn}}
             <p class="text-sm font-semibold text-gray-600 mb-1 mt-3">Confirmed ({{len .Data.HomeRSVPsIn}})</p>
             <ul class="text-sm mb-1">
@@ -91,7 +93,7 @@
                 {{end}}
             </ul>
             {{end}}
-            {{if and (not .Data.IsPast) .Data.HomeRSVPsOut}}
+            {{if .Data.HomeRSVPsOut}}
             <p class="text-sm font-semibold text-gray-600 mb-1 mt-2">Not Attending ({{len .Data.HomeRSVPsOut}})</p>
             <ul class="text-sm mb-1">
                 {{range .Data.HomeRSVPsOut}}
@@ -99,7 +101,7 @@
                 {{end}}
             </ul>
             {{end}}
-            {{if and (not .Data.IsPast) .Data.HomeRSVPsNoResponse}}
+            {{if .Data.HomeRSVPsNoResponse}}
             <p class="text-sm font-semibold text-gray-600 mb-1 mt-2">Not Replied ({{len .Data.HomeRSVPsNoResponse}})</p>
             <ul class="text-sm mb-1">
                 {{range .Data.HomeRSVPsNoResponse}}
@@ -107,14 +109,12 @@
                 {{end}}
             </ul>
             {{end}}
+            {{end}}
         </div>
         {{end}}
         {{if .Data.ShowAwayBox}}
         <div class="bg-white border border-brand-line px-4 py-4">
             <h4 class="pt-0 text-center"><a href="/team/{{.Data.AwayTeam.ID}}">{{.Data.AwayTeam.Name}}</a></h4>
-            {{template "team-note-panel" (teamNoteSideData $ .Data.AwayNote)}}
-            {{template "team-test-reminder" (teamNoteSideData $ .Data.AwayNote)}}
-            {{if .Data.IsPast}}{{template "team-attendance" (matchAttendanceSideData $ .Data.AwayAttendance)}}{{end}}
             {{if .Data.AwayGoals}}
             <ul class="text-sm mb-3">
                 {{range .Data.AwayGoals}}
@@ -139,6 +139,11 @@
                 {{end}}
             </ul>
             {{end}}
+            {{template "team-note-panel" (teamNoteSideData $ .Data.AwayNote)}}
+            {{template "team-test-reminder" (teamNoteSideData $ .Data.AwayNote)}}
+            {{if .Data.IsPast}}
+            {{template "team-attendance" (matchAttendanceSideData $ .Data.AwayAttendance)}}
+            {{else}}
             {{if .Data.AwayRSVPsIn}}
             <p class="text-sm font-semibold text-gray-600 mb-1 mt-3">Confirmed ({{len .Data.AwayRSVPsIn}})</p>
             <ul class="text-sm mb-1">
@@ -147,7 +152,7 @@
                 {{end}}
             </ul>
             {{end}}
-            {{if and (not .Data.IsPast) .Data.AwayRSVPsOut}}
+            {{if .Data.AwayRSVPsOut}}
             <p class="text-sm font-semibold text-gray-600 mb-1 mt-2">Not Attending ({{len .Data.AwayRSVPsOut}})</p>
             <ul class="text-sm mb-1">
                 {{range .Data.AwayRSVPsOut}}
@@ -155,13 +160,14 @@
                 {{end}}
             </ul>
             {{end}}
-            {{if and (not .Data.IsPast) .Data.AwayRSVPsNoResponse}}
+            {{if .Data.AwayRSVPsNoResponse}}
             <p class="text-sm font-semibold text-gray-600 mb-1 mt-2">Not Replied ({{len .Data.AwayRSVPsNoResponse}})</p>
             <ul class="text-sm mb-1">
                 {{range .Data.AwayRSVPsNoResponse}}
                 <li>{{.PlayerName}}</li>
                 {{end}}
             </ul>
+            {{end}}
             {{end}}
         </div>
         {{end}}

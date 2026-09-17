@@ -2834,11 +2834,11 @@ func TestMatchRSVPClosedForPastMatches(t *testing.T) {
 	}
 }
 
-// The match view's "Not Attending" and "Not Replied" lists show roster
-// players who RSVP'd "no" (with their message), or haven't RSVP'd at all,
-// while the match is still upcoming, but both drop off the page once the
-// match has happened — only "Confirmed" (who actually showed) matters in
-// hindsight.
+// The match view's "Confirmed", "Not Attending", and "Not Replied" RSVP
+// lists all show while a match is still upcoming, but all three drop off
+// the page once the match has happened — replaced by the resolved
+// Attendance list, since actual attendance is what matters in hindsight,
+// not who said they were coming.
 func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
 	app := newTestApplication(t)
 
@@ -2928,7 +2928,7 @@ func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
 		}
 	})
 
-	t.Run("past match hides Not Attending, keeps Confirmed", func(t *testing.T) {
+	t.Run("past match hides every RSVP list, shows Attendance instead", func(t *testing.T) {
 		pastMatchID, err := mm.Insert(&models.Match{
 			SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID,
 			MatchDate: time.Now().AddDate(0, 0, -3),
@@ -2951,14 +2951,17 @@ func TestMatchRSVPNotAttendingVisibility(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("want %d; got %d", http.StatusOK, code)
 		}
-		if !strings.Contains(body, "Confirmed") {
-			t.Error("expected the Confirmed list to still show for a past match")
+		if strings.Contains(body, "Confirmed") {
+			t.Error("expected no Confirmed list for a match that already happened -- the Attendance list replaces it")
 		}
 		if strings.Contains(body, "Not Attending") {
 			t.Error("expected no Not Attending list for a match that already happened")
 		}
 		if strings.Contains(body, "Not Replied") {
 			t.Error("expected no Not Replied list for a match that already happened")
+		}
+		if !strings.Contains(body, "Attendance:") {
+			t.Error("expected the Attendance section to show for a match that already happened")
 		}
 	})
 }

@@ -2865,6 +2865,77 @@ func TestMatchRSVPClosedForLegends(t *testing.T) {
 	}
 }
 
+// A Legend can't RSVP at all (see TestMatchRSVPClosedForLegends above), so
+// they shouldn't show up on the "Not Replied" list -- they'll never
+// reply, but not because they're ignoring a nudge. Regression test for a
+// real bug: Legends were showing up there since the RSVP lists were built
+// off the full roster instead of the active one.
+func TestMatchNotRepliedExcludesLegends(t *testing.T) {
+	app := newTestApplication(t)
+
+	lm := &models.LeagueModel{DB: testDB}
+	leagueID, err := lm.Insert(&models.League{Name: "Legend Not Replied League"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm := &models.TeamModel{DB: testDB}
+	homeTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Legend Not Replied Home FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awayTeamID, err := tm.Insert(&models.Team{LeagueID: leagueID, Name: "Legend Not Replied Away FC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := &models.SeasonModel{DB: testDB}
+	seasonID, err := sm.Insert(&models.Season{LeagueID: leagueID, Name: "Legend Not Replied Season"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := &models.MatchModel{DB: testDB}
+	matchID, err := mm.Insert(&models.Match{
+		SeasonID: seasonID, HomeTeamID: homeTeamID, AwayTeamID: awayTeamID, MatchDate: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pm := &models.PlayerModel{DB: testDB}
+	tmm := &models.TeamMemberModel{DB: testDB}
+	legendID, err := pm.Insert(&models.Player{FirstName: "Old", LastName: "Legend"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(legendID, homeTeamID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.SetLegendStatus(legendID, homeTeamID, true); err != nil {
+		t.Fatal(err)
+	}
+	activeID, err := pm.Insert(&models.Player{FirstName: "Current", LastName: "Player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tmm.AddMembership(activeID, homeTeamID); err != nil {
+		t.Fatal(err)
+	}
+	setupRosterMember(t, homeTeamID, "legend-not-replied-viewer@test.com", "validpassword123")
+
+	ts := newTestServer(t, app.routes())
+	ts.login(t, "legend-not-replied-viewer@test.com", "validpassword123")
+
+	code, _, body := ts.get(t, fmt.Sprintf("/match/%d", matchID))
+	if code != http.StatusOK {
+		t.Fatalf("want %d; got %d", http.StatusOK, code)
+	}
+	if strings.Contains(body, "Old Legend") {
+		t.Error("expected the Legend not to appear on the Not Replied list")
+	}
+	if !strings.Contains(body, "Current Player") {
+		t.Error("expected the active roster player to still appear on the Not Replied list")
+	}
+}
+
 // A match that already happened can no longer be RSVP'd to: the widget
 // doesn't render, and a direct POST is redirected away without recording a
 // response — the same "in-handler eligibility check" enforced server-side,

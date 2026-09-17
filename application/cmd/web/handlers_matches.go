@@ -574,6 +574,22 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 	if err != nil {
 		return nil, err
 	}
+	// RSVP lists (Confirmed/Not Attending/Not Replied, below) use only the
+	// active roster -- a Legend can't RSVP at all (see canRSVPAsTeam), so
+	// building those lists off the full roster left every Legend showing
+	// up as perpetually "Not Replied." Historical box-score attribution
+	// (goals/cards/own-goal detection) and Player of the Match still use
+	// the full roster above, since a scorer who's since become a Legend
+	// shouldn't have their past goal misflagged as an own goal or their
+	// name drop out of the box score.
+	homeActiveRoster, err := app.playerService.GetActiveByTeam(match.HomeTeamID)
+	if err != nil {
+		return nil, err
+	}
+	awayActiveRoster, err := app.playerService.GetActiveByTeam(match.AwayTeamID)
+	if err != nil {
+		return nil, err
+	}
 	playerName := make(map[int]string, len(homeRoster)+len(awayRoster))
 	homeRosterIDs := make(map[int]bool, len(homeRoster))
 	for _, player := range homeRoster {
@@ -834,12 +850,12 @@ func (app *application) buildMatchViewData(r *http.Request, match *models.Match)
 		CanManage:           canManage,
 		CanRSVP:             canRSVP,
 		IsPast:              isPast,
-		HomeRSVPsIn:         buildRSVPRows(homeRoster, rsvpsByPlayer, "yes"),
-		AwayRSVPsIn:         buildRSVPRows(awayRoster, rsvpsByPlayer, "yes"),
-		HomeRSVPsOut:        buildRSVPRows(homeRoster, rsvpsByPlayer, "no"),
-		AwayRSVPsOut:        buildRSVPRows(awayRoster, rsvpsByPlayer, "no"),
-		HomeRSVPsNoResponse: buildNoResponseRows(homeRoster, rsvpsByPlayer),
-		AwayRSVPsNoResponse: buildNoResponseRows(awayRoster, rsvpsByPlayer),
+		HomeRSVPsIn:         buildRSVPRows(homeActiveRoster, rsvpsByPlayer, "yes"),
+		AwayRSVPsIn:         buildRSVPRows(awayActiveRoster, rsvpsByPlayer, "yes"),
+		HomeRSVPsOut:        buildRSVPRows(homeActiveRoster, rsvpsByPlayer, "no"),
+		AwayRSVPsOut:        buildRSVPRows(awayActiveRoster, rsvpsByPlayer, "no"),
+		HomeRSVPsNoResponse: buildNoResponseRows(homeActiveRoster, rsvpsByPlayer),
+		AwayRSVPsNoResponse: buildNoResponseRows(awayActiveRoster, rsvpsByPlayer),
 		HomeNote:            homeNote,
 		AwayNote:            awayNote,
 		HomeAttendance:      homeAttendance,
